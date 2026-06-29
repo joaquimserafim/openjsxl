@@ -103,18 +103,18 @@ first entry. Validate output with `unzip -l` and by opening in a real spreadshee
 - [ ] Verify `basic.xlsx` opens in LibreOffice/Excel and via `unzip -l`.
 **Acceptance.** `pnpm fixtures` writes a `basic.xlsx` that a real spreadsheet app opens.
 
-### F0.3 — Primitive: A1 addressing ☐
+### F0.3 — Primitive: A1 addressing ☑
 **Context.** Cells are addressed in A1 notation; columns are **bijective base-26**
 (A=1 … Z=26, AA=27 — no zero digit). Needed by the reader and every test.
 **Scope.** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef` (+ `CellRef` type).
 **Design notes.** Case-insensitive column letters; reject malformed refs; Excel's max column
 is `XFD` (16384), max row 1048576.
 **Tasks**
-- [ ] `ooxml/a1.ts` with the four functions and validation.
-- [ ] `ooxml/a1.test.ts`: boundary cases (`A`,`Z`,`AA`,`XFD`), 1..20000 round-trip, rejects.
-**Acceptance.** Round-trips every index 1..20000; parses/format the corner refs.
+- [x] `ooxml/a1.ts` with the four functions and validation.
+- [x] `ooxml/a1.test.ts`: boundary cases (`A`,`Z`,`AA`,`XFD`), 1..20000 round-trip, rejects.
+**Acceptance.** Round-trips every index 1..20000; parses/format the corner refs. ✅ met.
 
-### F0.4 — Primitive: date serials & epochs ☐
+### F0.4 — Primitive: date serials & epochs ☑
 **Context.** Excel stores dates/times as serial numbers under one of two epoch systems.
 Whether a number *is* a date is decided later by the style (F2.1), not here.
 **Scope.** `serialToDate(serial, date1904?)` → `Date` (UTC-based).
@@ -122,10 +122,10 @@ Whether a number *is* a date is decided later by the style (F2.1), not here.
 `1900-02-29` leap-year bug (correct for all dates ≥ 1900-03-01 — the universal convention).
 1904 system anchors at `1904-01-01`. Fractional serials encode time-of-day.
 **Tasks**
-- [ ] `ooxml/dates.ts`.
-- [ ] `ooxml/dates.test.ts`: Unix-epoch serial 25569; modern date 43831 = 2020-01-01;
+- [x] `ooxml/dates.ts`.
+- [x] `ooxml/dates.test.ts`: Unix-epoch serial 25569; modern date 43831 = 2020-01-01;
       1904 serial 42369 = 2020-01-01; fractional → time.
-**Acceptance.** Matches known Excel serials across both epoch systems.
+**Acceptance.** Matches known Excel serials across both epoch systems. ✅ met.
 
 ---
 
