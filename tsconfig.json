@@ -1,7 +1,7 @@
 {
-  "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["packages/*/src/**/*.ts", "packages/*/scripts/**/*.mjs"]
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	"include": ["packages/*/src/**/*.ts", "packages/*/scripts/**/*.mjs"]
 }

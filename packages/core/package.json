@@ -1,27 +1,29 @@
 {
-  "name": "@openjsxl/core",
-  "version": "0.0.0",
-  "description": "Core OOXML engine for openjsxl — zero-dependency .xlsx primitives (zip, xml, cell typing).",
-  "type": "module",
-  "license": "MIT",
-  "engines": {
-    "node": ">=24"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": ["dist"],
-  "sideEffects": false,
-  "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc -p tsconfig.json"
-  },
-  "publishConfig": {
-    "access": "public"
-  }
+	"name": "@openjsxl/core",
+	"version": "0.0.0",
+	"description": "Core OOXML engine for openjsxl — zero-dependency .xlsx primitives (zip, xml, cell typing).",
+	"type": "module",
+	"license": "MIT",
+	"engines": {
+		"node": ">=24"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "tsup",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
 }

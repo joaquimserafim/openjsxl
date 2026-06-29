@@ -1,36 +1,36 @@
 {
-  "name": "@openjsxl/root",
-  "version": "0.0.0",
-  "private": true,
-  "description": "openjsxl monorepo — a fast, zero-dependency, TypeScript-first Excel (.xlsx) library for JavaScript runtimes.",
-  "type": "module",
-  "license": "MIT",
-  "engines": {
-    "node": ">=24"
-  },
-  "packageManager": "pnpm@11.9.0",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.9.0",
-      "onFail": "download"
-    }
-  },
-  "scripts": {
-    "build": "pnpm -r build",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "check": "biome check .",
-    "check:fix": "biome check --write .",
-    "format": "biome format --write .",
-    "fixtures": "node packages/fixtures/scripts/generate.mjs"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.1.0",
-    "@types/node": "^24.0.0",
-    "tsup": "^8.3.0",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
-  }
+	"name": "@openjsxl/root",
+	"version": "0.0.0",
+	"private": true,
+	"description": "openjsxl monorepo — a fast, zero-dependency, TypeScript-first Excel (.xlsx) library for JavaScript runtimes.",
+	"type": "module",
+	"license": "MIT",
+	"engines": {
+		"node": ">=24"
+	},
+	"packageManager": "pnpm@11.9.0",
+	"devEngines": {
+		"packageManager": {
+			"name": "pnpm",
+			"version": "^11.9.0",
+			"onFail": "download"
+		}
+	},
+	"scripts": {
+		"build": "pnpm -r build",
+		"typecheck": "tsc -p tsconfig.json",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"format": "biome format --write .",
+		"fixtures": "node packages/fixtures/scripts/generate.mjs"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.1.0",
+		"@types/node": "^24.0.0",
+		"tsup": "^8.3.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
 }
