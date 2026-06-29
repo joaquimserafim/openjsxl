@@ -1,0 +1,42 @@
+{
+	"name": "openjsxl",
+	"version": "0.0.0",
+	"description": "Fast, zero-dependency Excel (.xlsx) reader and writer for Node, Deno, Bun, and the browser.",
+	"type": "module",
+	"license": "MIT",
+	"engines": {
+		"node": ">=24"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "tsup",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"dependencies": {
+		"@openjsxl/core": "workspace:*"
+	},
+	"keywords": [
+		"xlsx",
+		"excel",
+		"spreadsheet",
+		"ooxml",
+		"reader",
+		"writer",
+		"openpyxl",
+		"calamine"
+	],
+	"publishConfig": {
+		"access": "public"
+	}
+}

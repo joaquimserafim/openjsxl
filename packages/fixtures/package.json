@@ -1,0 +1,14 @@
+{
+	"name": "@openjsxl/fixtures",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Test corpus and fixture generator for openjsxl.",
+	"type": "module",
+	"license": "MIT",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"generate": "node scripts/generate.mjs"
+	}
+}

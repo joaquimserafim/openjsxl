@@ -65,7 +65,7 @@ Status: ☐ not started · ◐ in progress · ☑ done
 
 | Version | Theme | Outcome | Status |
 | --- | --- | --- | --- |
-| **M0** | Foundations | Compiling skeleton, fixtures, pure primitives (A1, dates) | ☐ |
+| **M0** | Foundations | Compiling skeleton, fixtures, pure primitives (A1, dates) | ◐ |
 | **0.1** | Reader MVP | Read correctly-typed cells (string/number/date/bool) from a real `.xlsx` | ☐ |
 | **0.2** | Reader hardening | Constant-memory streaming; styles→date detection; merged cells, hyperlinks, comments | ☐ |
 | **0.3** | Writer MVP | Write values, types, sheets; round-trip fidelity tests | ☐ |

@@ -63,25 +63,25 @@ would forfeit the browser/Deno/edge story, which is the differentiator.
 Goal: a skeleton that installs, typechecks, lints, and tests green, plus the pure
 primitives that have no xlsx-format logic.
 
-### F0.1 — Package skeleton ☐
+### F0.1 — Package skeleton ☑
 **Context.** The repo currently has root tooling and `@openjsxl/core`'s manifest only. We
 need the full three-package layout and the core source tree so later features have a home.
 **Scope (in):** directory layout; `src/index.ts` + `types.ts`; per-package `tsconfig.json`
 + `tsup.config.ts`; the `openjsxl` facade; the `@openjsxl/fixtures` package shell.
 **Scope (out):** any parsing logic (those are their own features).
 **Tasks**
-- [ ] Create `packages/core/src/{zip,xml,ooxml,reader}/` with `index.ts` barrels.
-- [ ] `packages/core/src/types.ts` — the public `Cell` discriminated union, `CellType`,
+- [x] Create `packages/core/src/{zip,xml,ooxml,reader}/` with `index.ts` barrels.
+- [x] `packages/core/src/types.ts` — the public `Cell` discriminated union, `CellType`,
       `SheetInfo`.
-- [ ] `packages/core/src/index.ts` — public surface (re-exports only what's public).
-- [ ] `packages/core/tsconfig.json` (extends base, `noEmit` for typecheck) + `tsup.config.ts`.
-- [ ] `packages/openjsxl/` — manifest (`dependencies: @openjsxl/core`), `tsconfig`,
+- [x] `packages/core/src/index.ts` — public surface (re-exports only what's public).
+- [x] `packages/core/tsconfig.json` (extends base, `noEmit` for typecheck) + `tsup.config.ts`.
+- [x] `packages/openjsxl/` — manifest (`dependencies: @openjsxl/core`), `tsconfig`,
       `tsup.config.ts` (`noExternal: ['@openjsxl/core']`), `src/index.ts` (`export * from
       '@openjsxl/core'`).
-- [ ] `packages/fixtures/` — private manifest, `src/index.ts` (`fixturePath`,
+- [x] `packages/fixtures/` — private manifest, `src/index.ts` (`fixturePath`,
       `loadFixture`).
-- [ ] `pnpm install` clean; `pnpm check && pnpm typecheck && pnpm test` green (empty/`todo`).
-**Acceptance.** Fresh clone → `pnpm install` → all three quality commands pass.
+- [x] `pnpm install` clean; `pnpm check && pnpm typecheck && pnpm test` green (empty/`todo`).
+**Acceptance.** Fresh clone → `pnpm install` → all three quality commands pass. ✅ met.
 
 ### F0.2 — Test fixtures & generator ☐
 **Context.** A reader is only as trustworthy as its corpus. We need both *programmatic*
