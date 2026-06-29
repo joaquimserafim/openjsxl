@@ -83,7 +83,7 @@ need the full three-package layout and the core source tree so later features ha
 - [x] `pnpm install` clean; `pnpm check && pnpm typecheck && pnpm test` green (empty/`todo`).
 **Acceptance.** Fresh clone → `pnpm install` → all three quality commands pass. ✅ met.
 
-### F0.2 — Test fixtures & generator ☐
+### F0.2 — Test fixtures & generator ☑
 **Context.** A reader is only as trustworthy as its corpus. We need both *programmatic*
 fixtures (deterministic, committed) and *real-producer* fixtures (Excel, LibreOffice,
 Google Sheets) to catch real quirks.
@@ -94,14 +94,17 @@ and a cached formula; a README documenting how to add real-producer files.
 headers, CRC32, and an End-Of-Central-Directory record. `[Content_Types].xml` should be the
 first entry. Validate output with `unzip -l` and by opening in a real spreadsheet app.
 **Tasks**
-- [ ] `packages/fixtures/scripts/generate.mjs` — CRC32 + stored-zip writer + OOXML parts.
-- [ ] Emit `data/basic.xlsx`: `A1` string, `B1` number, `C1` date (styled), `D1` bool,
-      `A2` string, `B2` float.
-- [ ] Wire the root `pnpm fixtures` script; add `allowJs`/`checkJs:false` to root tsconfig
+- [x] `packages/fixtures/scripts/generate.mjs` — CRC32 + stored-zip writer + OOXML parts.
+- [x] Emit `data/basic.xlsx`: `A1` string, `B1` number, `C1` date (styled), `D1` bool,
+      `A2` string, `B2` float (plus `E1` cached formula for the M1 reader).
+- [x] Wire the root `pnpm fixtures` script; add `allowJs`/`checkJs:false` to root tsconfig
       so `scripts/**/*.mjs` is allowed by typecheck.
-- [ ] `data/README.md` — corpus policy + checklist for adding real-producer files.
-- [ ] Verify `basic.xlsx` opens in LibreOffice/Excel and via `unzip -l`.
-**Acceptance.** `pnpm fixtures` writes a `basic.xlsx` that a real spreadsheet app opens.
+- [x] `data/README.md` — corpus policy + checklist for adding real-producer files.
+- [x] Verify via `unzip -t` (CRC integrity, all 7 parts OK) + `unzip -l`. Opening in
+      Excel/LibreOffice is a recommended manual spot-check (no GUI in CI).
+- [x] `src/fixtures.test.ts` — CI guard asserting the committed fixture is a valid ZIP.
+**Acceptance.** `pnpm fixtures` writes a deterministic `basic.xlsx`; `unzip -t` passes (valid
+zip + correct CRCs). ✅ met (real-app open not verified in this environment).
 
 ### F0.3 — Primitive: A1 addressing ☑
 **Context.** Cells are addressed in A1 notation; columns are **bijective base-26**
