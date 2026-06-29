@@ -137,16 +137,16 @@ Whether a number *is* a date is decided later by the style (F2.1), not here.
 Goal: `await openXlsx(bytes)` → read a correctly-typed value from `A1` of a real Excel file.
 This is the demo that sells the project.
 
-### F1.1 — XML entity decoding ☐
+### F1.1 — XML entity decoding ☑
 **Context.** OOXML text uses the five predefined entities plus numeric character
 references. The tokenizer (F1.2) decodes both element text and attribute values with this.
 **Scope.** `decodeXmlEntities(input)`.
 **Design notes.** Handle `&amp; &lt; &gt; &quot; &apos;` and `&#nn;` / `&#xHH;`; leave
 unknown entities intact; guard against out-of-range code points.
 **Tasks**
-- [ ] `xml/entities.ts` + `xml/entities.test.ts` (predefined, decimal, hex, unknown, no-`&`
+- [x] `xml/entities.ts` + `xml/entities.test.ts` (predefined, decimal, hex, unknown, no-`&`
       fast path).
-**Acceptance.** Decodes all valid forms; passes through invalid ones unchanged.
+**Acceptance.** Decodes all valid forms; passes through invalid ones unchanged. ✅ met.
 
 ### F1.2 — Streaming XML tokenizer ☐
 **Context.** Worksheets can be huge; a DOM is the reason pure-JS incumbents are slow and
