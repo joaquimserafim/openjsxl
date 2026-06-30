@@ -1,4 +1,4 @@
-import { localName } from '../utils'
+import { localName, relationshipId } from '../utils'
 import { tokenize } from '../xml'
 
 // xl/workbook.xml lists the workbook's sheets in tab order. Each <sheet> gives a display
@@ -19,16 +19,6 @@ export interface WorkbookMeta {
 	sheets: WorkbookSheet[]
 	/** The 1904 date system flag (`<workbookPr date1904>`); selects the date serial epoch. */
 	date1904: boolean
-}
-
-// The relationship id is conventionally `r:id`, but the `r` prefix is only bound by
-// convention — fall back to any attribute whose local name is `id`.
-function relationshipId(attrs: Record<string, string>): string | undefined {
-	if (attrs['r:id'] !== undefined) return attrs['r:id']
-	for (const key of Object.keys(attrs)) {
-		if (localName(key) === 'id') return attrs[key]
-	}
-	return undefined
 }
 
 export function parseWorkbook(xml: string): WorkbookMeta {

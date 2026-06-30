@@ -1,6 +1,6 @@
-import { type DecodeContext, decodeCell, formatRef, parseRef } from '../ooxml'
-import type { Cell } from '../types'
-import { localName } from '../utils'
+import { type DecodeContext, decodeCell, formatRef, parseRef, type Relationship } from '../ooxml'
+import type { Cell, Hyperlink } from '../types'
+import { localName, relationshipId } from '../utils'
 import { createXmlStream, tokenize, type XmlToken } from '../xml'
 
 // Turn a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
@@ -240,6 +240,38 @@ export function parseMergedCells(xml: string): string[] {
 		}
 	}
 	return ranges
+}
+
+/**
+ * The hyperlinks a worksheet declares, in document order. They live in a `<hyperlinks>` block
+ * (a sibling of `<sheetData>`); each `<hyperlink>` carries the covered `ref` plus some of:
+ * an `r:id` pointing into the worksheet's own relationships (the external target), an
+ * in-workbook `location`, a `tooltip`, and a `display` override. The external target is joined
+ * from `rels` here so callers get the resolved URL, not a bare relationship id; a link with no
+ * resolvable `r:id` simply has no `target`. A missing/empty `ref` is skipped.
+ */
+export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): Hyperlink[] {
+	const links: Hyperlink[] = []
+	for (const token of tokenize(xml)) {
+		if (token.kind !== 'open' || localName(token.name) !== 'hyperlink') continue
+		const ref = token.attrs.ref
+		if (ref === undefined || ref === '') continue
+
+		// Built immutably (Hyperlink is readonly): include only the attributes that are present.
+		const rid = relationshipId(token.attrs)
+		const target = rid !== undefined ? rels?.get(rid)?.target : undefined
+		const location = token.attrs.location
+		const tooltip = token.attrs.tooltip
+		const display = token.attrs.display
+		links.push({
+			ref,
+			...(target !== undefined ? { target } : {}),
+			...(location !== undefined && location !== '' ? { location } : {}),
+			...(tooltip !== undefined ? { tooltip } : {}),
+			...(display !== undefined ? { display } : {}),
+		})
+	}
+	return links
 }
 
 /**

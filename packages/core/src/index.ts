@@ -8,4 +8,4 @@ export { serialToDate } from './ooxml/dates'
 // Reader API (F1.7) — open a workbook and read typed cells.
 export { openXlsx, streamSheetRows, Workbook, Worksheet } from './reader/workbook'
 export type { Row } from './reader/worksheet'
-export type { Cell, CellType, SheetInfo } from './types'
+export type { Cell, CellType, Hyperlink, SheetInfo } from './types'

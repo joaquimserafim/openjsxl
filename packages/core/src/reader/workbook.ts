@@ -4,11 +4,12 @@ import {
 	parseSharedStrings,
 	parseStyles,
 	parseWorkbook,
+	type Relationship,
 	resolveTarget,
 } from '../ooxml'
-import type { Cell, SheetInfo } from '../types'
+import type { Cell, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
-import { parseMergedCells, type Row, readRows, streamRows } from './worksheet'
+import { parseHyperlinks, parseMergedCells, type Row, readRows, streamRows } from './worksheet'
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -49,15 +50,23 @@ export class Worksheet {
 	readonly #info: SheetInfo
 	readonly #xml: string
 	readonly #context: DecodeContext
+	readonly #rels: Map<string, Relationship> | undefined
 
 	#cells: Map<string, Cell> | undefined
 	#merged: readonly string[] | undefined
+	#hyperlinks: readonly Hyperlink[] | undefined
 
-	constructor(info: SheetInfo, xml: string, context: DecodeContext) {
+	constructor(
+		info: SheetInfo,
+		xml: string,
+		context: DecodeContext,
+		rels?: Map<string, Relationship>,
+	) {
 		this.name = info.name
 		this.#info = info
 		this.#xml = xml
 		this.#context = context
+		this.#rels = rels
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
@@ -77,6 +86,18 @@ export class Worksheet {
 	get mergedCells(): readonly string[] {
 		if (this.#merged === undefined) this.#merged = parseMergedCells(this.#xml)
 		return this.#merged
+	}
+
+	/**
+	 * Hyperlinks declared on this sheet, in document order. Each carries the covered `ref` and,
+	 * where present, a resolved external `target`, an in-workbook `location`, a `tooltip`, and a
+	 * `display` override. Empty when none.
+	 */
+	get hyperlinks(): readonly Hyperlink[] {
+		if (this.#hyperlinks === undefined) {
+			this.#hyperlinks = parseHyperlinks(this.#xml, this.#rels)
+		}
+		return this.#hyperlinks
 	}
 
 	/** The cell at an A1 reference. Absent cells read as `empty` (Excel treats them blank). */
@@ -192,9 +213,15 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 	const byName = new Map<string, Worksheet>()
 	for (const { info, path } of sheets) {
 		const xml = decoder.decode(await zip.read(path))
+		// The sheet's own relationships (xl/worksheets/_rels/sheetN.xml.rels) resolve hyperlink
+		// r:ids to their targets. Optional — a sheet with no external links has no rels part.
+		const relsPath = relsPathFor(path)
+		const rels = zip.has(relsPath)
+			? parseRels(decoder.decode(await zip.read(relsPath)))
+			: undefined
 		infos.push(info)
 		// First definition wins if two sheets somehow share a name.
-		if (!byName.has(info.name)) byName.set(info.name, new Worksheet(info, xml, context))
+		if (!byName.has(info.name)) byName.set(info.name, new Worksheet(info, xml, context, rels))
 	}
 
 	return new Workbook(infos, byName)

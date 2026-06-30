@@ -24,3 +24,19 @@ export interface SheetInfo {
 	/** false for hidden or very-hidden sheets. */
 	visible: boolean
 }
+
+export interface Hyperlink {
+	/** The cell or range the link covers, e.g. "A1" or "B1:C2". */
+	readonly ref: string
+	/**
+	 * External destination (a URL, `mailto:`, or `file:` target) resolved through the
+	 * worksheet's relationships. Absent for a purely in-workbook link.
+	 */
+	readonly target?: string
+	/** In-workbook destination, e.g. "'Sheet2'!B5". Absent for a purely external link. */
+	readonly location?: string
+	/** Hover text the producer attached to the link, if any. */
+	readonly tooltip?: string
+	/** Display-text override for the link, if any. */
+	readonly display?: string
+}
