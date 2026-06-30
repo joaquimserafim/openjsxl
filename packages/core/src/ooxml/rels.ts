@@ -1,3 +1,4 @@
+import { localName } from '../utils'
 import { tokenize } from '../xml'
 
 // Relationship parts (_rels/*.rels) are the source of truth for locating parts. A part's
@@ -11,11 +12,6 @@ export interface Relationship {
 	/** Target exactly as written; resolve internal ones with resolveTarget. */
 	target: string
 	targetMode: 'Internal' | 'External'
-}
-
-function localName(name: string): string {
-	const colon = name.indexOf(':')
-	return colon === -1 ? name : name.slice(colon + 1)
 }
 
 export function parseRels(xml: string): Map<string, Relationship> {

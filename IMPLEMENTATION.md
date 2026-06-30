@@ -203,17 +203,22 @@ the source part's directory. `sheetId` is **not** a file mapping.
 - [x] `ooxml/__tests__/rels.test.ts` — unit tests + a real-`basic.xlsx` walk.
 **Acceptance.** Resolves `Sheet1`'s `r:id` to `xl/worksheets/sheet1.xml` via the graph. ✅ met.
 
-### F1.5 — Shared strings table ☐
+### F1.5 — Shared strings table ☑
 **Context.** Most text lives once in `xl/sharedStrings.xml`; cells of type `s` store a
 zero-based index into it.
 **Scope.** `parseSharedStrings(xml)` → `string[]`.
 **Design notes.** Parse once. Handle plain `<si><t>` and rich-text `<si><r><t>…</t></r>`
 (concatenate runs). Respect `xml:space="preserve"`. This is the first big consumer of the
-streaming tokenizer.
+streaming tokenizer. Phonetic guides (`<rPh>`, `<phoneticPr>`) carry an alternate reading,
+not the value — their `<t>` text is excluded (matches openpyxl). Lifted `localName` into
+`utils` since rels needs it too. Adversarial review hardened misnested input by holding the
+OOXML invariant **one table entry per `<si>` start**: a stray/nested `<si>`/`<si/>`
+finalizes the open item first, so it can't drop or shift a well-formed neighbour's index.
 **Tasks**
-- [ ] `ooxml/shared-strings.ts` (plain + rich-text runs).
-- [ ] `ooxml/shared-strings.test.ts`.
-**Acceptance.** Index → string matches the fixture's `sst` exactly, runs concatenated.
+- [x] `utils/xml-names.ts` — `localName` lifted from rels + `__tests__/xml-names.test.ts`.
+- [x] `ooxml/shared-strings.ts` — plain + rich-text runs; phonetic exclusion; misnest-safe.
+- [x] `ooxml/__tests__/shared-strings.test.ts` — units + real `basic.xlsx` + misnest cases.
+**Acceptance.** Index → string matches the fixture's `sst` exactly, runs concatenated. ✅ met.
 
 ### F1.6 — Worksheet cell stream & typing ☐
 **Context.** The core value: turn `<c>` elements into typed `Cell`s.

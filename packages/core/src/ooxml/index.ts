@@ -3,3 +3,4 @@
 export * from './a1'
 export * from './dates'
 export * from './rels'
+export * from './shared-strings'
