@@ -226,6 +226,23 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 }
 
 /**
+ * The merged-cell ranges a worksheet declares, in document order, as A1 ranges (e.g. `A1:B2`).
+ * They live in a `<mergeCells>` block after `<sheetData>`, so we scan the token stream for the
+ * `<mergeCell ref>` children rather than the row state machine. Refs are returned verbatim as
+ * the producer wrote them; a missing or empty `ref` is skipped.
+ */
+export function parseMergedCells(xml: string): string[] {
+	const ranges: string[] = []
+	for (const token of tokenize(xml)) {
+		if (token.kind === 'open' && localName(token.name) === 'mergeCell') {
+			const ref = token.attrs.ref
+			if (ref !== undefined && ref !== '') ranges.push(ref)
+		}
+	}
+	return ranges
+}
+
+/**
  * Read rows from a stream of decompressed worksheet chunks without materializing the part —
  * peak memory tracks one row, not the whole sheet (F2.2). Bytes are decoded with a streaming
  * `TextDecoder` (multi-byte sequences may split across chunks) and fed through the chunk-safe

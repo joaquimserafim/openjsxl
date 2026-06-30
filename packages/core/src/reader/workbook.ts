@@ -8,7 +8,7 @@ import {
 } from '../ooxml'
 import type { Cell, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
-import { type Row, readRows, streamRows } from './worksheet'
+import { parseMergedCells, type Row, readRows, streamRows } from './worksheet'
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -51,6 +51,7 @@ export class Worksheet {
 	readonly #context: DecodeContext
 
 	#cells: Map<string, Cell> | undefined
+	#merged: readonly string[] | undefined
 
 	constructor(info: SheetInfo, xml: string, context: DecodeContext) {
 		this.name = info.name
@@ -67,6 +68,15 @@ export class Worksheet {
 	/** false for hidden or very-hidden sheets. */
 	get visible(): boolean {
 		return this.#info.visible
+	}
+
+	/**
+	 * Merged-cell ranges in A1 notation (e.g. `['A1:B1', 'A2:A4']`), in document order. Only the
+	 * top-left cell of a merge holds a value; the rest read as `empty`. Empty when none.
+	 */
+	get mergedCells(): readonly string[] {
+		if (this.#merged === undefined) this.#merged = parseMergedCells(this.#xml)
+		return this.#merged
 	}
 
 	/** The cell at an A1 reference. Absent cells read as `empty` (Excel treats them blank). */
