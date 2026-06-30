@@ -236,6 +236,10 @@ importers:
       '@openjsxl/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@openjsxl/fixtures':
+        specifier: workspace:*
+        version: link:../fixtures
 
 packages:
 

@@ -261,13 +261,16 @@ is view-safe. True streaming stays deferred to F2.3.
 **Acceptance.** `(await openXlsx(bytes)).sheet('Sheet1').cell('A1').value` is the right
 typed value. ✅ met.
 
-### F1.8 — Vertical-slice tests ☐
+### F1.8 — Vertical-slice tests ☑
 **Context.** Lock the MVP behavior with end-to-end tests on a real file.
 **Tasks**
-- [ ] Wire `@openjsxl/fixtures` into the reader tests (alias + tsconfig path).
-- [ ] Un-`todo` the slice: list sheets via rels; read string/number/bool; (date after F2.1).
-- [ ] README quick-start: "`.xlsx` → JSON in < 50 LOC".
-**Acceptance.** `pnpm test` exercises a real `.xlsx` end-to-end and is green. **Tag v0.1.**
+- [x] Wire `@openjsxl/fixtures` into the facade tests (workspace devDep on `openjsxl`).
+- [x] Slice through the **public** `openjsxl` entry: list sheets via rels; read
+      string/number/bool; `.xlsx`→JSON records (date deferred to F2.1).
+- [x] README quick-start: "`.xlsx` → JSON in < 50 LOC".
+**Acceptance.** `pnpm test` exercises a real `.xlsx` end-to-end and is green. **Tag v0.1.** ✅
+met — `packages/openjsxl/src/__tests__/slice.test.ts` drives the facade; `openjsxl` and
+`@openjsxl/core` bumped to `0.1.0`.
 
 ---
 

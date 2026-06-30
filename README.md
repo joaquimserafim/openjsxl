@@ -3,9 +3,40 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **pre-alpha.** The repo is being built in the open, plan-first. There is no
-> published package yet. See the [roadmap](./ROADMAP.md) and [implementation
-> plan](./IMPLEMENTATION.md).
+> Status: **v0.1 — reader MVP.** Open an `.xlsx` and read typed cells today; not yet
+> published to npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
+> [implementation plan](./IMPLEMENTATION.md).
+
+## Quick start
+
+`.xlsx` → JSON, in well under 50 lines:
+
+```ts
+import { openXlsx } from 'openjsxl'
+import { readFile } from 'node:fs/promises'
+
+// Open a workbook from bytes (Uint8Array or ArrayBuffer).
+const wb = await openXlsx(await readFile('data.xlsx'))
+
+// Read one cell — it's typed, so `cell.type` narrows `cell.value`.
+const a1 = wb.sheet('Sheet1').cell('A1')
+console.log(a1.type, a1.value) // e.g. "string" "hello"
+
+// Or turn a whole sheet into JSON records keyed by column letter.
+const sheet = wb.sheet(wb.sheets[0].name)
+const rows = []
+for await (const row of sheet.rows()) {
+	const record = {}
+	for (const cell of row.cells) {
+		record[cell.ref.replace(/\d+$/, '')] = cell.value
+	}
+	rows.push(record)
+}
+console.log(JSON.stringify(rows, null, 2))
+```
+
+Cells are a discriminated union — `string`, `number`, `boolean`, `error`, or `empty` (and
+`date` once F2.1 lands) — so narrowing on `cell.type` gives you a correctly typed `cell.value`.
 
 ## Why
 
