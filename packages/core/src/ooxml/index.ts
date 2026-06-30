@@ -1,4 +1,5 @@
-// ooxml layer — relationship graph, shared strings, styles, cell typing, and the
-// A1/date helpers. Populated by F0.3, F0.4, F1.4–F1.6, F2.1.
+// ooxml layer — A1/date helpers, the relationship graph, and (soon) shared strings,
+// styles, and cell typing. Aggregates the modules of this layer.
 export * from './a1'
 export * from './dates'
+export * from './rels'

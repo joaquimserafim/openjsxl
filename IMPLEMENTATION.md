@@ -189,7 +189,7 @@ for. Tolerate a trailing EOCD comment.
       name, and explicit ZIP64 rejection. Deferred robustness items pushed to F2.4.
 **Acceptance.** Lists every part of `basic.xlsx` and returns exact bytes for each. ✅ met.
 
-### F1.4 — Relationship graph (rels) ☐
+### F1.4 — Relationship graph (rels) ☑
 **Context.** **Relationships, not filenames, are the source of truth.** Sheets are found by
 following `r:id` from `workbook.xml` into `workbook.xml.rels`.
 **Scope.** `parseRels(xml)` → `Map<id, {id,type,target}>`; helpers to resolve a part's
@@ -198,9 +198,10 @@ relationships relative to its path.
 `xl/workbook.xml`) → `xl/_rels/workbook.xml.rels`. Targets may be relative; resolve against
 the source part's directory. `sheetId` is **not** a file mapping.
 **Tasks**
-- [ ] `ooxml/rels.ts` (parse + relative target resolution).
-- [ ] `ooxml/rels.test.ts` against fixtures.
-**Acceptance.** Resolves `Sheet1`'s `r:id` to `xl/worksheets/sheet1.xml` via the graph.
+- [x] `ooxml/rels.ts` — `parseRels` (via the tokenizer) + `resolveTarget` (relative,
+      `..`/`.`, and package-absolute `/` targets); `Internal`/`External` target modes.
+- [x] `ooxml/__tests__/rels.test.ts` — unit tests + a real-`basic.xlsx` walk.
+**Acceptance.** Resolves `Sheet1`'s `r:id` to `xl/worksheets/sheet1.xml` via the graph. ✅ met.
 
 ### F1.5 — Shared strings table ☐
 **Context.** Most text lives once in `xl/sharedStrings.xml`; cells of type `s` store a
