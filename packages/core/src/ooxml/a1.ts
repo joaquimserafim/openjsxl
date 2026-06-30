@@ -3,9 +3,9 @@
 
 export interface CellRef {
 	/** 1-based column index (A = 1). */
-	col: number
+	readonly col: number
 	/** 1-based row index. */
-	row: number
+	readonly row: number
 }
 
 const CODE_UPPER_A = 65

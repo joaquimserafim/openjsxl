@@ -20,9 +20,9 @@ import { createXmlStream, tokenize, type XmlToken } from '../xml'
 
 export interface Row {
 	/** 1-based row index — from `<row r>`, or positional when the attribute is absent. */
-	index: number
+	readonly index: number
 	/** Cells present in the row, in document order. Gaps are simply absent (sparse). */
-	cells: Cell[]
+	readonly cells: readonly Cell[]
 }
 
 function safeColumn(ref: string): number | undefined {

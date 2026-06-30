@@ -13,17 +13,17 @@ import { inflateRaw, inflateRawStream } from './inflate'
 // (> 4 GB or > 65535 entries), encryption, and multi-disk archives.
 
 export interface ZipEntry {
-	name: string
+	readonly name: string
 	/** 0 = stored, 8 = raw deflate */
-	method: number
-	compressedSize: number
-	uncompressedSize: number
+	readonly method: number
+	readonly compressedSize: number
+	readonly uncompressedSize: number
 	/** absolute offset of the local file header within the archive */
-	localHeaderOffset: number
+	readonly localHeaderOffset: number
 }
 
 export interface ZipArchive {
-	entries: ReadonlyMap<string, ZipEntry>
+	readonly entries: ReadonlyMap<string, ZipEntry>
 	has(name: string): boolean
 	read(name: string): Promise<Uint8Array>
 	/** Read an entry as a stream of chunks, without materializing the whole part. */

@@ -18,7 +18,7 @@ export function localName(name: string): string {
 // it on: <sheet> and <hyperlink> carry no attribute whose local name is `id` other than the
 // relationship id, so the fallback cannot mis-match. Reusing it on an element that may carry a
 // foreign `*:id` attribute would need revisiting.
-export function relationshipId(attrs: Record<string, string>): string | undefined {
+export function relationshipId(attrs: Readonly<Record<string, string>>): string | undefined {
 	if (attrs['r:id'] !== undefined) return attrs['r:id']
 	for (const key of Object.keys(attrs)) {
 		if (localName(key) === 'id') return attrs[key]

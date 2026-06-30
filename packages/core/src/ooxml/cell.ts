@@ -23,22 +23,22 @@ import type { StyleTable } from './styles'
 
 export interface RawCell {
 	/** A1 reference, e.g. "B2". */
-	ref: string
+	readonly ref: string
 	/** The `t` attribute; `undefined` means the default (number). */
-	type: string | undefined
+	readonly type: string | undefined
 	/** `<v>` text, or concatenated inline `<is>` text; `undefined` when the cell has none. */
-	value: string | undefined
+	readonly value: string | undefined
 	/** The `s` attribute (index into `cellXfs`); drives date detection. `undefined` ⇒ style 0. */
-	style: number | undefined
+	readonly style: number | undefined
 }
 
 export interface DecodeContext {
 	/** The workbook's shared string table (F1.5), indexed by `s`-type cells. */
-	sharedStrings: string[]
+	readonly sharedStrings: readonly string[]
 	/** Style table (F2.1); when present, date-styled numbers decode as `date` cells. */
-	styles?: StyleTable
+	readonly styles?: StyleTable
 	/** Workbook 1904 date system flag, selecting the serial epoch. Defaults to false. */
-	date1904?: boolean
+	readonly date1904?: boolean
 }
 
 export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {

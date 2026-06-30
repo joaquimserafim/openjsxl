@@ -9,9 +9,9 @@ function mergeText(tokens: XmlToken[]): XmlToken[] {
 	for (const token of tokens) {
 		const prev = out[out.length - 1]
 		if (token.kind === 'text' && prev?.kind === 'text') {
-			prev.value += token.value
+			out[out.length - 1] = { kind: 'text', value: prev.value + token.value }
 		} else {
-			out.push(token.kind === 'text' ? { ...token } : token)
+			out.push(token)
 		}
 	}
 	// A merge can leave an empty text token only if the input had one; drop empties for a

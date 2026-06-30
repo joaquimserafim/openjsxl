@@ -22,9 +22,14 @@ import { decodeXmlEntities } from './entities'
 // consecutive `text` events (CDATA, comments, and entities all split a run).
 
 export type XmlToken =
-	| { kind: 'open'; name: string; attrs: Record<string, string>; selfClosing: boolean }
-	| { kind: 'text'; value: string }
-	| { kind: 'close'; name: string }
+	| {
+			readonly kind: 'open'
+			readonly name: string
+			readonly attrs: Readonly<Record<string, string>>
+			readonly selfClosing: boolean
+	  }
+	| { readonly kind: 'text'; readonly value: string }
+	| { readonly kind: 'close'; readonly name: string }
 
 export function* tokenize(xml: string): Generator<XmlToken> {
 	const len = xml.length

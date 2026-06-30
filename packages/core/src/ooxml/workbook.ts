@@ -8,17 +8,17 @@ import { tokenize } from '../xml'
 
 export interface WorkbookSheet {
 	/** Sheet name as shown on the tab. */
-	name: string
+	readonly name: string
 	/** Relationship id (r:id) resolving to the worksheet part via workbook.xml.rels. */
-	rid: string
+	readonly rid: string
 	/** false for hidden or very-hidden sheets (the `state` attribute). */
-	visible: boolean
+	readonly visible: boolean
 }
 
 export interface WorkbookMeta {
-	sheets: WorkbookSheet[]
+	readonly sheets: readonly WorkbookSheet[]
 	/** The 1904 date system flag (`<workbookPr date1904>`); selects the date serial epoch. */
-	date1904: boolean
+	readonly date1904: boolean
 }
 
 export function parseWorkbook(xml: string): WorkbookMeta {

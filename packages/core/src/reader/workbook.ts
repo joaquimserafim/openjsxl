@@ -6,6 +6,7 @@ import {
 	parseWorkbook,
 	type Relationship,
 	resolveTarget,
+	type StyleTable,
 } from '../ooxml'
 import type { Cell, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
@@ -146,11 +147,11 @@ export class Workbook {
 }
 
 interface LoadedWorkbook {
-	zip: ZipArchive
+	readonly zip: ZipArchive
 	/** Shared decode context (shared strings, styles, date system) for every sheet. */
-	context: DecodeContext
+	readonly context: DecodeContext
 	/** Sheets in tab order, each with its resolved part path. */
-	sheets: Array<{ info: SheetInfo; path: string }>
+	readonly sheets: ReadonlyArray<{ readonly info: SheetInfo; readonly path: string }>
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -183,14 +184,16 @@ async function loadWorkbook(source: Uint8Array | ArrayBuffer): Promise<LoadedWor
 	}
 
 	// Style table (optional) — needed to tell date-styled numbers from plain ones.
-	const context: DecodeContext = { sharedStrings, date1904 }
+	let styles: StyleTable | undefined
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES))
 	if (stylesRel !== undefined && stylesRel.targetMode !== 'External') {
 		const stylesPath = resolveTarget(workbookDir, stylesRel.target)
 		if (zip.has(stylesPath)) {
-			context.styles = parseStyles(decoder.decode(await zip.read(stylesPath)))
+			styles = parseStyles(decoder.decode(await zip.read(stylesPath)))
 		}
 	}
+	const context: DecodeContext =
+		styles !== undefined ? { sharedStrings, date1904, styles } : { sharedStrings, date1904 }
 
 	// Resolve each sheet's r:id to a part path.
 	const sheets: Array<{ info: SheetInfo; path: string }> = []

@@ -7,11 +7,11 @@ import { tokenize } from '../xml'
 // workbook.xml.rels, never by guessing a filename.
 
 export interface Relationship {
-	id: string
-	type: string
+	readonly id: string
+	readonly type: string
 	/** Target exactly as written; resolve internal ones with resolveTarget. */
-	target: string
-	targetMode: 'Internal' | 'External'
+	readonly target: string
+	readonly targetMode: 'Internal' | 'External'
 }
 
 export function parseRels(xml: string): Map<string, Relationship> {
