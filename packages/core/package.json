@@ -23,6 +23,9 @@
 		"build": "tsup",
 		"typecheck": "tsc -p tsconfig.json"
 	},
+	"devDependencies": {
+		"@openjsxl/fixtures": "workspace:*"
+	},
 	"publishConfig": {
 		"access": "public"
 	}

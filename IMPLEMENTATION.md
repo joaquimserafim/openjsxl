@@ -170,7 +170,7 @@ optimization. Avoid per-token allocation in the hot loop where practical.
 (realistic worksheet-row + shared-strings shapes tested inline; full extraction lands with
 F1.3).
 
-### F1.3 — ZIP / OPC container reader ☐
+### F1.3 — ZIP / OPC container reader ☑
 **Context.** An `.xlsx` is a ZIP (Open Packaging Conventions). We need entry lookup + on
 -demand inflate, with **zero deps** via the platform.
 **Scope (in):** `inflateRaw(bytes)` (DecompressionStream); `openZip(bytes)` → entry map +
@@ -180,11 +180,14 @@ each entry's name / method / sizes / local-header offset. Method 0 = stored (ver
 method 8 = raw deflate (→ `inflateRaw`). Read lazily — only inflate parts the caller asks
 for. Tolerate a trailing EOCD comment.
 **Tasks**
-- [ ] `zip/inflate.ts` (+ test round-tripping `CompressionStream` output, empty input).
-- [ ] `zip/central-directory.ts`: EOCD scan, central-directory walk, local-header parse.
-- [ ] `read(name)`: dispatch stored vs deflate; decode against entry size.
-- [ ] `zip/*.test.ts` against `basic.xlsx`: list entries, read `[Content_Types].xml`.
-**Acceptance.** Lists every part of `basic.xlsx` and returns exact bytes for each.
+- [x] `zip/inflate.ts` — `inflateRaw` via `DecompressionStream`, with an output-size cap; round-trip test.
+- [x] `zip/central-directory.ts`: EOCD scan, central-directory walk, local-header parse.
+- [x] `read(name)`: dispatch stored vs deflate (output bounded by the declared size).
+- [x] `zip/__tests__/*` against `basic.xlsx` + hand-built deflate / data-descriptor / extra-field zips.
+- [x] Adversarial review (3 lenses): confirmed correct on the real-world data-descriptor
+      (GP-bit-3) layout; added a decompression-bomb cap, wrapped inflate errors with the part
+      name, and explicit ZIP64 rejection. Deferred robustness items pushed to F2.4.
+**Acceptance.** Lists every part of `basic.xlsx` and returns exact bytes for each. ✅ met.
 
 ### F1.4 — Relationship graph (rels) ☐
 **Context.** **Relationships, not filenames, are the source of truth.** Sheets are found by
@@ -297,6 +300,9 @@ malformed input.
 **Tasks**
 - [ ] Tolerate missing optional parts; clear typed errors on corrupt input; fuzz the
       tokenizer/zip parser.
+- [ ] Zip hardening deferred from F1.3: commit a real Excel/LibreOffice/Sheets `.xlsx`
+      fixture (closes the F1.3 review's S7); a configurable max part size; decide policy for
+      duplicate entry names (last-wins today) and directory entries (`name/` placeholders).
 **Acceptance.** No crashes on a corpus of malformed/edge-case files; errors are actionable.
 
 ---

@@ -9,13 +9,6 @@
 		"node": ">=24"
 	},
 	"packageManager": "pnpm@11.9.0",
-	"devEngines": {
-		"packageManager": {
-			"name": "pnpm",
-			"version": "^11.9.0",
-			"onFail": "download"
-		}
-	},
 	"scripts": {
 		"build": "pnpm -r build",
 		"typecheck": "tsc -p tsconfig.json",

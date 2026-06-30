@@ -7,3 +7,6 @@ coverage/
 .idea/
 .vscode/
 !.vscode/extensions.json
+
+# Local working status notes (not tracked)
+progress.md
