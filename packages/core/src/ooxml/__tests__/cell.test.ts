@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { type DecodeContext, decodeCell, type RawCell } from '../cell'
+import type { StyleTable } from '../styles'
 
 const ctx: DecodeContext = { sharedStrings: ['hello', 'world'] }
 
-const raw = (ref: string, type: string | undefined, value: string | undefined): RawCell => ({
-	ref,
-	type,
-	value,
-})
+const raw = (
+	ref: string,
+	type: string | undefined,
+	value: string | undefined,
+	style?: number,
+): RawCell => ({ ref, type, value, style })
 
 describe('decodeCell', () => {
 	it('resolves a shared-string index to its text', () => {
@@ -86,5 +88,54 @@ describe('decodeCell', () => {
 		})
 		expect(decodeCell(raw('A1', undefined, ''), ctx).type).toBe('empty')
 		expect(decodeCell(raw('A1', 'n', 'abc'), ctx).type).toBe('empty')
+	})
+})
+
+describe('decodeCell — date detection (F2.1)', () => {
+	// A stub style table where style index 1 is a date format and everything else is not.
+	const dateStyles: StyleTable = { isDateStyle: (i) => i === 1 }
+	const dateCtx: DecodeContext = { sharedStrings: ['hi'], styles: dateStyles }
+
+	it('decodes a date-styled number as a Date (1900 system)', () => {
+		expect(decodeCell(raw('C1', undefined, '43831', 1), dateCtx)).toEqual({
+			ref: 'C1',
+			type: 'date',
+			value: new Date(Date.UTC(2020, 0, 1)),
+		})
+	})
+
+	it('leaves a number with a non-date style a number', () => {
+		expect(decodeCell(raw('B1', undefined, '42', 0), dateCtx)).toEqual({
+			ref: 'B1',
+			type: 'number',
+			value: 42,
+		})
+	})
+
+	it('never turns strings, booleans, or errors into dates, even with a date style', () => {
+		expect(decodeCell(raw('A1', 's', '0', 1), dateCtx).type).toBe('string')
+		expect(decodeCell(raw('A1', 'b', '1', 1), dateCtx).type).toBe('boolean')
+		expect(decodeCell(raw('A1', 'e', '#N/A', 1), dateCtx).type).toBe('error')
+	})
+
+	it('honours the 1904 date system', () => {
+		const epoch1900 = decodeCell(raw('C1', undefined, '0', 1), dateCtx)
+		const epoch1904 = decodeCell(raw('C1', undefined, '0', 1), { ...dateCtx, date1904: true })
+		expect(epoch1900).toEqual({
+			ref: 'C1',
+			type: 'date',
+			value: new Date(Date.UTC(1899, 11, 30)),
+		})
+		expect(epoch1904).toEqual({
+			ref: 'C1',
+			type: 'date',
+			value: new Date(Date.UTC(1904, 0, 1)),
+		})
+	})
+
+	it('stays a number when the context carries no style table', () => {
+		expect(decodeCell(raw('C1', undefined, '43831', 1), { sharedStrings: [] }).type).toBe(
+			'number',
+		)
 	})
 })

@@ -15,12 +15,16 @@ describe('openXlsx — basic.xlsx', () => {
 		])
 	})
 
-	it('reads typed cells by A1 reference', () => {
+	it('reads typed cells by A1 reference, including a date', () => {
 		const sheet = wb.sheet('Sheet1')
-		// Date detection is deferred to F2.1, so the date-styled serial reads as a number.
 		expect(sheet.cell('A1')).toEqual({ ref: 'A1', type: 'string', value: 'hello' })
 		expect(sheet.cell('B1')).toEqual({ ref: 'B1', type: 'number', value: 42 })
-		expect(sheet.cell('C1')).toEqual({ ref: 'C1', type: 'number', value: 43831 })
+		// C1 is serial 43831 with a date number format → a real Date now (F2.1).
+		expect(sheet.cell('C1')).toEqual({
+			ref: 'C1',
+			type: 'date',
+			value: new Date(Date.UTC(2020, 0, 1)),
+		})
 		expect(sheet.cell('D1')).toEqual({ ref: 'D1', type: 'boolean', value: true })
 		expect(sheet.cell('E1')).toEqual({ ref: 'E1', type: 'number', value: 84 })
 		expect(sheet.cell('A2')).toEqual({ ref: 'A2', type: 'string', value: 'world' })

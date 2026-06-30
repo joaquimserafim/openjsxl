@@ -1,5 +1,6 @@
 import { loadFixture } from '@openjsxl/fixtures'
 import { describe, expect, it } from 'vitest'
+import type { StyleTable } from '../../ooxml'
 import type { Cell } from '../../types'
 import { openZip } from '../../zip'
 import { type Row, readRows } from '../worksheet'
@@ -150,7 +151,8 @@ describe('readRows — real basic.xlsx', () => {
 		const xml = new TextDecoder().decode(await zip.read('xl/worksheets/sheet1.xml'))
 		const cells = byRef([...readRows(xml, ctx)])
 
-		// Date detection is deferred to F2.1, so the date-styled serial still reads as a number.
+		// No style table is passed here, so date-styled C1 still reads as a number — date
+		// promotion is exercised below and in the openXlsx integration test.
 		expect(cells.get('A1')).toEqual({ ref: 'A1', type: 'string', value: 'hello' })
 		expect(cells.get('B1')).toEqual({ ref: 'B1', type: 'number', value: 42 })
 		expect(cells.get('C1')).toEqual({ ref: 'C1', type: 'number', value: 43831 })
@@ -158,5 +160,21 @@ describe('readRows — real basic.xlsx', () => {
 		expect(cells.get('E1')).toEqual({ ref: 'E1', type: 'number', value: 84 })
 		expect(cells.get('A2')).toEqual({ ref: 'A2', type: 'string', value: 'world' })
 		expect(cells.get('B2')).toEqual({ ref: 'B2', type: 'number', value: 3.14159 })
+	})
+
+	it('promotes a date-styled number to a date when a style table is supplied', () => {
+		const styles: StyleTable = { isDateStyle: (i) => i === 1 }
+		const cells = byRef([
+			...readRows(
+				sheet('<row r="1"><c r="A1" s="1"><v>43831</v></c><c r="B1"><v>42</v></c></row>'),
+				{ sharedStrings: [], styles },
+			),
+		])
+		expect(cells.get('A1')).toEqual({
+			ref: 'A1',
+			type: 'date',
+			value: new Date(Date.UTC(2020, 0, 1)),
+		})
+		expect(cells.get('B1')).toEqual({ ref: 'B1', type: 'number', value: 42 })
 	})
 })

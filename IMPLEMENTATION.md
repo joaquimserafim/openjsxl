@@ -278,21 +278,25 @@ met — `packages/openjsxl/src/__tests__/slice.test.ts` drives the facade; `open
 
 Goal: correct dates, constant memory, and the common metadata real files carry.
 
-### F2.1 — Styles & number-format date detection ☐
+### F2.1 — Styles & number-format date detection ☑
 **Context.** Nothing on a cell says "date" — a number is a date iff its style applies a
 date/time number format. This unlocks correct `date` cells.
 **Scope.** `parseStyles(xml)` → `StyleTable.isDateStyle(styleIndex)`; integrate into
 `decodeCell` so date-styled numbers become `Date` (via F0.4).
-**Design notes.** `c@s` indexes `cellXfs`; each `xf` → `numFmtId`. IDs < 164 are **built-ins
-not listed in `<numFmts>`** (hardcode the date/time ones: 14–22, 45–47, etc.); IDs ≥ 164 are
-custom in `<numFmts>` — detect date tokens (`y m d h s`) outside quoted literals.
-`cellXfs[0]` is the implicit default (omitted `s` ⇒ `s=0`).
+**Design notes.** `c@s` indexes `cellXfs` (NOT `cellStyleXfs`); each `xf` → `numFmtId`. IDs
+< 164 are built-ins not listed in `<numFmts>` (date/time ones: 14–22, 27–36, 45–47, 50–58);
+IDs ≥ 164 are custom in `<numFmts>` — `isDateFormatCode` strips quoted literals, `\`-escapes,
+and `[bracket]` sections, then looks for `d m y h s`. `cellXfs[0]` is the implicit default
+(omitted `s` ⇒ `s=0`). Promotion applies to numeric cells only; the workbook `date1904` flag
+(from `<workbookPr>`) selects the epoch. The style table + flag ride in `DecodeContext`,
+shared across sheets; the `s` index travels on `RawCell`.
 **Tasks**
-- [ ] `ooxml/styles.ts` (cellXfs + numFmts + built-in date table + format-code date sniff).
-- [ ] Integrate into `decodeCell`; honor `date1904`.
-- [ ] Tests across built-in and custom date formats + a non-date number with `s`.
+- [x] `ooxml/styles.ts` (cellXfs + numFmts + built-in date ranges + format-code date sniff).
+- [x] Integrate into `decodeCell`; thread `s` via the worksheet streamer; honor `date1904`.
+- [x] Tests across built-in and custom date formats + a non-date number with `s` + 1904 +
+      real `basic.xlsx`.
 **Acceptance.** `C1` of `basic.xlsx` reads as a `Date`; a plain number with a style stays a
-number.
+number. ✅ met.
 
 ### F2.2 — Constant-memory streaming reader ☐
 **Context.** Worksheets and shared strings can be huge; peak memory must not scale with file

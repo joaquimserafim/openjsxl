@@ -43,6 +43,7 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 	let inCell = false
 	let cellRef = ''
 	let cellType: string | undefined
+	let cellStyle: number | undefined // the `s` attribute (index into cellXfs)
 	let cellIsInline = false // type === 'inlineStr': value lives in <is>, not <v>
 	let cellValue = ''
 	let hasValue = false // the value channel's element was present (even if empty)
@@ -56,7 +57,12 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 		if (!inCell) return
 		cells.push(
 			decodeCell(
-				{ ref: cellRef, type: cellType, value: hasValue ? cellValue : undefined },
+				{
+					ref: cellRef,
+					type: cellType,
+					value: hasValue ? cellValue : undefined,
+					style: cellStyle,
+				},
 				ctx,
 			),
 		)
@@ -104,6 +110,8 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 					cellRef = formatRef({ col: lastCol, row: rowIndex })
 				}
 				cellType = token.attrs.t
+				const s = token.attrs.s
+				cellStyle = s === undefined ? undefined : Number(s)
 				cellIsInline = cellType === 'inlineStr'
 				cellValue = ''
 				hasValue = false
@@ -112,7 +120,12 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 				textDepth = 0
 				phoneticDepth = 0
 				if (token.selfClosing) {
-					cells.push(decodeCell({ ref: cellRef, type: cellType, value: undefined }, ctx))
+					cells.push(
+						decodeCell(
+							{ ref: cellRef, type: cellType, value: undefined, style: cellStyle },
+							ctx,
+						),
+					)
 				} else {
 					inCell = true
 				}

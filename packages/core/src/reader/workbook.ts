@@ -1,4 +1,11 @@
-import { parseRels, parseSharedStrings, parseWorkbook, resolveTarget } from '../ooxml'
+import {
+	type DecodeContext,
+	parseRels,
+	parseSharedStrings,
+	parseStyles,
+	parseWorkbook,
+	resolveTarget,
+} from '../ooxml'
 import type { Cell, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
 import { type Row, readRows } from './worksheet'
@@ -16,6 +23,7 @@ const decoder = new TextDecoder()
 // 2006 namespace and tolerates the strict/transitional variants.
 const REL_OFFICE_DOCUMENT = '/officeDocument'
 const REL_SHARED_STRINGS = '/sharedStrings'
+const REL_STYLES = '/styles'
 
 function directoryOf(path: string): string {
 	const slash = path.lastIndexOf('/')
@@ -40,14 +48,15 @@ export class Worksheet {
 	readonly name: string
 	readonly #info: SheetInfo
 	readonly #xml: string
-	readonly #sharedStrings: string[]
+	readonly #context: DecodeContext
+
 	#cells: Map<string, Cell> | undefined
 
-	constructor(info: SheetInfo, xml: string, sharedStrings: string[]) {
+	constructor(info: SheetInfo, xml: string, context: DecodeContext) {
 		this.name = info.name
 		this.#info = info
 		this.#xml = xml
-		this.#sharedStrings = sharedStrings
+		this.#context = context
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
@@ -67,7 +76,7 @@ export class Worksheet {
 
 	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
 	async *rows(): AsyncGenerator<Row> {
-		for (const row of readRows(this.#xml, { sharedStrings: this.#sharedStrings })) {
+		for (const row of readRows(this.#xml, this.#context)) {
 			yield row
 		}
 	}
@@ -75,7 +84,7 @@ export class Worksheet {
 	#index(): Map<string, Cell> {
 		if (this.#cells === undefined) {
 			const cells = new Map<string, Cell>()
-			for (const row of readRows(this.#xml, { sharedStrings: this.#sharedStrings })) {
+			for (const row of readRows(this.#xml, this.#context)) {
 				for (const cell of row.cells) cells.set(cell.ref, cell)
 			}
 			this.#cells = cells
@@ -116,8 +125,8 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 	const workbookPath = resolveTarget('', office.target)
 	const workbookDir = directoryOf(workbookPath)
 
-	// Workbook sheet list + the workbook's own relationships.
-	const workbookSheets = parseWorkbook(await readText(zip, workbookPath))
+	// Workbook sheet list + date system + the workbook's own relationships.
+	const { sheets: workbookSheets, date1904 } = parseWorkbook(await readText(zip, workbookPath))
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)))
 
 	// Shared string table (optional — a workbook may use only inline strings).
@@ -127,6 +136,16 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 		const sstPath = resolveTarget(workbookDir, sst.target)
 		if (zip.has(sstPath)) {
 			sharedStrings = parseSharedStrings(decoder.decode(await zip.read(sstPath)))
+		}
+	}
+
+	// Style table (optional) — needed to tell date-styled numbers from plain ones.
+	const context: DecodeContext = { sharedStrings, date1904 }
+	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES))
+	if (stylesRel !== undefined && stylesRel.targetMode !== 'External') {
+		const stylesPath = resolveTarget(workbookDir, stylesRel.target)
+		if (zip.has(stylesPath)) {
+			context.styles = parseStyles(decoder.decode(await zip.read(stylesPath)))
 		}
 	}
 
@@ -142,7 +161,7 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 		const info: SheetInfo = { name: entry.name, path, visible: entry.visible }
 		infos.push(info)
 		// First definition wins if two sheets somehow share a name.
-		if (!byName.has(entry.name)) byName.set(entry.name, new Worksheet(info, xml, sharedStrings))
+		if (!byName.has(entry.name)) byName.set(entry.name, new Worksheet(info, xml, context))
 	}
 
 	return new Workbook(infos, byName)

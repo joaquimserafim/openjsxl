@@ -1,4 +1,6 @@
 import type { Cell } from '../types'
+import { serialToDate } from './dates'
+import type { StyleTable } from './styles'
 
 // Turn a worksheet `<c>` element's raw pieces into a typed Cell. The `t` attribute selects
 // how the value text is interpreted; when absent the cell is a number (the OOXML default).
@@ -15,9 +17,9 @@ import type { Cell } from '../types'
 //
 // Booleans and errors live inside `<v>` and must not be read as numbers. Malformed or
 // missing values degrade to an `empty` cell rather than throwing — a reader stays resilient
-// on imperfect files, matching the tokenizer and zip layers. Date typing is deferred to
-// F2.1 (a date-styled serial reads as a plain number until then), so the style index is not
-// needed here yet.
+// on imperfect files, matching the tokenizer and zip layers. A numeric cell becomes a `date`
+// only when the context carries a style table and the cell's style applies a date/time
+// number format (F2.1); nothing about a number's value reveals that on its own.
 
 export interface RawCell {
 	/** A1 reference, e.g. "B2". */
@@ -26,11 +28,17 @@ export interface RawCell {
 	type: string | undefined
 	/** `<v>` text, or concatenated inline `<is>` text; `undefined` when the cell has none. */
 	value: string | undefined
+	/** The `s` attribute (index into `cellXfs`); drives date detection. `undefined` ⇒ style 0. */
+	style: number | undefined
 }
 
 export interface DecodeContext {
 	/** The workbook's shared string table (F1.5), indexed by `s`-type cells. */
 	sharedStrings: string[]
+	/** Style table (F2.1); when present, date-styled numbers decode as `date` cells. */
+	styles?: StyleTable
+	/** Workbook 1904 date system flag, selecting the serial epoch. Defaults to false. */
+	date1904?: boolean
 }
 
 export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {
@@ -63,9 +71,12 @@ export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {
 			// Absent or "n": a number. Reject empty/non-finite content as empty.
 			if (value === undefined || value === '') return { ref, type: 'empty', value: null }
 			const num = Number(value)
-			return Number.isFinite(num)
-				? { ref, type: 'number', value: num }
-				: { ref, type: 'empty', value: null }
+			if (!Number.isFinite(num)) return { ref, type: 'empty', value: null }
+			// A date-styled serial is a date; everything else stays a number.
+			if (ctx.styles?.isDateStyle(raw.style)) {
+				return { ref, type: 'date', value: serialToDate(num, ctx.date1904 ?? false) }
+			}
+			return { ref, type: 'number', value: num }
 		}
 	}
 }

@@ -34,9 +34,9 @@ describe('openjsxl vertical slice — basic.xlsx', () => {
 			records.push(record)
 		}
 
-		// Date detection lands in F2.1, so the date-styled serial is still a number here.
+		// C1 is a date-formatted serial, so it reads back as a real Date (F2.1).
 		expect(records).toEqual([
-			{ A: 'hello', B: 42, C: 43831, D: true, E: 84 },
+			{ A: 'hello', B: 42, C: new Date(Date.UTC(2020, 0, 1)), D: true, E: 84 },
 			{ A: 'world', B: 3.14159 },
 		])
 	})
