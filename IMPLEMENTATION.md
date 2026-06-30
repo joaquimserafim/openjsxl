@@ -241,18 +241,25 @@ a stray cross-channel element can't pollute the value (adversarial-review fixes)
 **Acceptance.** Reads string/number/bool/error/inline/formula-cached values with correct
 types from `basic.xlsx`. ✅ met.
 
-### F1.7 — Reader public API ☐
+### F1.7 — Reader public API ☑
 **Context.** The ergonomic surface users actually touch.
 **Scope.** `openXlsx(source)` → `Workbook`; `Workbook.sheets`, `Workbook.sheet(name)`;
 `Worksheet.cell('A1')`, `Worksheet.rows()` async iterator. `source`: `Uint8Array | ArrayBuffer`.
-**Design notes.** Async (decompression is async). Lazy per-sheet parsing. TS
-discriminated-union cells so `cell.type === 'date'` narrows `cell.value`.
+**Design notes.** Async (decompression is async). Worksheet XML is decompressed eagerly so
+`cell()` is sync, but parsed→indexed lazily on first `cell()`/`rows()` (a sheet you never
+touch costs a decompression, not a parse). TS discriminated-union cells so
+`cell.type === 'date'` narrows `cell.value`. `parseWorkbook` reads the `<sheet>` list
+(name/r:id/visibility); the part is located through the relationship graph, never a guessed
+filename. `sheet(name)` throws (lists available) for a clean happy-path type; an absent
+`cell(ref)` reads `empty`. `Uint8Array` subarray views (byteOffset>0) are handled — `openZip`
+is view-safe. True streaming stays deferred to F2.3.
 **Tasks**
-- [ ] `reader/workbook.ts` wiring zip → rels → sharedStrings → worksheet.
-- [ ] `cell('A1')` and `for await (const row of sheet.rows())`.
-- [ ] `reader/index.ts` + export from `core/src/index.ts` + facade.
+- [x] `ooxml/workbook.ts` `parseWorkbook` (sheet list) + `ooxml/__tests__/workbook.test.ts`.
+- [x] `reader/workbook.ts` `openXlsx` wiring zip → rels → sharedStrings → worksheet; `Workbook`/`Worksheet`.
+- [x] `cell('A1')` and `for await (const row of sheet.rows())`.
+- [x] `reader/index.ts` + export from `core/src/index.ts` (flows through the `openjsxl` facade).
 **Acceptance.** `(await openXlsx(bytes)).sheet('Sheet1').cell('A1').value` is the right
-typed value.
+typed value. ✅ met.
 
 ### F1.8 — Vertical-slice tests ☐
 **Context.** Lock the MVP behavior with end-to-end tests on a real file.
