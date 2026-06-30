@@ -1,0 +1,3 @@
+# @openjsxl/fixtures is private and never published; this is defensive only.
+# Local-only, differently-licensed test files must never ship to npm.
+local/

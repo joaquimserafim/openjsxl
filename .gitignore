@@ -10,3 +10,8 @@ coverage/
 
 # Local working status notes (not tracked)
 progress.md
+
+# Local-only test fixtures (e.g. differently-licensed real .xlsx files): usable for local
+# verification, never committed or published. The README is tracked so the dir documents itself.
+packages/fixtures/local/*
+!packages/fixtures/local/README.md

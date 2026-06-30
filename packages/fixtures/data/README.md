@@ -26,7 +26,16 @@ to commit and diff.
 Files exported by actual applications, committed directly here. These catch quirks the
 generator can't, so the reader is tested against what Excel really emits.
 
-**Checklist when adding one:**
+### Vendored from other projects
+
+Several real-producer files (`merge_cells.xlsx`, `hyperlinks.xlsx`, `date.xlsx`, …) are copied
+from permissively-licensed open-source projects rather than exported by us, to cover genuine
+Excel / LibreOffice / openpyxl output. Their provenance and licenses are recorded in
+[`../THIRD_PARTY.md`](../THIRD_PARTY.md); they keep their original upstream names so each maps
+back to its source. Differently-licensed files we only test against locally live in the
+git-ignored [`../local/`](../local) directory and are never committed.
+
+### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.
 - [ ] Keep it small; strip anything not under test.
