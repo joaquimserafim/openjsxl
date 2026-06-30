@@ -50,8 +50,8 @@ would forfeit the browser/Deno/edge story, which is the differentiator.
 - **No runtime deps.** Decompression via `DecompressionStream('deflate-raw')`; strings via
   `TextEncoder`/`TextDecoder`.
 - **Async-first.** Public entry points return Promises.
-- **Testing:** Vitest, colocated `*.test.ts`, run against TS source (no build in dev).
-  Every format rule gets a fixture-backed test.
+- **Testing:** Vitest; tests live in `__tests__/` folders beside the code they cover,
+  run against TS source (no build in dev). Every format rule gets a fixture-backed test.
 - **Errors:** throw typed errors with the part/ref that failed; never silently mis-parse.
 - **Quality gate:** `biome check` + `tsc` typecheck + `vitest run` all green before a
   feature is marked done.
@@ -148,7 +148,7 @@ unknown entities intact; guard against out-of-range code points.
       fast path).
 **Acceptance.** Decodes all valid forms; passes through invalid ones unchanged. ✅ met.
 
-### F1.2 — Streaming XML tokenizer ☐
+### F1.2 — Streaming XML tokenizer ☑
 **Context.** Worksheets can be huge; a DOM is the reason pure-JS incumbents are slow and
 memory-heavy. We stream the OOXML subset as events.
 **Scope (in):** `tokenize(xml)` → iterator of `{open,name,attrs,selfClosing}` /
@@ -159,11 +159,16 @@ resolution (prefixes like `r:id` matched literally), validation.
 a string first (decode bytes once with `TextDecoder`); a byte-level scanner is a later
 optimization. Avoid per-token allocation in the hot loop where practical.
 **Tasks**
-- [ ] `xml/tokenizer.ts` scanner (tags, attrs, text, self-closing, comments skipped).
-- [ ] Entity decoding wired for text + attribute values.
-- [ ] `xml/tokenizer.test.ts`: nested elements, attrs, self-closing, preserved whitespace,
+- [x] `xml/tokenizer.ts` scanner (tags, attrs, text, self-closing, comments skipped).
+- [x] Entity decoding wired for text + attribute values.
+- [x] `xml/tokenizer.test.ts`: nested elements, attrs, self-closing, preserved whitespace,
       CDATA-free OOXML samples, malformed-input behavior.
-**Acceptance.** Tokenizes the `sheetN.xml` and `sharedStrings.xml` fixtures correctly.
+- [x] Adversarial review (3 lenses) — fixed 3 real bugs: surrogate code-point decode
+      (`entities`), `/` self-close swallowing markup, and unescaped `<` phantom element;
+      plus BOM stripping. Each pinned with a regression test.
+**Acceptance.** Tokenizes the `sheetN.xml` and `sharedStrings.xml` fixtures correctly. ✅ met
+(realistic worksheet-row + shared-strings shapes tested inline; full extraction lands with
+F1.3).
 
 ### F1.3 — ZIP / OPC container reader ☐
 **Context.** An `.xlsx` is a ZIP (Open Packaging Conventions). We need entry lookup + on

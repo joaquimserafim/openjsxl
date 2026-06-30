@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeXmlEntities } from './entities'
+import { decodeXmlEntities } from '../entities'
 
 describe('decodeXmlEntities', () => {
 	it('returns the input unchanged when there is no ampersand', () => {
@@ -20,10 +20,18 @@ describe('decodeXmlEntities', () => {
 	it('decodes hexadecimal character references, including astral code points', () => {
 		expect(decodeXmlEntities('&#x41;&#x42;')).toBe('AB')
 		expect(decodeXmlEntities('&#x1F600;')).toBe('😀')
+		// decimal and hex of the same code point agree
+		expect(decodeXmlEntities('&#128512;')).toBe(decodeXmlEntities('&#x1F600;'))
 	})
 
 	it('handles adjacent entities', () => {
 		expect(decodeXmlEntities('&lt;&gt;&amp;')).toBe('<>&')
+	})
+
+	it('leaves surrogate and out-of-range numeric refs literal (no ill-formed scalars)', () => {
+		expect(decodeXmlEntities('&#xD800;')).toBe('&#xD800;') // lone high surrogate
+		expect(decodeXmlEntities('&#xDFFF;')).toBe('&#xDFFF;') // lone low surrogate
+		expect(decodeXmlEntities('&#x110000;')).toBe('&#x110000;') // > U+10FFFF
 	})
 
 	it('leaves unknown or malformed entities intact', () => {

@@ -27,7 +27,11 @@ export function decodeXmlEntities(input: string): string {
 					body[1] === 'x'
 						? Number.parseInt(body.slice(2), 16)
 						: Number.parseInt(body.slice(1), 10)
-				return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match
+				// Reject out-of-range values and lone surrogates (U+D800–U+DFFF): both would
+				// produce an ill-formed scalar, so leave the reference as literal text instead.
+				const isScalar =
+					code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+				return isScalar ? String.fromCodePoint(code) : match
 			}
 		}
 	})
