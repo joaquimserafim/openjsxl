@@ -36,3 +36,29 @@ export async function inflateRaw(
 	}
 	return out
 }
+
+// Streaming variant: yield decompressed chunks instead of one buffer, so a large part can be
+// consumed without ever materializing it whole. `maxBytes` bounds the total output (a bomb
+// cap); the stream is cancelled if the consumer stops early.
+export async function* inflateRawStream(
+	data: Uint8Array,
+	maxBytes = Number.POSITIVE_INFINITY,
+): AsyncGenerator<Uint8Array> {
+	const blob = new Blob([data as BlobPart])
+	const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+
+	let total = 0
+	try {
+		for (;;) {
+			const { done, value } = await reader.read()
+			if (done) break
+			total += value.byteLength
+			if (total > maxBytes) {
+				throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`)
+			}
+			yield value
+		}
+	} finally {
+		await reader.cancel().catch(() => {})
+	}
+}

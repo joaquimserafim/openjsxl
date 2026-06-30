@@ -1,11 +1,12 @@
 import { type DecodeContext, decodeCell, formatRef, parseRef } from '../ooxml'
 import type { Cell } from '../types'
 import { localName } from '../utils'
-import { tokenize } from '../xml'
+import { createXmlStream, tokenize, type XmlToken } from '../xml'
 
-// Stream a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
+// Turn a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
 // tokenizer event stream rather than building a DOM, so peak memory tracks one row, not the
-// whole sheet.
+// whole sheet. The same row state machine drives both the in-memory `readRows` (over a full
+// string) and the constant-memory `streamRows` (over decompressed chunks) — see F2.2.
 //
 // Cells and rows are sparse and may appear out of order, so each cell carries its own A1
 // ref and callers key by that ref — never by position in the array. When a `<c>` omits its
@@ -32,7 +33,14 @@ function safeColumn(ref: string): number | undefined {
 	}
 }
 
-export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
+interface RowAssembler {
+	/** Advance the state machine by one token; returns any rows that completed. */
+	push(token: XmlToken): Row[]
+	/** Emit a row left open at end of input (truncated file). */
+	flush(): Row[]
+}
+
+function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	let inSheetData = false
 	let inRow = false
 	let lastRow = 0
@@ -69,19 +77,21 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 		inCell = false
 	}
 
-	for (const token of tokenize(xml)) {
+	function push(token: XmlToken): Row[] {
+		const out: Row[] = []
+
 		if (token.kind === 'open') {
 			const name = localName(token.name)
 
 			if (name === 'sheetData') {
 				if (!token.selfClosing) inSheetData = true
-				continue
+				return out
 			}
-			if (!inSheetData) continue
+			if (!inSheetData) return out
 
 			if (name === 'row') {
 				flushCell()
-				if (inRow) yield { index: rowIndex, cells }
+				if (inRow) out.push({ index: rowIndex, cells })
 				const r = token.attrs.r
 				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
 				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
@@ -89,14 +99,14 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 				cells = []
 				lastCol = 0
 				if (token.selfClosing) {
-					yield { index: rowIndex, cells }
+					out.push({ index: rowIndex, cells })
 					inRow = false
 				} else {
 					inRow = true
 				}
-				continue
+				return out
 			}
-			if (!inRow) continue
+			if (!inRow) return out
 
 			if (name === 'c') {
 				flushCell()
@@ -129,15 +139,15 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 				} else {
 					inCell = true
 				}
-				continue
+				return out
 			}
-			if (!inCell) continue
+			if (!inCell) return out
 
-			// A cell's value lives in exactly one channel, picked by its type: inline
-			// strings in <is>/<t>, everything else in <v>. Gate on the type so a stray
-			// element from the other channel can't pollute the value. Mark the value
-			// present as soon as its element opens, so an explicit but empty <v></v> or
-			// <is><t></t></is> reads as "" rather than collapsing to a blank cell.
+			// A cell's value lives in exactly one channel, picked by its type: inline strings
+			// in <is>/<t>, everything else in <v>. Gate on the type so a stray element from
+			// the other channel can't pollute the value. Mark the value present as soon as its
+			// element opens, so an explicit but empty <v></v> or <is><t></t></is> reads as ""
+			// rather than collapsing to a blank cell.
 			if (cellIsInline) {
 				if (name === 'is') {
 					hasValue = true
@@ -151,7 +161,10 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 				hasValue = true
 				if (!token.selfClosing) inValue = true
 			}
-		} else if (token.kind === 'text') {
+			return out
+		}
+
+		if (token.kind === 'text') {
 			const collect = cellIsInline
 				? inInline && textDepth > 0 && phoneticDepth === 0
 				: inValue
@@ -159,38 +172,80 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 				cellValue += token.value
 				hasValue = true
 			}
-		} else {
-			const name = localName(token.name)
-			if (name === 'sheetData') {
-				flushCell()
-				if (inRow) {
-					yield { index: rowIndex, cells }
-					inRow = false
-				}
-				inSheetData = false
-				continue
-			}
-			if (name === 'row') {
-				if (inRow) {
-					flushCell()
-					yield { index: rowIndex, cells }
-					inRow = false
-				}
-				continue
-			}
-			if (!inCell) continue
-			if (name === 'c') flushCell()
-			else if (name === 'v') inValue = false
-			else if (name === 'is') inInline = false
-			else if (name === 't') {
-				if (textDepth > 0) textDepth--
-			} else if (name === 'rPh' || name === 'phoneticPr') {
-				if (phoneticDepth > 0) phoneticDepth--
-			}
+			return out
 		}
+
+		// close
+		const name = localName(token.name)
+		if (name === 'sheetData') {
+			flushCell()
+			if (inRow) {
+				out.push({ index: rowIndex, cells })
+				inRow = false
+			}
+			inSheetData = false
+			return out
+		}
+		if (name === 'row') {
+			if (inRow) {
+				flushCell()
+				out.push({ index: rowIndex, cells })
+				inRow = false
+			}
+			return out
+		}
+		if (!inCell) return out
+		if (name === 'c') flushCell()
+		else if (name === 'v') inValue = false
+		else if (name === 'is') inInline = false
+		else if (name === 't') {
+			if (textDepth > 0) textDepth--
+		} else if (name === 'rPh' || name === 'phoneticPr') {
+			if (phoneticDepth > 0) phoneticDepth--
+		}
+		return out
 	}
 
-	// Emit a row left open by a truncated file.
-	flushCell()
-	if (inRow) yield { index: rowIndex, cells }
+	function flush(): Row[] {
+		flushCell()
+		if (inRow) {
+			inRow = false
+			return [{ index: rowIndex, cells }]
+		}
+		return []
+	}
+
+	return { push, flush }
+}
+
+/** Read rows from a fully in-memory worksheet string. */
+export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
+	const assembler = createRowAssembler(ctx)
+	for (const token of tokenize(xml)) yield* assembler.push(token)
+	yield* assembler.flush()
+}
+
+/**
+ * Read rows from a stream of decompressed worksheet chunks without materializing the part —
+ * peak memory tracks one row, not the whole sheet (F2.2). Bytes are decoded with a streaming
+ * `TextDecoder` (multi-byte sequences may split across chunks) and fed through the chunk-safe
+ * tokenizer.
+ */
+export async function* streamRows(
+	chunks: AsyncIterable<Uint8Array>,
+	ctx: DecodeContext,
+): AsyncGenerator<Row> {
+	const assembler = createRowAssembler(ctx)
+	const xml = createXmlStream()
+	const decoder = new TextDecoder()
+
+	for await (const bytes of chunks) {
+		const text = decoder.decode(bytes, { stream: true })
+		if (text === '') continue
+		for (const token of xml.push(text)) yield* assembler.push(token)
+	}
+	const tail = decoder.decode() // finalize any pending multi-byte sequence
+	if (tail !== '') for (const token of xml.push(tail)) yield* assembler.push(token)
+	for (const token of xml.flush()) yield* assembler.push(token)
+	yield* assembler.flush()
 }

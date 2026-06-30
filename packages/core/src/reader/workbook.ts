@@ -8,7 +8,7 @@ import {
 } from '../ooxml'
 import type { Cell, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
-import { type Row, readRows } from './worksheet'
+import { type Row, readRows, streamRows } from './worksheet'
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -114,7 +114,19 @@ export class Workbook {
 	}
 }
 
-export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbook> {
+interface LoadedWorkbook {
+	zip: ZipArchive
+	/** Shared decode context (shared strings, styles, date system) for every sheet. */
+	context: DecodeContext
+	/** Sheets in tab order, each with its resolved part path. */
+	sheets: Array<{ info: SheetInfo; path: string }>
+}
+
+// Read the small parts every sheet depends on — relationships, the workbook, shared strings,
+// styles — and resolve each sheet's part path through the relationship graph. Worksheets
+// themselves are NOT read here, so this stays cheap whether the caller wants random access
+// (openXlsx) or a constant-memory stream (streamSheetRows).
+async function loadWorkbook(source: Uint8Array | ArrayBuffer): Promise<LoadedWorkbook> {
 	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source)
 	const zip = openZip(bytes)
 
@@ -149,20 +161,58 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 		}
 	}
 
-	// Resolve each sheet's r:id to a part, decompress it, and build the Worksheet.
-	const infos: SheetInfo[] = []
-	const byName = new Map<string, Worksheet>()
+	// Resolve each sheet's r:id to a part path.
+	const sheets: Array<{ info: SheetInfo; path: string }> = []
 	for (const entry of workbookSheets) {
 		const rel = workbookRels.get(entry.rid)
 		if (rel === undefined || rel.targetMode === 'External') continue
 		const path = resolveTarget(workbookDir, rel.target)
 		if (!zip.has(path)) continue
+		sheets.push({ info: { name: entry.name, path, visible: entry.visible }, path })
+	}
+
+	return { zip, context, sheets }
+}
+
+export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbook> {
+	const { zip, context, sheets } = await loadWorkbook(source)
+
+	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
+	const infos: SheetInfo[] = []
+	const byName = new Map<string, Worksheet>()
+	for (const { info, path } of sheets) {
 		const xml = decoder.decode(await zip.read(path))
-		const info: SheetInfo = { name: entry.name, path, visible: entry.visible }
 		infos.push(info)
 		// First definition wins if two sheets somehow share a name.
-		if (!byName.has(entry.name)) byName.set(entry.name, new Worksheet(info, xml, context))
+		if (!byName.has(info.name)) byName.set(info.name, new Worksheet(info, xml, context))
 	}
 
 	return new Workbook(infos, byName)
+}
+
+/**
+ * Stream the rows of one sheet with roughly constant memory: the worksheet is never
+ * materialized as a whole string — it is decompressed and tokenized chunk by chunk, and each
+ * row is yielded then discarded (F2.2). Use this for large sheets; use `openXlsx` when you
+ * need random `cell()` access. `sheetName` defaults to the first sheet in tab order.
+ */
+export async function* streamSheetRows(
+	source: Uint8Array | ArrayBuffer,
+	sheetName?: string,
+): AsyncGenerator<Row> {
+	const { zip, context, sheets } = await loadWorkbook(source)
+	const first = sheets[0]
+	if (first === undefined) throw new Error('xlsx has no readable worksheets')
+
+	let path = first.path
+	if (sheetName !== undefined) {
+		const match = sheets.find((s) => s.info.name === sheetName)
+		if (match === undefined) {
+			const available = sheets.map((s) => s.info.name).join(', ')
+			throw new Error(`no sheet named ${JSON.stringify(sheetName)}; available: ${available}`)
+		}
+		path = match.path
+	}
+
+	yield* streamRows(zip.readStream(path), context)
 }

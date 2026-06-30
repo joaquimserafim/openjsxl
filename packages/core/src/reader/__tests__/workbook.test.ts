@@ -1,6 +1,7 @@
 import { loadFixture } from '@openjsxl/fixtures'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { openXlsx, type Workbook } from '../workbook'
+import { openXlsx, streamSheetRows, type Workbook } from '../workbook'
+import type { Row } from '../worksheet'
 
 describe('openXlsx — basic.xlsx', () => {
 	let wb: Workbook
@@ -67,5 +68,31 @@ describe('openXlsx — source types', () => {
 		const view = padded.subarray(5, 5 + bytes.length) // byteOffset === 5
 		const wb = await openXlsx(view)
 		expect(wb.sheet('Sheet1').cell('A1').value).toBe('hello')
+	})
+})
+
+describe('streamSheetRows — public streaming API', () => {
+	async function collect(gen: AsyncIterable<Row>): Promise<Row[]> {
+		const out: Row[] = []
+		for await (const row of gen) out.push(row)
+		return out
+	}
+
+	it('streams the default sheet identically to the eager reader (dates included)', async () => {
+		const bytes = await loadFixture('basic.xlsx')
+		const eager = await collect((await openXlsx(bytes)).sheet('Sheet1').rows())
+		const streamed = await collect(streamSheetRows(bytes))
+		expect(streamed).toEqual(eager)
+		// And the date-styled C1 survives the streaming path as a Date.
+		const c1 = streamed[0]?.cells.find((c) => c.ref === 'C1')
+		expect(c1).toEqual({ ref: 'C1', type: 'date', value: new Date(Date.UTC(2020, 0, 1)) })
+	})
+
+	it('selects a named sheet and throws on an unknown one', async () => {
+		const bytes = await loadFixture('basic.xlsx')
+		expect(await collect(streamSheetRows(bytes, 'Sheet1'))).toHaveLength(2)
+		await expect(collect(streamSheetRows(bytes, 'Nope'))).rejects.toThrow(
+			/no sheet named "Nope".*Sheet1/,
+		)
 	})
 })

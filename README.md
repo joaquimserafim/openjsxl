@@ -35,8 +35,25 @@ for await (const row of sheet.rows()) {
 console.log(JSON.stringify(rows, null, 2))
 ```
 
-Cells are a discriminated union — `string`, `number`, `boolean`, `error`, or `empty` (and
-`date` once F2.1 lands) — so narrowing on `cell.type` gives you a correctly typed `cell.value`.
+Cells are a discriminated union — `string`, `number`, `boolean`, `date`, `error`, or
+`empty` — so narrowing on `cell.type` gives you a correctly typed `cell.value`.
+
+### Large files
+
+`openXlsx` decompresses each sheet so `cell('A1')` is random-access and synchronous. For
+sheets too big to hold in memory, `streamSheetRows` reads row-at-a-time with roughly constant
+memory — the worksheet is never materialized whole:
+
+```ts
+import { streamSheetRows } from 'openjsxl'
+import { readFile } from 'node:fs/promises'
+
+const bytes = await readFile('huge.xlsx')
+for await (const row of streamSheetRows(bytes /*, 'Sheet1' */)) {
+	// one row at a time; previous rows are already freed
+	process.stdout.write(`${row.index}: ${row.cells.length} cells\n`)
+}
+```
 
 ## Why
 

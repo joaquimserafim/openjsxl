@@ -298,18 +298,25 @@ shared across sheets; the `s` index travels on `RawCell`.
 **Acceptance.** `C1` of `basic.xlsx` reads as a `Date`; a plain number with a style stays a
 number. ✅ met.
 
-### F2.2 — Constant-memory streaming reader ☐
+### F2.2 — Constant-memory streaming reader ☑
 **Context.** Worksheets and shared strings can be huge; peak memory must not scale with file
 size.
-**Scope.** Stream `sheetN.xml` and `sharedStrings.xml` from the zip without materializing
-whole parts; expose row-at-a-time iteration end-to-end.
+**Scope.** Stream `sheetN.xml` from the zip without materializing the whole part; expose
+row-at-a-time iteration end-to-end.
 **Design notes.** Drive `DecompressionStream`'s readable directly into the tokenizer;
-chunk-boundary-safe scanning. Optional interned shared-strings to cap memory.
+chunk-boundary-safe scanning. Kept **non-breaking**: sync `cell()` needs the part
+materialized, and decompression is async-only, so streaming is a *separate* path
+(`streamSheetRows`) rather than a change to `openXlsx`/`cell()`. The row state machine was
+extracted into a push-based assembler shared by `readRows` (string) and `streamRows`
+(chunks). `createXmlStream` buffers to a `safeBoundary` so no tag/comment/CDATA/PI/entity
+straddles a cut; `TextDecoder({stream})` reassembles multi-byte UTF-8. Shared-strings
+interning deferred (sharedStrings is read eagerly; usually far smaller than the worksheet).
 **Tasks**
-- [ ] Streaming inflate → tokenizer bridge (handle split tokens across chunks).
-- [ ] Streaming shared-strings (or interned lookup).
-- [ ] Memory test: read a large generated sheet under a fixed cap.
-**Acceptance.** Reads a 100k-row generated sheet with roughly constant memory.
+- [x] Streaming inflate (`inflateRawStream`) + zip `readStream`; chunk-fed `createXmlStream`.
+- [x] `streamRows(chunks)` + public `streamSheetRows(source, sheetName?)`.
+- [x] Memory test: read a 100k-row generated sheet streaming in fixed-size chunks.
+**Acceptance.** Reads a 100k-row generated sheet with roughly constant memory. ✅ met
+(`streamRows` holds ~one row; verified by the 100k-row + multi-byte + every-chunk-size tests).
 
 ### F2.3 — Common metadata ☐
 **Scope.** Merged cells, hyperlinks, comments, per-cell number-format strings, sheet

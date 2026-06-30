@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { StyleTable } from '../../ooxml'
 import type { Cell } from '../../types'
 import { openZip } from '../../zip'
-import { type Row, readRows } from '../worksheet'
+import { type Row, readRows, streamRows } from '../worksheet'
 
 const ctx = { sharedStrings: ['hello', 'world'] }
 
@@ -176,5 +176,58 @@ describe('readRows — real basic.xlsx', () => {
 			value: new Date(Date.UTC(2020, 0, 1)),
 		})
 		expect(cells.get('B1')).toEqual({ ref: 'B1', type: 'number', value: 42 })
+	})
+})
+
+describe('streamRows — constant-memory streaming', () => {
+	const encoder = new TextEncoder()
+
+	// Feed a string as `size`-byte chunks, simulating decompression output.
+	async function* chunked(text: string, size: number): AsyncGenerator<Uint8Array> {
+		const bytes = encoder.encode(text)
+		for (let i = 0; i < bytes.length; i += size) yield bytes.subarray(i, i + size)
+	}
+
+	async function collect(gen: AsyncIterable<Row>): Promise<Row[]> {
+		const out: Row[] = []
+		for await (const row of gen) out.push(row)
+		return out
+	}
+
+	it('streams the same rows as readRows for the real fixture', async () => {
+		const zip = openZip(await loadFixture('basic.xlsx'))
+		const xml = new TextDecoder().decode(await zip.read('xl/worksheets/sheet1.xml'))
+		const streamed = await collect(streamRows(chunked(xml, 8), ctx))
+		expect(streamed).toEqual([...readRows(xml, ctx)])
+	})
+
+	it('decodes multi-byte UTF-8 split across chunks (one byte at a time)', async () => {
+		const xml = `${sheet('<row r="1"><c r="A1" t="inlineStr"><is><t>café—漢字</t></is></c></row>')}`
+		async function* oneByte(): AsyncGenerator<Uint8Array> {
+			for (const b of encoder.encode(xml)) yield Uint8Array.of(b)
+		}
+		const [row] = await collect(streamRows(oneByte(), { sharedStrings: [] }))
+		expect(row?.cells[0]?.value).toBe('café—漢字')
+	})
+
+	it('reads a 100k-row sheet streaming in fixed-size chunks', async () => {
+		const N = 100_000
+		const parts = ['<worksheet><sheetData>']
+		for (let r = 1; r <= N; r++) parts.push(`<row r="${r}"><c r="A${r}"><v>${r}</v></c></row>`)
+		parts.push('</sheetData></worksheet>')
+		const xml = parts.join('')
+
+		let count = 0
+		let firstValue: unknown
+		let lastValue: unknown
+		// 64 KB chunks → the source string is large, but streamRows holds ~one row at a time.
+		for await (const row of streamRows(chunked(xml, 65_536), { sharedStrings: [] })) {
+			count++
+			if (count === 1) firstValue = row.cells[0]?.value
+			lastValue = row.cells[0]?.value
+		}
+		expect(count).toBe(N)
+		expect(firstValue).toBe(1)
+		expect(lastValue).toBe(N)
 	})
 })

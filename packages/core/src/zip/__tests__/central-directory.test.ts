@@ -246,3 +246,28 @@ describe('openZip — deflate and real-world layouts', () => {
 		expect(() => openZip(zip)).toThrow(/ZIP64/)
 	})
 })
+
+describe('readStream', () => {
+	async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+		const parts: Uint8Array[] = []
+		let total = 0
+		for await (const chunk of chunks) {
+			parts.push(chunk)
+			total += chunk.byteLength
+		}
+		const out = new Uint8Array(total)
+		let offset = 0
+		for (const part of parts) {
+			out.set(part, offset)
+			offset += part.byteLength
+		}
+		return out
+	}
+
+	it('streams the same bytes as read() for every part', async () => {
+		const zip = openZip(await loadFixture('basic.xlsx'))
+		for (const part of PARTS) {
+			expect(decode(await collect(zip.readStream(part)))).toBe(decode(await zip.read(part)))
+		}
+	})
+})

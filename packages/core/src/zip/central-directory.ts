@@ -1,4 +1,4 @@
-import { inflateRaw } from './inflate'
+import { inflateRaw, inflateRawStream } from './inflate'
 
 // Minimal reader for the ZIP (OPC) container that wraps every .xlsx. We locate the
 // End-Of-Central-Directory record, walk the central directory to find each entry, and read
@@ -26,6 +26,8 @@ export interface ZipArchive {
 	entries: ReadonlyMap<string, ZipEntry>
 	has(name: string): boolean
 	read(name: string): Promise<Uint8Array>
+	/** Read an entry as a stream of chunks, without materializing the whole part. */
+	readStream(name: string): AsyncGenerator<Uint8Array>
 }
 
 const SIG_EOCD = 0x06054b50
@@ -86,12 +88,12 @@ export function openZip(bytes: Uint8Array): ZipArchive {
 		pos += 46 + nameLen + extraLen + commentLen
 	}
 
-	async function read(name: string): Promise<Uint8Array> {
+	// Find an entry's raw (still-compressed) payload. The local header repeats name/extra
+	// lengths, which may differ from the central directory's — trust the local header to find
+	// where the data actually starts.
+	function locate(name: string): { entry: ZipEntry; payload: Uint8Array } {
 		const entry = entries.get(name)
 		if (entry === undefined) throw new Error(`zip entry not found: ${name}`)
-
-		// The local header repeats name/extra lengths, which may differ from the central
-		// directory's — trust the local header to find where the data actually starts.
 		const header = entry.localHeaderOffset
 		if (header + 30 > len || view.getUint32(header, true) !== SIG_LOCAL) {
 			throw new Error(`corrupt zip: bad local header for ${name}`)
@@ -102,8 +104,11 @@ export function openZip(bytes: Uint8Array): ZipArchive {
 		if (dataStart + entry.compressedSize > len) {
 			throw new Error(`corrupt zip: entry data for ${name} runs past end of file`)
 		}
-		const payload = bytes.subarray(dataStart, dataStart + entry.compressedSize)
+		return { entry, payload: bytes.subarray(dataStart, dataStart + entry.compressedSize) }
+	}
 
+	async function read(name: string): Promise<Uint8Array> {
+		const { entry, payload } = locate(name)
 		if (entry.method === 0) return payload
 		if (entry.method === 8) {
 			if (entry.compressedSize === 0) return new Uint8Array(0)
@@ -116,9 +121,30 @@ export function openZip(bytes: Uint8Array): ZipArchive {
 		throw new Error(`unsupported zip compression method ${entry.method} for ${name}`)
 	}
 
+	// Read an entry as a stream of chunks, never materializing the whole part. Stored entries
+	// yield their (already in-memory) payload as one chunk; deflate entries stream the inflate.
+	async function* readStream(name: string): AsyncGenerator<Uint8Array> {
+		const { entry, payload } = locate(name)
+		if (entry.method === 0) {
+			if (payload.byteLength > 0) yield payload
+			return
+		}
+		if (entry.method === 8) {
+			if (entry.compressedSize === 0) return
+			try {
+				yield* inflateRawStream(payload, entry.uncompressedSize)
+			} catch (cause) {
+				throw new Error(`corrupt zip: failed to inflate ${name}`, { cause })
+			}
+			return
+		}
+		throw new Error(`unsupported zip compression method ${entry.method} for ${name}`)
+	}
+
 	return {
 		entries,
 		has: (name) => entries.has(name),
 		read,
+		readStream,
 	}
 }

@@ -3,4 +3,4 @@
 
 export type { ZipArchive, ZipEntry } from './central-directory'
 export { openZip } from './central-directory'
-export { inflateRaw } from './inflate'
+export { inflateRaw, inflateRawStream } from './inflate'
