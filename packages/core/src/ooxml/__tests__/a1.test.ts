@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { columnToIndex, formatRef, indexToColumn, parseRef } from './a1'
+import { columnToIndex, formatRef, indexToColumn, parseRef } from '../a1'
 
 describe('columnToIndex', () => {
 	it('maps the bijective base-26 boundaries', () => {

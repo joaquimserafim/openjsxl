@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { serialToDate } from './dates'
+import { serialToDate } from '../dates'
 
 describe('serialToDate', () => {
 	it('maps the 1900-system serial for the Unix epoch', () => {

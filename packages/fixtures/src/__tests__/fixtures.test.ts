@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadFixture } from './index'
+import { loadFixture } from '../index'
 
 describe('basic.xlsx fixture', () => {
 	it('exists and is a valid ZIP (local file header signature "PK\\x03\\x04")', async () => {
