@@ -35,5 +35,17 @@
 			"trailingCommas": "all",
 			"arrowParentheses": "always"
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/__tests__/**"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noApproximativeNumericConstant": "off"
+					}
+				}
+			}
+		}
+	]
 }

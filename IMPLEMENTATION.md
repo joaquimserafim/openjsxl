@@ -220,7 +220,7 @@ finalizes the open item first, so it can't drop or shift a well-formed neighbour
 - [x] `ooxml/__tests__/shared-strings.test.ts` — units + real `basic.xlsx` + misnest cases.
 **Acceptance.** Index → string matches the fixture's `sst` exactly, runs concatenated. ✅ met.
 
-### F1.6 — Worksheet cell stream & typing ☐
+### F1.6 — Worksheet cell stream & typing ☑
 **Context.** The core value: turn `<c>` elements into typed `Cell`s.
 **Scope.** A worksheet streamer that yields rows of `Cell`; `decodeCell(raw, ctx)` mapping
 the `t` attribute + content to the discriminated union.
@@ -228,13 +228,18 @@ the `t` attribute + content to the discriminated union.
 `str` = cached formula string, `b` = boolean (`0`/`1` inside `<v>`), `e` = error,
 `inlineStr` = text in `<is><t>`. Booleans/errors live **inside `<v>`** — don't read them as
 numbers. Cells/rows are **sparse and may be unordered** — key by ref. Date detection is
-deferred to F2.1 (until then a date-styled number reads as a number).
+deferred to F2.1 (until then a date-styled number reads as a number). The value channel is
+gated by type (inline strings read `<is>`, everything else `<v>`) and marked present on
+element-open, so an explicit empty `<v></v>`/`<is><t></t></is>` reads as `""` not blank, and
+a stray cross-channel element can't pollute the value (adversarial-review fixes). Missing
+`r` falls back to positional column/row per spec; misnested rows/cells finalize-on-reopen.
 **Tasks**
-- [ ] `ooxml/cell.ts` `decodeCell` for all `t` variants (date typing stubbed to number).
-- [ ] `reader/worksheet` streamer over `sheetN.xml` using the tokenizer.
-- [ ] Tests: each `t` variant from a fixture; sparse rows; out-of-order cells.
+- [x] `ooxml/cell.ts` `decodeCell` for all `t` variants (date typing stubbed to number).
+- [x] `reader/worksheet.ts` `readRows` streamer over `sheetN.xml` using the tokenizer.
+- [x] Tests: each `t` variant; sparse, out-of-order, positional, empty/`""`, channel-gating;
+      real `basic.xlsx` integration.
 **Acceptance.** Reads string/number/bool/error/inline/formula-cached values with correct
-types from `basic.xlsx`.
+types from `basic.xlsx`. ✅ met.
 
 ### F1.7 — Reader public API ☐
 **Context.** The ergonomic surface users actually touch.

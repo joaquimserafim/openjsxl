@@ -1,2 +1,3 @@
-// reader layer — the public Workbook/Worksheet API. Populated by F1.7.
-export {}
+// reader layer — turns decompressed parts into typed rows/cells and (soon, F1.7) the
+// public Workbook/Worksheet API. Sits above the ooxml layer.
+export * from './worksheet'
