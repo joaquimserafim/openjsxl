@@ -27,6 +27,10 @@ so they are safe to commit and diff.
   (no `officeDocument` relationship; a missing required part). For the typed-error paths.
 - **`edge-duplicate-entry.xlsx`** (two entries with one name — rejected) and
   **`edge-with-directory.xlsx`** (a `name/` directory placeholder — skipped). For zip entry policy.
+- **`edge-overflow-col.xlsx`** — a valid workbook whose one row has a cell with a 300-letter
+  column ref (far past Excel's `XFD` limit) followed by a cell with no `r`. Regression for a
+  bare-throw the reader must not leak: the overflowing ref must be rejected and the reader fall
+  back to positional addressing, not crash. (F2.4e.)
 
 ## Real-producer fixtures
 

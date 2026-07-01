@@ -20,6 +20,16 @@ describe('columnToIndex', () => {
 		expect(() => columnToIndex('A1')).toThrow()
 		expect(() => columnToIndex('-')).toThrow()
 	})
+
+	it('rejects an overflowing ref instead of returning a non-integer', () => {
+		// A ref far past XFD used to overflow silently to a lossy float / Infinity, poisoning
+		// downstream column arithmetic. It must throw so callers can reject or fall back.
+		expect(() => columnToIndex('A'.repeat(300))).toThrow()
+		// 13 'A's is the first length that crosses MAX_SAFE_INTEGER in bijective base-26.
+		expect(() => columnToIndex('A'.repeat(13))).toThrow()
+		// A ref that still maps within safe-integer range is accepted (returns a finite integer).
+		expect(Number.isSafeInteger(columnToIndex('A'.repeat(9)))).toBe(true)
+	})
 })
 
 describe('indexToColumn', () => {

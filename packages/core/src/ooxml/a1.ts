@@ -23,6 +23,13 @@ export function columnToIndex(letters: string): number {
 		else if (code >= CODE_LOWER_A && code <= CODE_LOWER_Z) value = code - CODE_LOWER_A + 1
 		else throw new Error(`invalid column reference: ${letters}`)
 		index = index * 26 + value
+		// An absurdly long ref (far beyond Excel's XFD/16384 limit) overflows past exact
+		// integer precision — bail before it silently becomes a lossy float or Infinity, which
+		// would poison downstream column arithmetic and formatRef. Bailing here also caps work
+		// on a megabyte-long attacker-supplied ref. Callers that tolerate bad refs (the reader's
+		// safeColumn) catch this and fall back to positional addressing.
+		if (index > Number.MAX_SAFE_INTEGER)
+			throw new Error(`column reference too large: ${letters}`)
 	}
 	return index
 }

@@ -94,6 +94,32 @@ const broken = [
 			{ name: 'keep.xml', xml: 'hi' },
 		],
 	},
+	// A VALID package whose worksheet holds an adversarial cell ref: a column made of 300 'A's,
+	// far past Excel's XFD limit. columnToIndex must reject it (rather than overflow to a
+	// non-integer) so the reader falls back to positional addressing instead of throwing a bare
+	// Error out of the read path. Should open cleanly and yield one row of two cells. (F2.4e —
+	// regression for a bare-throw found by adversarial review, not by the seeded fuzz.)
+	{
+		file: 'edge-overflow-col.xlsx',
+		parts: [
+			{
+				name: '_rels/.rels',
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.xml"/></Relationships>`,
+			},
+			{
+				name: 'xl/workbook.xml',
+				xml: `${XMLD}\n<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+			},
+			{
+				name: 'xl/_rels/workbook.xml.rels',
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+			},
+			{
+				name: 'xl/worksheets/sheet1.xml',
+				xml: `${XMLD}\n<worksheet><sheetData><row r="1"><c r="${'A'.repeat(300)}1"><v>1</v></c><c><v>2</v></c></row></sheetData></worksheet>`,
+			},
+		],
+	},
 ]
 
 const dataDir = new URL('../data/', import.meta.url)

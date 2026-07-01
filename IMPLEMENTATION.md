@@ -335,12 +335,18 @@ comments (no threaded), column/row default styles not resolved (#22), no formula
 **Scope.** Sparse/unordered cells, missing `<dimension>`, large/odd shared strings,
 malformed input.
 **Tasks**
-- [ ] Tolerate missing optional parts; clear typed errors on corrupt input; fuzz the
-      tokenizer/zip parser.
-- [ ] Zip hardening deferred from F1.3: commit a real Excel/LibreOffice/Sheets `.xlsx`
+- [x] Tolerate missing optional parts; clear typed errors on corrupt input; fuzz the
+      tokenizer/zip parser. (`XlsxError`; missing-part tolerance; seeded fuzz over `tokenize`,
+      `createXmlStream`, `openZip`, `openXlsx`, `streamSheetRows` asserting only `XlsxError`
+      ever escapes — no bare `Error`/`TypeError`/`RangeError`, no hang.)
+- [x] Zip hardening deferred from F1.3: commit a real Excel/LibreOffice/Sheets `.xlsx`
       fixture (closes the F1.3 review's S7); a configurable max part size; decide policy for
-      duplicate entry names (last-wins today) and directory entries (`name/` placeholders).
+      duplicate entry names (rejected) and directory entries (`name/` placeholders, skipped).
 **Acceptance.** No crashes on a corpus of malformed/edge-case files; errors are actionable.
+The fuzz pass + an adversarial review found one bare-throw (an overflowing column ref reaching
+`formatRef` as `Infinity`); fixed by rejecting the overflow in `columnToIndex` so the reader
+falls back to positional addressing. Remaining correctness item: column/row default styles (#22)
+— tracked separately; not a robustness/crash concern.
 
 ---
 
