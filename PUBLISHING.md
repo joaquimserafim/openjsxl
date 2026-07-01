@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.1.0` (already set) — skip this step. For a later
+For the current release the version is `0.2.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -91,7 +91,9 @@ git push -f origin v<version>
 
 - **`0.1.0`** — first public release: the hardened reader (typed cells, number formats, merges,
   hyperlinks, comments, constant-memory streaming, typed `XlsxError`). No writer yet.
-- **`1.0.0`** — bump once `0.1.0` proves out and the API is settled. Follow semver thereafter.
+- **`0.2.0`** — documentation release: self-contained per-package READMEs, a `PUBLISHING.md`
+  runbook, and a runnable `examples/` workspace. Reader code unchanged from `0.1.0`.
+- **`1.0.0`** — bump once the API is settled (and, likely, once the writer lands). Follow semver.
 
 ## Notes
 
