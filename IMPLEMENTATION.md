@@ -400,10 +400,23 @@ emit a file Excel would "repair".
 verified for strings (incl. `& < >`, edge whitespace), ints/floats/negatives, booleans, date +
 datetime, sparse cells, multi-sheet. Real Excel/LibreOffice fidelity is F3.3.
 
-### F3.3 — Round-trip fidelity ☐
+### F3.3 — Round-trip fidelity ☑
+**Scope.** `workbookToInput(workbook)` — the reader→writer bridge: turns an open `Workbook` into
+`writeXlsx` input (each populated cell placed at its own A1 ref; sheets sparse via array holes),
+enabling read → modify → write. Public, exported from the package index.
+**Fidelity** is scoped to values, types, and sheet names/order (the writer's supported set).
+Documented non-fidelity (not silently mangled): formulas keep only their cached value; error cells
+become their text; merges/hyperlinks/comments/custom number formats/sheet visibility drop (M4).
 **Tasks**
-- [ ] Write → read → assert values/types/sheets; golden-file diffs.
-**Acceptance.** Round-trip is lossless for the supported value set. **Tag v0.3.**
+- [x] `writer/from-workbook.ts` (`workbookToInput`) + export.
+- [x] Fidelity tests: read→write→read stability over `basic.xlsx`/`minimal.xlsx`; bridge over the
+  supported value matrix (sparse, multi-sheet, dates); a golden XML-string pin of the wire format.
+- [x] Reader robustness fix (found by review): a date-styled serial outside JS's Date range now
+  reads as a `number`, not an Invalid Date (which would crash the writer on round trip).
+- [x] Independent validation: `basic.xlsx` → `workbookToInput` → `writeXlsx` re-opens in openpyxl
+  with identical values.
+**Acceptance.** Round-trip lossless for the supported value set — verified against real fixtures and
+openpyxl. **Release (separate step): tag v0.3** — bump `0.3.0`, README/PUBLISHING, writeXlsx example.
 
 ---
 

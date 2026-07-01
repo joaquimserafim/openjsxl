@@ -4,6 +4,7 @@
 
 export { crc32 } from './crc32'
 export { deflateRaw } from './deflate'
+export { workbookToInput } from './from-workbook'
 export type { CellValue, SheetInput, WorkbookInput, WriteOptions } from './types'
 export { writeXlsx } from './workbook'
 export { writeZip, type ZipInput } from './zip'

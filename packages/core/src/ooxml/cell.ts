@@ -72,9 +72,13 @@ export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {
 			if (value === undefined || value === '') return { ref, type: 'empty', value: null }
 			const num = Number(value)
 			if (!Number.isFinite(num)) return { ref, type: 'empty', value: null }
-			// A date-styled serial is a date; everything else stays a number.
+			// A date-styled serial is a date — unless the serial is so large (or small) that it
+			// falls outside JS's representable Date range, where serialToDate yields an Invalid Date
+			// (getTime() === NaN). A broken Date helps no consumer (and would crash the writer's
+			// dateToSerial on a round trip), so such a cell stays a plain number.
 			if (ctx.styles?.isDateStyle(raw.style)) {
-				return { ref, type: 'date', value: serialToDate(num, ctx.date1904 ?? false) }
+				const date = serialToDate(num, ctx.date1904 ?? false)
+				if (!Number.isNaN(date.getTime())) return { ref, type: 'date', value: date }
 			}
 			return { ref, type: 'number', value: num }
 		}

@@ -118,6 +118,17 @@ describe('decodeCell — date detection (F2.1)', () => {
 		expect(decodeCell(raw('A1', 'e', '#N/A', 1), dateCtx).type).toBe('error')
 	})
 
+	it('keeps a date-styled serial that overflows JS Date range a number, not an Invalid Date', () => {
+		// A serial this large maps past ±8.64e15 ms, so serialToDate would be an Invalid Date. The
+		// reader must not hand out a Date whose getTime() is NaN (it is useless and crashes the
+		// writer on a round trip) — it stays the raw number.
+		expect(decodeCell(raw('A1', undefined, '100000000000', 1), dateCtx)).toEqual({
+			ref: 'A1',
+			type: 'number',
+			value: 100000000000,
+		})
+	})
+
 	it('honours the 1904 date system', () => {
 		const epoch1900 = decodeCell(raw('C1', undefined, '0', 1), dateCtx)
 		const epoch1904 = decodeCell(raw('C1', undefined, '0', 1), { ...dateCtx, date1904: true })

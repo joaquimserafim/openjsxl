@@ -11,10 +11,12 @@ export { openXlsx, type ReadOptions, streamSheetRows, Workbook, Worksheet } from
 export type { Row } from './reader/worksheet'
 export type { Cell, CellType, Comment, Hyperlink, SheetInfo } from './types'
 // Writer API (F3.2) — serialize a workbook described as plain data to .xlsx bytes.
+// The bridge (F3.3) turns an open Workbook back into writer input, closing the round trip.
 export {
 	type CellValue,
 	type SheetInput,
 	type WorkbookInput,
 	type WriteOptions,
+	workbookToInput,
 	writeXlsx,
 } from './writer'
