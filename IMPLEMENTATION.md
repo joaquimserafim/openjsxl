@@ -358,14 +358,24 @@ address cells identically.
 
 Goal: write a valid `.xlsx` Excel opens without "repair", round-tripping values and types.
 
-### F3.1 — ZIP / OPC writer ☐
-**Scope.** Build a ZIP from parts: stored and/or `CompressionStream('deflate-raw')`, CRC32,
-correct local/central headers + EOCD.
-**Design notes.** Reuse the generator's stored-zip code (F0.2) as the basis; add deflate for
-large parts. Prefer **inline strings** when writing to avoid buffering a shared table.
+### F3.1 — ZIP / OPC writer ☑
+**Scope.** `writeZip(entries)` builds a ZIP from named byte-parts: correct local/central headers +
+EOCD, CRC-32 per entry, `CompressionStream('deflate-raw')` with store-when-not-smaller fallback.
+Internal only — the public `openjsxl/write` surface arrives in F3.2.
+**Design notes.** Mirror image of `zip/central-directory.ts`; CRC-32 and byte layout follow the
+generator's stored-zip code (F0.2). Deflate via the platform `CompressionStream` (symmetric with
+the reader's `DecompressionStream`), so the writer stays zero-dep and runtime-agnostic — no
+`node:zlib`, no hand-rolled inflate. Each part is deflated (method 8) and kept only when strictly
+smaller than the raw bytes, else stored (method 0). Buffer each part in full so CRC + both sizes go
+straight into the local header (no data descriptor, general-purpose bit 3 = 0). Fixed DOS timestamp
+⇒ byte-identical output for identical input. Refuse anything that would need ZIP64 (`XlsxError`
+`unsupported`) rather than emit a sentinel the reader misreads.
 **Tasks**
-- [ ] `writer/zip.ts` (store + deflate + CRC32); round-trip with `openZip`.
-**Acceptance.** Output re-reads byte-identically through F1.3.
+- [x] `writer/crc32.ts` (table-driven CRC-32) + known-vector test.
+- [x] `writer/deflate.ts` (`deflateRaw` via `CompressionStream`, mirrors `inflate.ts`).
+- [x] `writer/zip.ts` (`writeZip`: store + deflate + headers + EOCD; ZIP64 + duplicate guards).
+- [x] `writer/__tests__/` — round-trip `writeZip` → `openZip` (stored + deflate), determinism, guards.
+**Acceptance.** Output re-reads byte-identically through F1.3 (`openZip`), both compression methods.
 
 ### F3.2 — Minimal workbook writer ☐
 **Scope.** Emit the minimal valid part set: `[Content_Types].xml`, `_rels/.rels`,
