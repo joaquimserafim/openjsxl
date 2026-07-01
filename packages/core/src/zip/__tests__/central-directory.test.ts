@@ -1,5 +1,6 @@
 import { loadFixture } from '@openjsxl/fixtures'
 import { describe, expect, it } from 'vitest'
+import { XlsxError } from '../../errors'
 import { openZip } from '../central-directory'
 
 const PARTS = [
@@ -227,6 +228,7 @@ describe('openZip — deflate and real-world layouts', () => {
 			await buildZip({ name: 'bad.xml', content: 'whatever', corruptPayload: true }),
 		)
 		await expect(zip.read('bad.xml')).rejects.toThrow(/corrupt zip: failed to inflate bad\.xml/)
+		await expect(zip.read('bad.xml')).rejects.toMatchObject({ code: 'corrupt-zip' })
 	})
 
 	it('returns empty bytes for a zero-length deflate entry', async () => {
@@ -244,6 +246,12 @@ describe('openZip — deflate and real-world layouts', () => {
 	it('rejects ZIP64 archives with an explicit error', async () => {
 		const zip = await buildZip({ name: 'p.xml', content: 'x', centralLocalOffset: 0xffffffff })
 		expect(() => openZip(zip)).toThrow(/ZIP64/)
+		expect(() => openZip(zip)).toThrow(XlsxError)
+		try {
+			openZip(zip)
+		} catch (e) {
+			expect((e as XlsxError).code).toBe('unsupported')
+		}
 	})
 })
 

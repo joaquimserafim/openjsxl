@@ -1,3 +1,4 @@
+import { XlsxError } from '../errors'
 import {
 	type DecodeContext,
 	parseRels,
@@ -51,7 +52,8 @@ function relsPathFor(path: string): string {
 }
 
 async function readText(zip: ZipArchive, path: string): Promise<string> {
-	if (!zip.has(path)) throw new Error(`xlsx is missing a required part: ${path}`)
+	if (!zip.has(path))
+		throw new XlsxError('missing-part', `xlsx is missing a required part: ${path}`)
 	return decoder.decode(await zip.read(path))
 }
 
@@ -196,7 +198,10 @@ export class Workbook {
 		const worksheet = this.#byName.get(name)
 		if (worksheet === undefined) {
 			const available = this.sheets.map((s) => s.name).join(', ')
-			throw new Error(`no sheet named ${JSON.stringify(name)}; available: ${available}`)
+			throw new XlsxError(
+				'no-such-sheet',
+				`no sheet named ${JSON.stringify(name)}; available: ${available}`,
+			)
 		}
 		return worksheet
 	}
@@ -221,7 +226,9 @@ async function loadWorkbook(source: Uint8Array | ArrayBuffer): Promise<LoadedWor
 	// Package relationships → the workbook part.
 	const packageRels = parseRels(await readText(zip, '_rels/.rels'))
 	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT))
-	if (office === undefined) throw new Error('not an xlsx: no officeDocument relationship')
+	if (office === undefined) {
+		throw new XlsxError('not-xlsx', 'not an xlsx: no officeDocument relationship')
+	}
 	const workbookPath = resolveTarget('', office.target)
 	const workbookDir = directoryOf(workbookPath)
 
@@ -309,14 +316,17 @@ export async function* streamSheetRows(
 ): AsyncGenerator<Row> {
 	const { zip, context, sheets } = await loadWorkbook(source)
 	const first = sheets[0]
-	if (first === undefined) throw new Error('xlsx has no readable worksheets')
+	if (first === undefined) throw new XlsxError('not-xlsx', 'xlsx has no readable worksheets')
 
 	let path = first.path
 	if (sheetName !== undefined) {
 		const match = sheets.find((s) => s.info.name === sheetName)
 		if (match === undefined) {
 			const available = sheets.map((s) => s.info.name).join(', ')
-			throw new Error(`no sheet named ${JSON.stringify(sheetName)}; available: ${available}`)
+			throw new XlsxError(
+				'no-such-sheet',
+				`no sheet named ${JSON.stringify(sheetName)}; available: ${available}`,
+			)
 		}
 		path = match.path
 	}
