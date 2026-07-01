@@ -1,5 +1,5 @@
 import { type DecodeContext, decodeCell, formatRef, parseRef, type Relationship } from '../ooxml'
-import type { Cell, Hyperlink } from '../types'
+import type { Cell, Comment, Hyperlink } from '../types'
 import { localName, relationshipId } from '../utils'
 import { createXmlStream, tokenize, type XmlToken } from '../xml'
 
@@ -216,6 +216,76 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	}
 
 	return { push, flush }
+}
+
+/**
+ * The comments a worksheet carries. Comments live in a separate part (xl/commentsN.xml) that
+ * pairs an `<authors>` list with a `<commentList>`; each `<comment ref authorId>` holds rich
+ * text in `<text>`. We concatenate the `<t>` runs (dropping formatting, matching how shared
+ * strings read) and resolve the authorId against the authors list. A comment with no `ref`, or
+ * an authorId that resolves to nothing, still yields text — the author is just omitted.
+ */
+export function parseComments(xml: string): Comment[] {
+	const authors: string[] = []
+	const comments: Comment[] = []
+	let inAuthors = false
+	let authorText: string | undefined // non-undefined while inside an <author>
+	let current: { ref: string; authorId: number } | undefined // inside a <comment>
+	let inText = false // inside the current comment's <text>
+	let tDepth = 0 // open <t> within <text>
+	let text = ''
+
+	for (const token of tokenize(xml)) {
+		if (token.kind === 'open') {
+			const name = localName(token.name)
+			if (name === 'authors') {
+				if (!token.selfClosing) inAuthors = true
+			} else if (name === 'author' && inAuthors) {
+				if (token.selfClosing) authors.push('')
+				else authorText = ''
+			} else if (name === 'comment') {
+				const ref = token.attrs.ref
+				// A missing/empty/non-integer authorId is unresolved (-1) so the author is omitted,
+				// rather than falling through Number('')===0 to author 0 — don't fabricate an
+				// attribution the file never made.
+				const rawId = token.attrs.authorId
+				const authorId =
+					rawId !== undefined && rawId !== '' && Number.isInteger(Number(rawId))
+						? Number(rawId)
+						: -1
+				current = ref !== undefined && ref !== '' ? { ref, authorId } : undefined
+				text = ''
+				inText = false
+				tDepth = 0
+			} else if (name === 'text' && current !== undefined) {
+				if (!token.selfClosing) inText = true
+			} else if (name === 't' && inText) {
+				if (!token.selfClosing) tDepth++
+			}
+		} else if (token.kind === 'text') {
+			if (authorText !== undefined) authorText += token.value
+			else if (inText && tDepth > 0) text += token.value
+		} else {
+			const name = localName(token.name)
+			if (name === 'authors') inAuthors = false
+			else if (name === 'author' && authorText !== undefined) {
+				authors.push(authorText)
+				authorText = undefined
+			} else if (name === 't') {
+				if (tDepth > 0) tDepth--
+			} else if (name === 'text') inText = false
+			else if (name === 'comment' && current !== undefined) {
+				const author = authors[current.authorId]
+				comments.push({
+					ref: current.ref,
+					...(author !== undefined && author !== '' ? { author } : {}),
+					text,
+				})
+				current = undefined
+			}
+		}
+	}
+	return comments
 }
 
 /**

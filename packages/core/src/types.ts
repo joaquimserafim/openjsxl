@@ -25,6 +25,15 @@ export interface SheetInfo {
 	readonly visible: boolean
 }
 
+export interface Comment {
+	/** The cell the comment is anchored to, e.g. "B2". */
+	readonly ref: string
+	/** Comment author, resolved from the authors table. Absent when it can't be resolved. */
+	readonly author?: string
+	/** The comment's plain text — rich-text runs concatenated, formatting dropped. */
+	readonly text: string
+}
+
 export interface Hyperlink {
 	/** The cell or range the link covers, e.g. "A1" or "B1:C2". */
 	readonly ref: string

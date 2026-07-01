@@ -8,10 +8,11 @@ import {
 	resolveTarget,
 	type StyleTable,
 } from '../ooxml'
-import type { Cell, Hyperlink, SheetInfo } from '../types'
+import type { Cell, Comment, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
 import {
 	parseCellStyles,
+	parseComments,
 	parseDimension,
 	parseHyperlinks,
 	parseMergedCells,
@@ -34,6 +35,7 @@ const decoder = new TextDecoder()
 const REL_OFFICE_DOCUMENT = '/officeDocument'
 const REL_SHARED_STRINGS = '/sharedStrings'
 const REL_STYLES = '/styles'
+const REL_COMMENTS = '/comments'
 
 function directoryOf(path: string): string {
 	const slash = path.lastIndexOf('/')
@@ -60,6 +62,7 @@ export class Worksheet {
 	readonly #xml: string
 	readonly #context: DecodeContext
 	readonly #rels: Map<string, Relationship> | undefined
+	readonly #commentsXml: string | undefined
 
 	#cells: Map<string, Cell> | undefined
 	#merged: readonly string[] | undefined
@@ -67,18 +70,21 @@ export class Worksheet {
 	#cellStyles: Map<string, number> | undefined
 	#dimension: string | undefined
 	#dimensionRead = false
+	#comments: readonly Comment[] | undefined
 
 	constructor(
 		info: SheetInfo,
 		xml: string,
 		context: DecodeContext,
 		rels?: Map<string, Relationship>,
+		commentsXml?: string,
 	) {
 		this.name = info.name
 		this.#info = info
 		this.#xml = xml
 		this.#context = context
 		this.#rels = rels
+		this.#commentsXml = commentsXml
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
@@ -133,6 +139,17 @@ export class Worksheet {
 			this.#dimensionRead = true
 		}
 		return this.#dimension
+	}
+
+	/**
+	 * The comments anchored to cells on this sheet, in document order — each with its `ref`,
+	 * resolved `author`, and plain `text`. Empty when the sheet has no comments part.
+	 */
+	get comments(): readonly Comment[] {
+		if (this.#comments === undefined) {
+			this.#comments = this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml)
+		}
+		return this.#comments
 	}
 
 	#cellStyleMap(): Map<string, number> {
@@ -256,14 +273,25 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 	for (const { info, path } of sheets) {
 		const xml = decoder.decode(await zip.read(path))
 		// The sheet's own relationships (xl/worksheets/_rels/sheetN.xml.rels) resolve hyperlink
-		// r:ids to their targets. Optional — a sheet with no external links has no rels part.
+		// r:ids and locate the comments part. Optional — a plain sheet has no rels part.
 		const relsPath = relsPathFor(path)
 		const rels = zip.has(relsPath)
 			? parseRels(decoder.decode(await zip.read(relsPath)))
 			: undefined
+
+		// Comments live in a separate part linked from the worksheet rels.
+		let commentsXml: string | undefined
+		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS))
+		if (commentsRel !== undefined && commentsRel.targetMode !== 'External') {
+			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target)
+			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath))
+		}
+
 		infos.push(info)
 		// First definition wins if two sheets somehow share a name.
-		if (!byName.has(info.name)) byName.set(info.name, new Worksheet(info, xml, context, rels))
+		if (!byName.has(info.name)) {
+			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml))
+		}
 	}
 
 	return new Workbook(infos, byName)
