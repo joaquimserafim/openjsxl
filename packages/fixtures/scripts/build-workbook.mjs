@@ -13,6 +13,11 @@
 // Cell spec (one field selects the kind): { ref, text } | { ref, number } | { ref, bool } |
 //   { ref, serial, numFmtId? | numFmt? } | { ref, formula, number? }. Any cell may carry a
 //   numFmtId (built-in) or numFmt (custom code string) to style it.
+//
+// Column / row default styles (exercise style inheritance): a sheet may carry
+//   columns: [{ min, max, numFmtId? | numFmt? }]  → emits <col min max style> (column default)
+//   rowStyles: { <rowNumber>: { numFmtId? | numFmt? } } → emits <row s customFormat="1"> for that
+//     row, so its cells that omit their own `s` inherit the format.
 
 const encoder = new TextEncoder()
 
@@ -236,7 +241,7 @@ function cellXml(cell, sst, styles) {
 	return `<c r="${cell.ref}"${sAttr}/>`
 }
 
-function sheetDataXml(cells, sst, styles) {
+function sheetDataXml(cells, sst, styles, rowStyles) {
 	const rows = new Map()
 	for (const cell of cells) {
 		const r = rowOf(cell.ref)
@@ -245,7 +250,14 @@ function sheetDataXml(cells, sst, styles) {
 	}
 	return [...rows.keys()]
 		.sort((a, b) => a - b)
-		.map((r) => `<row r="${r}">${rows.get(r).join('')}</row>`)
+		.map((r) => {
+			// A row default style becomes `s` + customFormat="1" (the reader honors row `s` only
+			// under customFormat). Cells that set their own `s` still override it.
+			const rowStyle = rowStyles?.[r]
+			const idx = rowStyle !== undefined ? styles.indexFor(rowStyle) : undefined
+			const attrs = idx !== undefined ? ` s="${idx}" customFormat="1"` : ''
+			return `<row r="${r}"${attrs}>${rows.get(r).join('')}</row>`
+		})
 		.join('')
 }
 
@@ -321,18 +333,27 @@ export function buildWorkbook(spec) {
 			})
 		}
 
-		// OOXML order within <worksheet>: dimension, sheetData, …, mergeCells, …, hyperlinks.
+		// OOXML order within <worksheet>: dimension, cols, sheetData, …, mergeCells, …, hyperlinks.
 		const merges = sheet.merges?.length
 			? `<mergeCells count="${sheet.merges.length}">${sheet.merges
 					.map((r) => `<mergeCell ref="${r}"/>`)
 					.join('')}</mergeCells>`
 			: ''
 		const dim = sheet.dimension ? `<dimension ref="${sheet.dimension}"/>` : ''
-		const data = sheetDataXml(sheet.cells ?? [], sst, styles)
+		const cols = sheet.columns?.length
+			? `<cols>${sheet.columns
+					.map((c) => {
+						const idx = styles.indexFor(c)
+						const style = idx !== undefined ? ` style="${idx}"` : ''
+						return `<col min="${c.min}" max="${c.max}"${style}/>`
+					})
+					.join('')}</cols>`
+			: ''
+		const data = sheetDataXml(sheet.cells ?? [], sst, styles, sheet.rowStyles)
 		parts.push({
 			name: `xl/worksheets/sheet${num}.xml`,
 			xml: `${XML_DECL}
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${dim}<sheetData>${data}</sheetData>${merges}${hyperlinksXml}</worksheet>`,
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${dim}${cols}<sheetData>${data}</sheetData>${merges}${hyperlinksXml}</worksheet>`,
 		})
 		overrides.push({ part: `/xl/worksheets/sheet${num}.xml`, type: `${CT}.worksheet+xml` })
 

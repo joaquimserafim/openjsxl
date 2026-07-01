@@ -33,6 +33,69 @@ function safeColumn(ref: string): number | undefined {
 	}
 }
 
+// A cell's format can be set at three levels, not just on the cell. `<c s>` is per-cell, but a
+// whole column can be formatted with `<col … style>` and a whole row with `<row s customFormat>`.
+// The effective style index resolves in this precedence (SpreadsheetML §18.3.1.13/.73/.4):
+//
+//     cell's own `s`  >  row default (customFormat)  >  column default (<col>)  >  style 0
+//
+// Without this, a date column whose cells omit `s` reads as plain numbers, and numberFormat()
+// returns the wrong code — the common case where a producer formats a column once instead of
+// per cell. All three levels are indices into the SAME cellXfs table, so the resolved index
+// drops straight into StyleTable.isDateStyle/formatCode with no further translation.
+
+// A column-default style: `<col … style>` applies to every cell in columns [min, max] that does
+// not set its own `s`. (`style` is the column's default cell format — an index into cellXfs.)
+interface ColumnStyle {
+	readonly min: number
+	readonly max: number
+	readonly style: number
+}
+
+function columnStyleFromToken(attrs: Readonly<Record<string, string>>): ColumnStyle | undefined {
+	// A <col> with no `style` sets width/visibility only — it contributes no default format.
+	if (attrs.style === undefined) return undefined
+	const style = Number(attrs.style)
+	const min = Number(attrs.min)
+	const max = Number(attrs.max)
+	if (!Number.isInteger(style) || !Number.isInteger(min) || !Number.isInteger(max))
+		return undefined
+	return { min, max, style }
+}
+
+// A row's default style is honored ONLY when `customFormat="1"`. The spec is explicit: `<row>`'s
+// `s` is "only applied if the customFormat attribute is '1'". Writers routinely emit a bookkeeping
+// `s` on ordinary rows, so without this gate we would restyle cells the file never meant to format.
+function rowDefaultStyleFromToken(attrs: Readonly<Record<string, string>>): number | undefined {
+	if (attrs.customFormat !== '1' && attrs.customFormat !== 'true') return undefined
+	if (attrs.s === undefined) return undefined
+	const s = Number(attrs.s)
+	return Number.isInteger(s) ? s : undefined
+}
+
+// Resolve the precedence above for one cell. A present-but-unparseable cell `s` still counts as
+// "the cell declared its own style" — it opts out of inherited defaults and falls back to style 0,
+// rather than silently borrowing the row/column format.
+function effectiveStyle(
+	ownS: string | undefined,
+	rowDefault: number | undefined,
+	col: number | undefined,
+	columns: readonly ColumnStyle[],
+): number | undefined {
+	if (ownS !== undefined) {
+		const s = Number(ownS)
+		return Number.isInteger(s) ? s : undefined
+	}
+	if (rowDefault !== undefined) return rowDefault
+	if (col !== undefined) {
+		// First covering range wins. Ranges don't overlap in a valid file; first-match keeps
+		// resolution deterministic even if a malformed file declares a column twice.
+		const range = columns.find((c) => col >= c.min && col <= c.max)
+		if (range !== undefined) return range.style
+	}
+	return undefined
+}
+
 interface RowAssembler {
 	/** Advance the state machine by one token; returns any rows that completed. */
 	push(token: XmlToken): Row[]
@@ -47,6 +110,12 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	let rowIndex = 0
 	let cells: Cell[] = []
 	let lastCol = 0
+
+	// Column defaults from `<cols>` (which precedes `<sheetData>`, so it is fully seen before any
+	// cell) and the current row's default (customFormat) — both feed effectiveStyle for cells
+	// that omit their own `s`. See the ColumnStyle/effectiveStyle notes above.
+	const columns: ColumnStyle[] = []
+	let rowDefault: number | undefined
 
 	let inCell = false
 	let cellRef = ''
@@ -87,6 +156,13 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				if (!token.selfClosing) inSheetData = true
 				return out
 			}
+			// `<col>` lives in `<cols>`, a sibling that precedes `<sheetData>` — capture its
+			// default style before the inSheetData guard below would skip it.
+			if (name === 'col') {
+				const cs = columnStyleFromToken(token.attrs)
+				if (cs !== undefined) columns.push(cs)
+				return out
+			}
 			if (!inSheetData) return out
 
 			if (name === 'row') {
@@ -96,6 +172,8 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
 				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
 				lastRow = rowIndex
+				// A non-customFormat row overwrites this back to undefined — no stale carryover.
+				rowDefault = rowDefaultStyleFromToken(token.attrs)
 				cells = []
 				lastCol = 0
 				if (token.selfClosing) {
@@ -111,17 +189,21 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			if (name === 'c') {
 				flushCell()
 				const r = token.attrs.r
+				// The cell's column index, needed to resolve a `<col>` default style. Known even
+				// when `r` is absent (positional: one past the previous cell).
+				let col: number | undefined
 				if (r !== undefined) {
 					cellRef = r
-					const col = safeColumn(r)
+					col = safeColumn(r)
 					if (col !== undefined) lastCol = col
 				} else {
 					lastCol += 1
+					col = lastCol
 					cellRef = formatRef({ col: lastCol, row: rowIndex })
 				}
 				cellType = token.attrs.t
-				const s = token.attrs.s
-				cellStyle = s === undefined ? undefined : Number(s)
+				// Effective style: cell `s` → row default → column default → style 0.
+				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns)
 				cellIsInline = cellType === 'inlineStr'
 				cellValue = ''
 				hasValue = false
@@ -304,19 +386,56 @@ export function parseDimension(xml: string): string | undefined {
 }
 
 /**
- * Map each addressed cell (`<c r s>`) to its style index (the `s` attribute), for resolving
- * per-cell number formats. Cells without an `r` or `s` are omitted — a missing `s` means the
- * default style 0, which the style lookup already falls back to.
+ * Map each cell to its EFFECTIVE style index, for resolving per-cell number formats. Effective
+ * means the same precedence date detection uses — cell `s`, else the row default (`<row s
+ * customFormat>`), else the column default (`<col … style>`), else style 0. A cell that resolves
+ * to no style is omitted (the lookup falls back to style 0 anyway).
+ *
+ * Addressing MUST match the row assembler so numberFormat() and cell()/rows() agree on the same
+ * ref: an explicit `r` is used verbatim; a cell without `r` is positioned one past the previous
+ * cell (`formatRef`), exactly as the assembler synthesizes its ref — otherwise a no-`r` cell that
+ * inherits a column/row style would read as a date via cell() but as "General" via numberFormat().
  */
 export function parseCellStyles(xml: string): Map<string, number> {
 	const styles = new Map<string, number>()
+	const columns: ColumnStyle[] = []
+	let rowDefault: number | undefined
+	let lastRow = 0
+	let rowIndex = 0
+	let lastCol = 0
 	for (const token of tokenize(xml)) {
-		if (token.kind !== 'open' || localName(token.name) !== 'c') continue
-		const ref = token.attrs.r
-		const s = token.attrs.s
-		if (ref === undefined || s === undefined) continue
-		const index = Number(s)
-		if (Number.isInteger(index)) styles.set(ref, index)
+		if (token.kind !== 'open') continue
+		const name = localName(token.name)
+		if (name === 'col') {
+			const cs = columnStyleFromToken(token.attrs)
+			if (cs !== undefined) columns.push(cs)
+			continue
+		}
+		if (name === 'row') {
+			const r = token.attrs.r
+			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
+			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
+			lastRow = rowIndex
+			rowDefault = rowDefaultStyleFromToken(token.attrs)
+			lastCol = 0
+			continue
+		}
+		if (name !== 'c') continue
+		// Resolve the cell's ref and column with the same positional rule as the assembler.
+		const r = token.attrs.r
+		let ref: string
+		let col: number | undefined
+		if (r !== undefined) {
+			ref = r
+			col = safeColumn(r)
+			if (col !== undefined) lastCol = col
+		} else {
+			lastCol += 1
+			col = lastCol
+			ref = formatRef({ col: lastCol, row: rowIndex })
+		}
+		const index = effectiveStyle(token.attrs.s, rowDefault, col, columns)
+		if (index !== undefined) styles.set(ref, index)
 	}
 	return styles
 }

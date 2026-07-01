@@ -331,7 +331,7 @@ files; **comments' real-producer check is local-only** (Apache-2.0 POI, CI-skipp
 design), covered in CI by inline units. Known limitations tracked for later: legacy-only
 comments (no threaded), column/row default styles not resolved (#22), no formula text.
 
-### F2.4 — Robustness ☐
+### F2.4 — Robustness ☑
 **Scope.** Sparse/unordered cells, missing `<dimension>`, large/odd shared strings,
 malformed input.
 **Tasks**
@@ -342,11 +342,15 @@ malformed input.
 - [x] Zip hardening deferred from F1.3: commit a real Excel/LibreOffice/Sheets `.xlsx`
       fixture (closes the F1.3 review's S7); a configurable max part size; decide policy for
       duplicate entry names (rejected) and directory entries (`name/` placeholders, skipped).
+- [x] Resolve column/row default styles (#22): a cell's effective format is `cell s` → row
+      default (`<row s customFormat>`) → column default (`<col … style>`) → style 0, feeding
+      both date detection and `numberFormat`.
 **Acceptance.** No crashes on a corpus of malformed/edge-case files; errors are actionable.
 The fuzz pass + an adversarial review found one bare-throw (an overflowing column ref reaching
 `formatRef` as `Infinity`); fixed by rejecting the overflow in `columnToIndex` so the reader
-falls back to positional addressing. Remaining correctness item: column/row default styles (#22)
-— tracked separately; not a robustness/crash concern.
+falls back to positional addressing. A second review pass on #22 found the two style accessors
+disagreed on no-`r` cells (positional in the assembler, skipped in `numberFormat`); fixed so both
+address cells identically.
 
 ---
 

@@ -50,6 +50,32 @@ const fixtures = [
 			],
 		},
 	},
+	// Style inheritance (#22): a format set at the column and row level, NOT on the cell.
+	//  - Column B carries a date format; B1/B2 omit their own `s` → must read as dates.
+	//  - Row 3 is a customFormat percent row; A3 omits `s` → inherits the percent.
+	//  - B3 sets its own date `s` → the cell wins over row 3's percent (precedence check).
+	//  - C1 is an explicit per-cell date (control); A1 is an unstyled plain number.
+	{
+		file: 'col-row-styles.xlsx',
+		spec: {
+			sheets: [
+				{
+					name: 'Sheet1',
+					dimension: 'A1:C3',
+					columns: [{ min: 2, max: 2, numFmtId: 14 }],
+					rowStyles: { 3: { numFmt: '0.00%' } },
+					cells: [
+						{ ref: 'A1', number: 1 },
+						{ ref: 'B1', serial: 43831 },
+						{ ref: 'C1', serial: 43831, numFmtId: 14 },
+						{ ref: 'B2', serial: 44000 },
+						{ ref: 'A3', number: 0.5 },
+						{ ref: 'B3', serial: 44100, numFmtId: 14 },
+					],
+				},
+			],
+		},
+	},
 ]
 
 // Deliberately-broken packages for the error paths (F2.4b). Valid ZIPs, invalid OOXML.
