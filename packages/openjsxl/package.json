@@ -1,6 +1,6 @@
 {
 	"name": "openjsxl",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Fast, zero-dependency Excel (.xlsx) reader and writer for Node, Deno, Bun, and the browser.",
 	"type": "module",
 	"license": "MIT",

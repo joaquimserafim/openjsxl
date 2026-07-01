@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.2.0` (already set) — skip this step. For a later
+For the current release the version is `0.2.1` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -93,6 +93,7 @@ git push -f origin v<version>
   hyperlinks, comments, constant-memory streaming, typed `XlsxError`). No writer yet.
 - **`0.2.0`** — documentation release: self-contained per-package READMEs, a `PUBLISHING.md`
   runbook, and a runnable `examples/` workspace. Reader code unchanged from `0.1.0`.
+- **`0.2.1`** — drop published source maps (install size ~178 KB → ~55 KB). No API change.
 - **`1.0.0`** — bump once the API is settled (and, likely, once the writer lands). Follow semver.
 
 ## Notes
