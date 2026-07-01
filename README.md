@@ -1,12 +1,18 @@
 # openjsxl
 
+[![npm version](https://img.shields.io/npm/v/openjsxl?color=cb3837&logo=npm)](https://www.npmjs.com/package/openjsxl)
+[![CI](https://github.com/joaquimserafim/openjsxl/actions/workflows/ci.yml/badge.svg)](https://github.com/joaquimserafim/openjsxl/actions/workflows/ci.yml)
+[![install size](https://packagephobia.com/badge?p=openjsxl)](https://packagephobia.com/result?p=openjsxl)
+[![types included](https://img.shields.io/npm/types/openjsxl)](https://www.npmjs.com/package/openjsxl)
+[![license: MIT](https://img.shields.io/npm/l/openjsxl?color=blue)](./LICENSE)
+
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
 > Status: **reader — hardened, pre-1.0.** Read typed cells, number formats, merged ranges,
 > hyperlinks, and comments; stream large sheets in roughly constant memory; get typed errors on
-> malformed input. A writer is next. First npm release (`v0.1.0`) is imminent. Built in the open,
-> plan-first — see the [roadmap](./ROADMAP.md) and [implementation plan](./IMPLEMENTATION.md).
+> malformed input. Published on npm; a writer is next. Built in the open, plan-first — see the
+> [roadmap](./ROADMAP.md) and [implementation plan](./IMPLEMENTATION.md).
 
 ## Quick start
 

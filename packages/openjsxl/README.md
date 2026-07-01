@@ -1,5 +1,10 @@
 # openjsxl
 
+[![npm version](https://img.shields.io/npm/v/openjsxl?color=cb3837&logo=npm)](https://www.npmjs.com/package/openjsxl)
+[![install size](https://packagephobia.com/badge?p=openjsxl)](https://packagephobia.com/result?p=openjsxl)
+[![types included](https://img.shields.io/npm/types/openjsxl)](https://www.npmjs.com/package/openjsxl)
+[![license: MIT](https://img.shields.io/npm/l/openjsxl?color=blue)](./LICENSE)
+
 Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader for JavaScript runtimes —
 Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports the
 [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.

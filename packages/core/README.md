@@ -1,5 +1,9 @@
 # @openjsxl/core
 
+[![npm version](https://img.shields.io/npm/v/@openjsxl/core?color=cb3837&logo=npm)](https://www.npmjs.com/package/@openjsxl/core)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://www.npmjs.com/package/@openjsxl/core?activeTab=dependencies)
+[![license: MIT](https://img.shields.io/npm/l/@openjsxl/core?color=blue)](./LICENSE)
+
 The zero-dependency OOXML engine behind [`openjsxl`](https://www.npmjs.com/package/openjsxl):
 the `zip → xml → ooxml → reader` layers that turn an `.xlsx` into typed cells, built only on
 platform Web APIs (`DecompressionStream`, `TextDecoder`, …). No runtime dependencies.
