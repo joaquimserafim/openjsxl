@@ -1,0 +1,103 @@
+# Publishing
+
+How to cut a release of openjsxl to npm. The repo is a pnpm workspace; releases go out with
+`pnpm -r publish`, which handles dependency order and the `workspace:*` rewrite for us.
+
+## What ships
+
+| Package | npm | Notes |
+| --- | --- | --- |
+| `openjsxl` | ✅ public | The facade users install. Re-exports `@openjsxl/core`. |
+| `@openjsxl/core` | ✅ public | The engine. Required — the facade's types re-export it. |
+| `@openjsxl/fixtures` | ❌ never | `private: true`. Test corpus; also holds git-ignored Apache-2.0 files under `local/`. |
+
+Both public packages carry `publishConfig.access: "public"` (scoped packages default to private
+otherwise), `files: ["dist"]`, a `README.md`, a `LICENSE`, and a `prepack` hook that rebuilds
+`dist` at pack time so a tarball can never ship stale output.
+
+## One-time prerequisites
+
+1. An npm **organization** named `openjsxl` (a scope must be owned before you can publish
+   `@openjsxl/*`). Free to create at <https://www.npmjs.com/org/create>.
+2. `npm login`, and confirm membership: `npm whoami`.
+3. If your npm account enforces 2FA for publish, have your authenticator ready (`--otp=<code>`).
+
+## Release steps
+
+Run everything from the repo root.
+
+### 1. Preflight — clean build and green gate
+
+```sh
+pnpm install
+pnpm -r build
+pnpm typecheck
+pnpm test
+```
+
+### 2. Set the version
+
+For the current release the version is `0.1.0` (already set) — skip this step. For a later
+release, set the **same** version in both public packages by editing the `"version"` field in:
+
+- `packages/core/package.json`
+- `packages/openjsxl/package.json`
+
+(Leave `@openjsxl/fixtures` as-is; it never publishes.) Keep the two in lock-step — the facade
+depends on `@openjsxl/core` via `workspace:*`, which is rewritten to that exact version on
+publish, so a mismatch would ship a broken dependency range.
+
+### 3. Dry-run — inspect the tarballs
+
+```sh
+pnpm -C packages/core     pack
+pnpm -C packages/openjsxl pack
+
+tar -tzf packages/core/openjsxl-core-*.tgz
+tar -tzf packages/openjsxl/openjsxl-*.tgz
+
+# Facade's core dep must be rewritten (prints "@openjsxl/core": "<version>", not workspace:*):
+tar -xzOf packages/openjsxl/openjsxl-*.tgz package/package.json | grep -A2 '"dependencies"'
+
+rm -f packages/*/*.tgz   # clean up
+```
+
+Each tarball should contain **only** `package.json`, `README.md`, `LICENSE`, and `dist/*` — no
+`src/`, `node_modules/`, `tsconfig`, `.tgz`, or `local/`.
+
+### 4. Publish
+
+Commit everything first — `pnpm publish` refuses an unclean tree (by design).
+
+```sh
+git status                        # must be clean
+pnpm -r publish --access public   # add --otp=<code> if 2FA is on
+```
+
+`pnpm -r publish` publishes `@openjsxl/core` first, then `openjsxl` (topological order), rewrites
+`workspace:*` → the version, and skips the private `@openjsxl/fixtures`.
+
+### 5. Verify and tag
+
+```sh
+npm view openjsxl version
+npm view @openjsxl/core version
+
+git tag -f v<version>             # -f only needed to re-point a tag never published under before
+git push -f origin v<version>
+```
+
+## Versioning
+
+- **`0.1.0`** — first public release: the hardened reader (typed cells, number formats, merges,
+  hyperlinks, comments, constant-memory streaming, typed `XlsxError`). No writer yet.
+- **`1.0.0`** — bump once `0.1.0` proves out and the API is settled. Follow semver thereafter.
+
+## Notes
+
+- **Private repo links.** While the GitHub repo is private, the `repository`/`homepage`/`bugs`
+  URLs in npm metadata will 404 for others. They resolve automatically once the repo is public.
+- **Provenance.** To publish with npm provenance from CI later, run `npm publish --provenance`
+  from a trusted GitHub Actions workflow; not required for a manual release.
+- **Deprecating a bad release.** npm forbids re-publishing a version. If a release is broken,
+  publish a patch and `npm deprecate openjsxl@<version> "use <newer>"`.
