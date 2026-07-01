@@ -24,6 +24,12 @@ Copyright (c) 2016 Johann Tuffe. Each file is an unmodified copy of
 
 The full MIT license text is in [`LICENSE-MIT-calamine.md`](./LICENSE-MIT-calamine.md).
 
+**Reproducing / contributing.** These files are hash-pinned in
+[`scripts/fetch-real.mjs`](./scripts/fetch-real.mjs); `pnpm fixtures:real` re-downloads and
+verifies them (any upstream change fails loudly). To contribute a real fixture that exercises a
+feature end-to-end, add it under `data/`, append an entry (file, url, license, sha256) to the
+manifest, and record it in this file — a great first contribution.
+
 ## Not committed
 
 Apache-2.0 comment fixtures from [Apache POI](https://github.com/apache/poi)
