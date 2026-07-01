@@ -218,6 +218,24 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	return { push, flush }
 }
 
+/**
+ * Map each addressed cell (`<c r s>`) to its style index (the `s` attribute), for resolving
+ * per-cell number formats. Cells without an `r` or `s` are omitted — a missing `s` means the
+ * default style 0, which the style lookup already falls back to.
+ */
+export function parseCellStyles(xml: string): Map<string, number> {
+	const styles = new Map<string, number>()
+	for (const token of tokenize(xml)) {
+		if (token.kind !== 'open' || localName(token.name) !== 'c') continue
+		const ref = token.attrs.r
+		const s = token.attrs.s
+		if (ref === undefined || s === undefined) continue
+		const index = Number(s)
+		if (Number.isInteger(index)) styles.set(ref, index)
+	}
+	return styles
+}
+
 /** Read rows from a fully in-memory worksheet string. */
 export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 	const assembler = createRowAssembler(ctx)

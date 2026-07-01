@@ -10,7 +10,14 @@ import {
 } from '../ooxml'
 import type { Cell, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
-import { parseHyperlinks, parseMergedCells, type Row, readRows, streamRows } from './worksheet'
+import {
+	parseCellStyles,
+	parseHyperlinks,
+	parseMergedCells,
+	type Row,
+	readRows,
+	streamRows,
+} from './worksheet'
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -56,6 +63,7 @@ export class Worksheet {
 	#cells: Map<string, Cell> | undefined
 	#merged: readonly string[] | undefined
 	#hyperlinks: readonly Hyperlink[] | undefined
+	#cellStyles: Map<string, number> | undefined
 
 	constructor(
 		info: SheetInfo,
@@ -99,6 +107,21 @@ export class Worksheet {
 			this.#hyperlinks = parseHyperlinks(this.#xml, this.#rels)
 		}
 		return this.#hyperlinks
+	}
+
+	/**
+	 * The number-format code applied to the cell at `ref` — a custom code like `"yyyy-mm-dd"`
+	 * or `"0.00%"`, or a built-in one. `undefined` when the workbook has no style table or the
+	 * id has no portable code. An unstyled or absent cell resolves to the default format (style
+	 * 0, usually `"General"`), mirroring how date detection defaults.
+	 */
+	numberFormat(ref: string): string | undefined {
+		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref))
+	}
+
+	#cellStyleMap(): Map<string, number> {
+		if (this.#cellStyles === undefined) this.#cellStyles = parseCellStyles(this.#xml)
+		return this.#cellStyles
 	}
 
 	/** The cell at an A1 reference. Absent cells read as `empty` (Excel treats them blank). */

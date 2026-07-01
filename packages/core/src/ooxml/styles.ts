@@ -13,6 +13,50 @@ import { tokenize } from '../xml'
 export interface StyleTable {
 	/** True when the cell format at this `s` index applies a date/time number format. */
 	isDateStyle(styleIndex: number | undefined): boolean
+	/**
+	 * The number-format code applied at this `s` index — a custom code (`<numFmts>`) or a
+	 * built-in one (e.g. `"0.00%"`, `"mm-dd-yy"`). `undefined` when the id is a locale/reserved
+	 * built-in with no portable code, or the index is out of range.
+	 */
+	formatCode(styleIndex: number | undefined): string | undefined
+}
+
+// Built-in number formats (ECMA-376 §18.8.30) with a fixed, non-locale code. The locale and
+// reserved ids (23–36, 41–44, 50–58) have no portable code and resolve to undefined; date
+// detection still recognises those via isBuiltinDateId, we just don't fabricate their string.
+const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
+	0: 'General',
+	1: '0',
+	2: '0.00',
+	3: '#,##0',
+	4: '#,##0.00',
+	5: '"$"#,##0_);("$"#,##0)',
+	6: '"$"#,##0_);[Red]("$"#,##0)',
+	7: '"$"#,##0.00_);("$"#,##0.00)',
+	8: '"$"#,##0.00_);[Red]("$"#,##0.00)',
+	9: '0%',
+	10: '0.00%',
+	11: '0.00E+00',
+	12: '# ?/?',
+	13: '# ??/??',
+	14: 'mm-dd-yy',
+	15: 'd-mmm-yy',
+	16: 'd-mmm',
+	17: 'mmm-yy',
+	18: 'h:mm AM/PM',
+	19: 'h:mm:ss AM/PM',
+	20: 'h:mm',
+	21: 'h:mm:ss',
+	22: 'm/d/yy h:mm',
+	37: '#,##0_);(#,##0)',
+	38: '#,##0_);[Red](#,##0)',
+	39: '#,##0.00_);(#,##0.00)',
+	40: '#,##0.00_);[Red](#,##0.00)',
+	45: 'mm:ss',
+	46: '[h]:mm:ss',
+	47: 'mmss.0',
+	48: '##0.0E+0',
+	49: '@',
 }
 
 function isBuiltinDateId(id: number): boolean {
@@ -77,5 +121,13 @@ export function parseStyles(xml: string): StyleTable {
 		return custom !== undefined ? isDateFormatCode(custom) : isBuiltinDateId(numFmtId)
 	}
 
-	return { isDateStyle }
+	function formatCode(styleIndex: number | undefined): string | undefined {
+		// An omitted `s` means style 0, the implicit default format. A custom code for the id
+		// wins over the built-in table (a file may redefine one); unknown ids stay undefined.
+		const numFmtId = cellFormatIds[styleIndex ?? 0]
+		if (numFmtId === undefined) return undefined
+		return customFormats.get(numFmtId) ?? BUILTIN_FORMATS[numFmtId]
+	}
+
+	return { isDateStyle, formatCode }
 }
