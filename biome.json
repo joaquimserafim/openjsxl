@@ -38,7 +38,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["**/__tests__/**"],
+			"includes": ["**/__tests__/**", "packages/fixtures/scripts/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {
