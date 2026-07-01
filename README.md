@@ -3,9 +3,10 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **v0.1 — reader MVP.** Open an `.xlsx` and read typed cells today; not yet
-> published to npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
-> [implementation plan](./IMPLEMENTATION.md).
+> Status: **reader — hardened, pre-1.0.** Read typed cells, number formats, merged ranges,
+> hyperlinks, and comments; stream large sheets in roughly constant memory; get typed errors on
+> malformed input. A writer is next. First npm release (`v0.1.0`) is imminent. Built in the open,
+> plan-first — see the [roadmap](./ROADMAP.md) and [implementation plan](./IMPLEMENTATION.md).
 
 ## Quick start
 
@@ -53,6 +54,41 @@ for await (const row of streamSheetRows(bytes /*, 'Sheet1' */)) {
 	// one row at a time; previous rows are already freed
 	process.stdout.write(`${row.index}: ${row.cells.length} cells\n`)
 }
+```
+
+### Metadata, number formats & typed errors
+
+Beyond values, a worksheet exposes the metadata Excel writers attach — number formats, merged
+ranges, hyperlinks, comments, and the declared used range. Number formats resolve through the
+cell's own style, then the column (`<col>`) and row defaults, so a date column reads as dates
+even when its cells carry no style of their own. Malformed input throws a typed `XlsxError` with
+a discriminating `code`, never a bare `TypeError` from a corrupt file.
+
+```ts
+import { openXlsx, XlsxError } from 'openjsxl'
+import { readFile } from 'node:fs/promises'
+
+let wb
+try {
+	// `maxPartBytes` caps any single decompressed part — an opt-in zip-bomb guard.
+	wb = await openXlsx(await readFile('report.xlsx'), { maxPartBytes: 50_000_000 })
+} catch (err) {
+	if (err instanceof XlsxError) {
+		// code: 'not-a-zip' | 'not-xlsx' | 'missing-part' | 'corrupt-zip' | 'part-too-large' | …
+		console.error(`could not read xlsx (${err.code}): ${err.message}`)
+		process.exit(1)
+	}
+	throw err
+}
+
+const sheet = wb.sheet(wb.sheets[0].name)
+
+sheet.numberFormat('C1') // "mm-dd-yy" — the format code, independent of the value
+sheet.dimension          // "A1:E2" | undefined (the declared used range)
+sheet.mergedCells        // ["A1:B1", "A2:A4", …]
+sheet.hyperlinks         // [{ ref: "A1", target: "https://…", tooltip?, location?, display? }, …]
+sheet.comments           // [{ ref: "A1", author: "Ada", text: "note" }, …]
+sheet.visible            // false for hidden / very-hidden sheets
 ```
 
 ## Why
