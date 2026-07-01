@@ -7,5 +7,7 @@ export default defineConfig({
 	dts: true,
 	clean: true,
 	treeshake: true,
-	sourcemap: true,
+	// No source maps in the published package: the output isn't minified (so it's already
+	// legible) and the map roughly quadruples install size for little debugging value.
+	sourcemap: false,
 })
