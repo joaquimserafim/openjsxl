@@ -10,6 +10,7 @@ export type XlsxErrorCode =
 	| 'corrupt-zip' // the ZIP structure is malformed, or an entry failed to inflate
 	| 'unsupported' // a valid but unsupported feature (ZIP64, encryption, unknown method)
 	| 'no-such-sheet' // the caller asked for a sheet name the workbook does not have
+	| 'part-too-large' // a part's decompressed size exceeds the caller's maxPartBytes limit
 
 export class XlsxError extends Error {
 	/** Machine-readable discriminant; branch on this rather than the message. */

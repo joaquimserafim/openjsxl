@@ -219,9 +219,12 @@ interface LoadedWorkbook {
 // styles — and resolve each sheet's part path through the relationship graph. Worksheets
 // themselves are NOT read here, so this stays cheap whether the caller wants random access
 // (openXlsx) or a constant-memory stream (streamSheetRows).
-async function loadWorkbook(source: Uint8Array | ArrayBuffer): Promise<LoadedWorkbook> {
+async function loadWorkbook(
+	source: Uint8Array | ArrayBuffer,
+	options?: ReadOptions,
+): Promise<LoadedWorkbook> {
 	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source)
-	const zip = openZip(bytes)
+	const zip = openZip(bytes, options)
 
 	// Package relationships → the workbook part.
 	const packageRels = parseRels(await readText(zip, '_rels/.rels'))
@@ -271,8 +274,19 @@ async function loadWorkbook(source: Uint8Array | ArrayBuffer): Promise<LoadedWor
 	return { zip, context, sheets }
 }
 
-export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbook> {
-	const { zip, context, sheets } = await loadWorkbook(source)
+/**
+ * Reader options. `maxPartBytes` caps the declared decompressed size of any single part — a
+ * zip-bomb guard independent of the archive's own (untrusted) size fields. Omit for no ceiling.
+ */
+export interface ReadOptions {
+	readonly maxPartBytes?: number
+}
+
+export async function openXlsx(
+	source: Uint8Array | ArrayBuffer,
+	options?: ReadOptions,
+): Promise<Workbook> {
+	const { zip, context, sheets } = await loadWorkbook(source, options)
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = []
@@ -313,8 +327,9 @@ export async function openXlsx(source: Uint8Array | ArrayBuffer): Promise<Workbo
 export async function* streamSheetRows(
 	source: Uint8Array | ArrayBuffer,
 	sheetName?: string,
+	options?: ReadOptions,
 ): AsyncGenerator<Row> {
-	const { zip, context, sheets } = await loadWorkbook(source)
+	const { zip, context, sheets } = await loadWorkbook(source, options)
 	const first = sheets[0]
 	if (first === undefined) throw new XlsxError('not-xlsx', 'xlsx has no readable worksheets')
 

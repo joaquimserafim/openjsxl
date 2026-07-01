@@ -28,3 +28,25 @@ describe('reader — missing optional parts', () => {
 		expect(rows).toEqual([2])
 	})
 })
+
+describe('reader — maxPartBytes (zip-bomb guard)', () => {
+	it('rejects a part larger than the configured limit', async () => {
+		const bytes = await loadFixture('basic.xlsx')
+		await expect(openXlsx(bytes, { maxPartBytes: 1 })).rejects.toMatchObject({
+			code: 'part-too-large',
+		})
+	})
+
+	it('opens normally when the limit is generous', async () => {
+		const bytes = await loadFixture('basic.xlsx')
+		const wb = await openXlsx(bytes, { maxPartBytes: 1_000_000 })
+		expect(wb.sheet('Sheet1').cell('A1')).toEqual({ ref: 'A1', type: 'string', value: 'hello' })
+	})
+
+	it('applies the limit to streaming too', async () => {
+		const bytes = await loadFixture('basic.xlsx')
+		await expect(
+			streamSheetRows(bytes, undefined, { maxPartBytes: 1 }).next(),
+		).rejects.toMatchObject({ code: 'part-too-large' })
+	})
+})

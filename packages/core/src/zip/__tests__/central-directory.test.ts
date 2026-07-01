@@ -253,6 +253,16 @@ describe('openZip — deflate and real-world layouts', () => {
 			expect((e as XlsxError).code).toBe('unsupported')
 		}
 	})
+
+	it('rejects a part whose declared size exceeds maxPartBytes', async () => {
+		const bytes = await buildZip({
+			name: 'big.xml',
+			content: 'x',
+			centralUncompressedSize: 10000,
+		})
+		const zip = openZip(bytes, { maxPartBytes: 100 })
+		await expect(zip.read('big.xml')).rejects.toMatchObject({ code: 'part-too-large' })
+	})
 })
 
 describe('readStream', () => {

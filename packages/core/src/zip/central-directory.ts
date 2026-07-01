@@ -51,9 +51,13 @@ function findEocd(view: DataView, len: number): number {
 	return -1
 }
 
-export function openZip(bytes: Uint8Array): ZipArchive {
+export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }): ZipArchive {
 	const len = bytes.byteLength
 	const view = new DataView(bytes.buffer, bytes.byteOffset, len)
+	// An absolute ceiling on a single part's declared decompressed size, independent of the
+	// (attacker-controllable) uncompressedSize the inflate already caps at — a zip-bomb guard
+	// callers opt into. undefined ⇒ no ceiling beyond the declared size.
+	const maxPartBytes = options?.maxPartBytes
 
 	const eocd = findEocd(view, len)
 	if (eocd === -1) {
@@ -106,6 +110,12 @@ export function openZip(bytes: Uint8Array): ZipArchive {
 	function locate(name: string): { entry: ZipEntry; payload: Uint8Array } {
 		const entry = entries.get(name)
 		if (entry === undefined) throw new XlsxError('missing-part', `zip entry not found: ${name}`)
+		if (maxPartBytes !== undefined && entry.uncompressedSize > maxPartBytes) {
+			throw new XlsxError(
+				'part-too-large',
+				`zip part ${name} declares ${entry.uncompressedSize} bytes, over the ${maxPartBytes}-byte limit`,
+			)
+		}
 		const header = entry.localHeaderOffset
 		if (header + 30 > len || view.getUint32(header, true) !== SIG_LOCAL) {
 			throw new XlsxError('corrupt-zip', `corrupt zip: bad local header for ${name}`)
