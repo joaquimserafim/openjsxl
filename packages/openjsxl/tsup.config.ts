@@ -8,6 +8,9 @@ export default defineConfig({
 	clean: true,
 	treeshake: true,
 	sourcemap: true,
-	// Bundle the core engine so consumers install a single package.
-	noExternal: ['@openjsxl/core'],
+	// Keep @openjsxl/core external — the facade re-exports it rather than bundling a second copy.
+	// A single copy keeps `instanceof XlsxError` consistent whether a consumer imports from
+	// `openjsxl` or `@openjsxl/core`, and aligns the runtime with the type re-export. npm still
+	// installs core automatically as a dependency, so `npm i openjsxl` stays one command.
+	external: ['@openjsxl/core'],
 })

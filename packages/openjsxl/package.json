@@ -4,6 +4,16 @@
 	"description": "Fast, zero-dependency Excel (.xlsx) reader and writer for Node, Deno, Bun, and the browser.",
 	"type": "module",
 	"license": "MIT",
+	"author": "joaquimserafim (https://github.com/joaquimserafim)",
+	"homepage": "https://github.com/joaquimserafim/openjsxl#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/joaquimserafim/openjsxl.git",
+		"directory": "packages/openjsxl"
+	},
+	"bugs": {
+		"url": "https://github.com/joaquimserafim/openjsxl/issues"
+	},
 	"engines": {
 		"node": ">=24"
 	},
@@ -21,6 +31,7 @@
 	"sideEffects": false,
 	"scripts": {
 		"build": "tsup",
+		"prepack": "tsup",
 		"typecheck": "tsc -p tsconfig.json"
 	},
 	"dependencies": {

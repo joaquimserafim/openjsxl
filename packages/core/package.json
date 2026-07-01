@@ -4,6 +4,25 @@
 	"description": "Core OOXML engine for openjsxl — zero-dependency .xlsx primitives (zip, xml, cell typing).",
 	"type": "module",
 	"license": "MIT",
+	"author": "joaquimserafim (https://github.com/joaquimserafim)",
+	"homepage": "https://github.com/joaquimserafim/openjsxl#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/joaquimserafim/openjsxl.git",
+		"directory": "packages/core"
+	},
+	"bugs": {
+		"url": "https://github.com/joaquimserafim/openjsxl/issues"
+	},
+	"keywords": [
+		"xlsx",
+		"excel",
+		"spreadsheet",
+		"ooxml",
+		"reader",
+		"zip",
+		"deflate"
+	],
 	"engines": {
 		"node": ">=24"
 	},
@@ -21,6 +40,7 @@
 	"sideEffects": false,
 	"scripts": {
 		"build": "tsup",
+		"prepack": "tsup",
 		"typecheck": "tsc -p tsconfig.json"
 	},
 	"devDependencies": {
