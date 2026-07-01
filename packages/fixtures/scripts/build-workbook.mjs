@@ -146,6 +146,7 @@ function makeSharedStrings() {
 	const index = new Map()
 	let total = 0
 	return {
+		has: () => list.length > 0,
 		ref(text) {
 			total++
 			let i = index.get(text)
@@ -176,6 +177,7 @@ function makeStyles() {
 	const byId = new Map([[0, 0]]) // numFmtId -> cellXf index
 	let nextCustom = 164
 	return {
+		has: () => xfs.length > 1 || custom.size > 0,
 		indexFor(cell) {
 			let numFmtId
 			if (typeof cell.numFmtId === 'number') numFmtId = cell.numFmtId
@@ -344,12 +346,27 @@ export function buildWorkbook(spec) {
 		type: `${REL}/worksheet`,
 		target: `worksheets/sheet${i + 1}.xml`,
 	}))
-	wbRels.push({ id: `rId${sheets.length + 1}`, type: `${REL}/styles`, target: 'styles.xml' })
-	wbRels.push({
-		id: `rId${sheets.length + 2}`,
-		type: `${REL}/sharedStrings`,
-		target: 'sharedStrings.xml',
-	})
+
+	// styles.xml and sharedStrings.xml are optional parts — emit each (with its rel and
+	// content-type override) only when the workbook actually has styles / strings, so a minimal
+	// workbook produces a minimal package.
+	const optionalFiles = []
+	const optionalOverrides = []
+	let nextRid = sheets.length + 1
+	if (styles.has()) {
+		wbRels.push({ id: `rId${nextRid++}`, type: `${REL}/styles`, target: 'styles.xml' })
+		optionalFiles.push({ name: 'xl/styles.xml', xml: styles.xml() })
+		optionalOverrides.push({ part: '/xl/styles.xml', type: `${CT}.styles+xml` })
+	}
+	if (sst.has()) {
+		wbRels.push({
+			id: `rId${nextRid++}`,
+			type: `${REL}/sharedStrings`,
+			target: 'sharedStrings.xml',
+		})
+		optionalFiles.push({ name: 'xl/sharedStrings.xml', xml: sst.xml() })
+		optionalOverrides.push({ part: '/xl/sharedStrings.xml', type: `${CT}.sharedStrings+xml` })
+	}
 
 	const workbookPr = spec.date1904 ? '<workbookPr date1904="1"/>' : ''
 	const sheetsXml = sheets
@@ -367,8 +384,7 @@ export function buildWorkbook(spec) {
 	const allOverrides = [
 		{ part: '/xl/workbook.xml', type: `${CT}.sheet.main+xml` },
 		...overrides,
-		{ part: '/xl/styles.xml', type: `${CT}.styles+xml` },
-		{ part: '/xl/sharedStrings.xml', type: `${CT}.sharedStrings+xml` },
+		...optionalOverrides,
 	]
 
 	const files = [
@@ -392,9 +408,17 @@ export function buildWorkbook(spec) {
 		},
 		{ name: 'xl/_rels/workbook.xml.rels', xml: relsPart(wbRels) },
 		...parts,
-		{ name: 'xl/styles.xml', xml: styles.xml() },
-		{ name: 'xl/sharedStrings.xml', xml: sst.xml() },
+		...optionalFiles,
 	]
 
 	return zipStore(files.map((f) => ({ name: f.name, data: encoder.encode(f.xml) })))
+}
+
+/**
+ * Pack arbitrary parts into a STORED .xlsx-shaped ZIP, without any workbook wiring. For crafting
+ * deliberately-broken packages in tests (a missing or malformed part); use buildWorkbook for
+ * valid workbooks. Each part is `{ name, xml }`.
+ */
+export function packParts(parts) {
+	return zipStore(parts.map((p) => ({ name: p.name, data: encoder.encode(p.xml) })))
 }

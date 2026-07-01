@@ -44,4 +44,16 @@ describe('XlsxError', () => {
 		})
 		expect((e as XlsxError).code).toBe('no-such-sheet')
 	})
+
+	it('codes a package with no officeDocument relationship as not-xlsx', async () => {
+		const bytes = await loadFixture('broken-no-officedoc.xlsx')
+		const e = await caught(() => openXlsx(bytes))
+		expect((e as XlsxError).code).toBe('not-xlsx')
+	})
+
+	it('codes a package missing a required part as missing-part', async () => {
+		const bytes = await loadFixture('broken-no-workbook.xlsx')
+		const e = await caught(() => openXlsx(bytes))
+		expect((e as XlsxError).code).toBe('missing-part')
+	})
 })
