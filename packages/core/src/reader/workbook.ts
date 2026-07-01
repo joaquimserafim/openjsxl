@@ -12,6 +12,7 @@ import type { Cell, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
 import {
 	parseCellStyles,
+	parseDimension,
 	parseHyperlinks,
 	parseMergedCells,
 	type Row,
@@ -64,6 +65,8 @@ export class Worksheet {
 	#merged: readonly string[] | undefined
 	#hyperlinks: readonly Hyperlink[] | undefined
 	#cellStyles: Map<string, number> | undefined
+	#dimension: string | undefined
+	#dimensionRead = false
 
 	constructor(
 		info: SheetInfo,
@@ -117,6 +120,19 @@ export class Worksheet {
 	 */
 	numberFormat(ref: string): string | undefined {
 		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref))
+	}
+
+	/**
+	 * The sheet's declared used range in A1 notation (e.g. `"A1:E10"`, or a single cell), from
+	 * the worksheet's `<dimension>`. `undefined` when the producer omits it — it is an optional
+	 * hint, not authoritative, so treat a present value as advisory.
+	 */
+	get dimension(): string | undefined {
+		if (!this.#dimensionRead) {
+			this.#dimension = parseDimension(this.#xml)
+			this.#dimensionRead = true
+		}
+		return this.#dimension
 	}
 
 	#cellStyleMap(): Map<string, number> {

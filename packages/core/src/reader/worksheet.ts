@@ -219,6 +219,21 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 }
 
 /**
+ * The worksheet's declared used range — the `<dimension ref>` (e.g. "A1:E10", or a single
+ * cell). Optional in OOXML: undefined when the producer omits it, or when it is empty. The
+ * element sits near the top of the part, so the scan returns as soon as it is found.
+ */
+export function parseDimension(xml: string): string | undefined {
+	for (const token of tokenize(xml)) {
+		if (token.kind === 'open' && localName(token.name) === 'dimension') {
+			const ref = token.attrs.ref
+			if (ref !== undefined && ref !== '') return ref
+		}
+	}
+	return undefined
+}
+
+/**
  * Map each addressed cell (`<c r s>`) to its style index (the `s` attribute), for resolving
  * per-cell number formats. Cells without an `r` or `s` are omitted — a missing `s` means the
  * default style 0, which the style lookup already falls back to.
