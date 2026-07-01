@@ -318,13 +318,18 @@ interning deferred (sharedStrings is read eagerly; usually far smaller than the 
 **Acceptance.** Reads a 100k-row generated sheet with roughly constant memory. ✅ met
 (`streamRows` holds ~one row; verified by the 100k-row + multi-byte + every-chunk-size tests).
 
-### F2.3 — Common metadata ☐
+### F2.3 — Common metadata ☑
 **Scope.** Merged cells, hyperlinks, comments, per-cell number-format strings, sheet
 visibility/dimensions.
 **Tasks**
-- [ ] Merged ranges; hyperlinks (via worksheet rels); comments; `numberFormat` on cells;
-      `SheetInfo.visible`/dimensions. Each fixture-backed.
-**Acceptance.** Each feature verified against a real-producer fixture.
+- [x] `Worksheet.mergedCells`; `Worksheet.hyperlinks` (resolved via worksheet rels);
+      `Worksheet.comments`; `Worksheet.numberFormat(ref)` (chosen over a cell field);
+      `SheetInfo.visible`/`Worksheet.dimension`. Each accessor adversarially reviewed.
+**Acceptance.** Each feature verified against a real-producer fixture. ✅ met — merges,
+hyperlinks, number formats (custom), visibility, and dimension are backed by committed real
+files; **comments' real-producer check is local-only** (Apache-2.0 POI, CI-skipped by
+design), covered in CI by inline units. Known limitations tracked for later: legacy-only
+comments (no threaded), column/row default styles not resolved (#22), no formula text.
 
 ### F2.4 — Robustness ☐
 **Scope.** Sparse/unordered cells, missing `<dimension>`, large/odd shared strings,
