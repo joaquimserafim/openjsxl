@@ -19,7 +19,6 @@
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"baseUrl": ".",
 		"paths": {
 			"@openjsxl/core": ["./packages/core/src/index.ts"],
 			"openjsxl": ["./packages/openjsxl/src/index.ts"]
