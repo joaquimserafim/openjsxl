@@ -78,6 +78,22 @@ const broken = [
 			},
 		],
 	},
+	// Two central-directory entries with the same name → the duplicate is rejected (corrupt-zip).
+	{
+		file: 'edge-duplicate-entry.xlsx',
+		parts: [
+			{ name: 'x.xml', xml: 'a' },
+			{ name: 'x.xml', xml: 'b' },
+		],
+	},
+	// A directory placeholder entry (name ends in '/') is skipped; the real part remains.
+	{
+		file: 'edge-with-directory.xlsx',
+		parts: [
+			{ name: 'sub/', xml: '' },
+			{ name: 'keep.xml', xml: 'hi' },
+		],
+	},
 ]
 
 const dataDir = new URL('../data/', import.meta.url)

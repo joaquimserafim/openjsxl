@@ -25,6 +25,8 @@ so they are safe to commit and diff.
   `styles.xml` (exercises the reader tolerating missing optional parts).
 - **`broken-no-officedoc.xlsx`**, **`broken-no-workbook.xlsx`** — valid ZIPs, invalid OOXML
   (no `officeDocument` relationship; a missing required part). For the typed-error paths.
+- **`edge-duplicate-entry.xlsx`** (two entries with one name — rejected) and
+  **`edge-with-directory.xlsx`** (a `name/` directory placeholder — skipped). For zip entry policy.
 
 ## Real-producer fixtures
 

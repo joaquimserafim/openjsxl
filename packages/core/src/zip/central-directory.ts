@@ -12,6 +12,9 @@ import { inflateRaw, inflateRawStream } from './inflate'
 //
 // Not supported (the reader detects and rejects these rather than misreading): ZIP64
 // (> 4 GB or > 65535 entries), encryption, and multi-disk archives.
+//
+// Entry policy: directory placeholders (`name/`) are skipped; duplicate part names are refused
+// (OPC forbids them, and an ambiguous package is a zip-confusion vector).
 
 export interface ZipEntry {
 	readonly name: string
@@ -100,8 +103,15 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 			throw new XlsxError('unsupported', 'ZIP64 archives are not supported')
 		}
 		const name = decoder.decode(bytes.subarray(pos + 46, pos + 46 + nameLen))
-		entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset })
 		pos += 46 + nameLen + extraLen + commentLen
+		// Directory entries (`name/`) are placeholders, not parts — skip them.
+		if (name.endsWith('/')) continue
+		// OPC forbids duplicate part names; a duplicate makes the package ambiguous (a
+		// zip-confusion vector), so refuse it rather than silently resolving to one entry.
+		if (entries.has(name)) {
+			throw new XlsxError('corrupt-zip', `corrupt zip: duplicate entry name ${name}`)
+		}
+		entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset })
 	}
 
 	// Find an entry's raw (still-compressed) payload. The local header repeats name/extra

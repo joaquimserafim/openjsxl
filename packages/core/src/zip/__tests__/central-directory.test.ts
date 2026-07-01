@@ -265,6 +265,24 @@ describe('openZip — deflate and real-world layouts', () => {
 	})
 })
 
+describe('openZip — entry policy', () => {
+	it('rejects a zip with duplicate entry names', async () => {
+		const bytes = await loadFixture('edge-duplicate-entry.xlsx')
+		expect(() => openZip(bytes)).toThrow(/duplicate entry name/)
+		try {
+			openZip(bytes)
+		} catch (e) {
+			expect((e as XlsxError).code).toBe('corrupt-zip')
+		}
+	})
+
+	it('skips directory placeholder entries, keeping real parts', async () => {
+		const zip = openZip(await loadFixture('edge-with-directory.xlsx'))
+		expect(zip.entries.has('sub/')).toBe(false)
+		expect(zip.has('keep.xml')).toBe(true)
+	})
+})
+
 describe('readStream', () => {
 	async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
 		const parts: Uint8Array[] = []
