@@ -1,6 +1,9 @@
-// writer layer — build the OPC/ZIP container and (from F3.2) the OOXML parts inside it.
-// Internal for now: the public `openjsxl/write` surface arrives with the workbook writer (F3.2).
+// writer layer — build the OPC/ZIP container (F3.1) and the OOXML workbook inside it (F3.2).
+// The container primitives (writeZip, crc32, deflateRaw) stay internal; writeXlsx is the public
+// surface, re-exported from the package index.
 
 export { crc32 } from './crc32'
 export { deflateRaw } from './deflate'
+export type { CellValue, SheetInput, WorkbookInput, WriteOptions } from './types'
+export { writeXlsx } from './workbook'
 export { writeZip, type ZipInput } from './zip'

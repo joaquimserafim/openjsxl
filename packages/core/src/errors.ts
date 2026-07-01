@@ -11,6 +11,7 @@ export type XlsxErrorCode =
 	| 'unsupported' // a valid but unsupported feature (ZIP64, encryption, unknown method)
 	| 'no-such-sheet' // the caller asked for a sheet name the workbook does not have
 	| 'part-too-large' // a part's decompressed size exceeds the caller's maxPartBytes limit
+	| 'invalid-input' // (writer) a value or option passed to writeXlsx can't be represented in .xlsx
 
 export class XlsxError extends Error {
 	/** Machine-readable discriminant; branch on this rather than the message. */

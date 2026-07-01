@@ -377,15 +377,28 @@ straight into the local header (no data descriptor, general-purpose bit 3 = 0). 
 - [x] `writer/__tests__/` — round-trip `writeZip` → `openZip` (stored + deflate), determinism, guards.
 **Acceptance.** Output re-reads byte-identically through F1.3 (`openZip`), both compression methods.
 
-### F3.2 — Minimal workbook writer ☐
-**Scope.** Emit the minimal valid part set: `[Content_Types].xml`, `_rels/.rels`,
-`xl/workbook.xml`, `xl/_rels/workbook.xml.rels`, `xl/worksheets/sheet1.xml`. Values, types
-(string/number/bool/date), multiple sheets.
-**Design notes.** Escape `& < >`; `xml:space="preserve"` for edge whitespace; clamp floats to
-15 significant figures; dates as serials + a date style; no `calcChain.xml`.
+### F3.2 — Minimal workbook writer ☑
+**Scope.** `writeXlsx(workbook, options?)` — public, flat/declarative API (symmetric with
+`openXlsx`). Emits the minimal valid part set: `[Content_Types].xml`, `_rels/.rels`,
+`xl/workbook.xml`, `xl/_rels/workbook.xml.rels`, `xl/worksheets/sheetN.xml`, and `xl/styles.xml`
+**only when a date is present**. Values + types (string/number/bool/date), multiple sheets.
+**Design notes.** Input is plain data — sheets of row-major `CellValue[]` (`string | number |
+boolean | Date | null | undefined`); the OOXML type is inferred from the JS value. **Inline
+strings** (no shared-strings table to buffer). Escape `& < >` (and `"` in attrs);
+`xml:space="preserve"` for edge whitespace; numbers via `String(n)` (shortest round-trippable
+form; non-finite rejected); dates via `dateToSerial` + numFmtId 14 style (`s="1"`); no
+`calcChain.xml`. Exported from the package index (tree-shakeable), not a subpath — `openjsxl/write`
+can be added later additively. Validates inputs (≥1 sheet; sheet names 1–31 chars, no
+`\ / ? * [ ] :`, unique case-insensitively) and throws `XlsxError('invalid-input')` rather than
+emit a file Excel would "repair".
 **Tasks**
-- [ ] `writer/workbook.ts` + public `openjsxl/write` entry; create sheets, set cells, save.
-**Acceptance.** A written file opens cleanly in Excel **and** LibreOffice.
+- [x] `dateToSerial` (inverse of `serialToDate`) + `invalid-input` error code.
+- [x] `writer/xml.ts` (escape/preserve), `writer/sheet.ts` (worksheet XML, dimension, typing).
+- [x] `writer/workbook.ts` — `writeXlsx`, validation, part assembly; exported from core index.
+- [x] Tests: write → `openXlsx` round-trip (types/values/sheets/sparse/1904/dimension), validation.
+**Acceptance.** Round-trips through `openXlsx` **and** opens in openpyxl (independent reader) —
+verified for strings (incl. `& < >`, edge whitespace), ints/floats/negatives, booleans, date +
+datetime, sparse cells, multi-sheet. Real Excel/LibreOffice fidelity is F3.3.
 
 ### F3.3 — Round-trip fidelity ☐
 **Tasks**

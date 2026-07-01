@@ -15,3 +15,15 @@ export function serialToDate(serial: number, date1904 = false): Date {
 	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC
 	return new Date(epoch + Math.round(serial * MS_PER_DAY))
 }
+
+// The exact inverse of serialToDate, for the writer: a JS Date → the Excel serial number that
+// serialToDate maps back to the same instant. Because both anchor on the same epoch, any Date the
+// writer emits round-trips through the reader losslessly (to the millisecond) — including the
+// pre-1900-03-01 range where Excel's phantom leap day makes the *absolute* serial off by one, since
+// we invert this implementation, not Excel's calendar. The result carries a fractional day for the
+// time-of-day component, exactly as Excel stores it. Returns NaN for an invalid Date (getTime NaN);
+// the writer rejects that before emitting.
+export function dateToSerial(date: Date, date1904 = false): number {
+	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC
+	return (date.getTime() - epoch) / MS_PER_DAY
+}
