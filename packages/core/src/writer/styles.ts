@@ -3,6 +3,9 @@ import {
 	BORDER_LINE_STYLES,
 	BUILTIN_FORMATS,
 	H_ALIGNMENTS,
+	HEX_COLOR,
+	MAX_COLOR_INDEX,
+	MAX_INDENT,
 	PATTERN_TYPES,
 	V_ALIGNMENTS,
 } from "../ooxml/styles"
@@ -62,16 +65,6 @@ const BUILTIN_CODE_TO_ID: ReadonlyMap<string, number> = (() => {
 })()
 const CUSTOM_NUMFMT_BASE = 164
 
-// 6-digit RGB or 8-digit ARGB hex, written verbatim. Both appear in real files (the reader keeps
-// whatever the producer wrote), so the writer must accept both or the bridge would reject a
-// legitimately-read color.
-const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/
-
-// xsd:unsignedInt ceiling for theme/indexed color values. Doubles at 1e21+ stringify in
-// exponential notation ("1e+21"), which is lexically invalid for an integer attribute — capping
-// at the schema's own range keeps every accepted value in plain digits.
-const MAX_U32 = 0xffffffff
-
 function invalid(ref: string, message: string): never {
 	throw new XlsxError("invalid-input", `cell ${ref}: ${message}`)
 }
@@ -119,8 +112,13 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 	if ("theme" in raw) {
 		checkKeys(ref, what, raw, ["theme", "tint"])
 		const theme = raw.theme
-		if (typeof theme !== "number" || !Number.isInteger(theme) || theme < 0 || theme > MAX_U32) {
-			invalid(ref, `${what}.theme must be an integer between 0 and ${MAX_U32}`)
+		if (
+			typeof theme !== "number" ||
+			!Number.isInteger(theme) ||
+			theme < 0 ||
+			theme > MAX_COLOR_INDEX
+		) {
+			invalid(ref, `${what}.theme must be an integer between 0 and ${MAX_COLOR_INDEX}`)
 		}
 		const tint = raw.tint
 		if (tint === undefined) return { theme }
@@ -136,9 +134,9 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 			typeof indexed !== "number" ||
 			!Number.isInteger(indexed) ||
 			indexed < 0 ||
-			indexed > MAX_U32
+			indexed > MAX_COLOR_INDEX
 		) {
-			invalid(ref, `${what}.indexed must be an integer between 0 and ${MAX_U32}`)
+			invalid(ref, `${what}.indexed must be an integer between 0 and ${MAX_COLOR_INDEX}`)
 		}
 		return { indexed }
 	}
@@ -311,8 +309,13 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 	}
 	const indent = raw.indent
 	if (indent !== undefined) {
-		if (typeof indent !== "number" || !Number.isInteger(indent) || indent < 0 || indent > 250) {
-			invalid(ref, "style.alignment.indent must be an integer between 0 and 250")
+		if (
+			typeof indent !== "number" ||
+			!Number.isInteger(indent) ||
+			indent < 0 ||
+			indent > MAX_INDENT
+		) {
+			invalid(ref, `style.alignment.indent must be an integer between 0 and ${MAX_INDENT}`)
 		}
 		if (indent > 0) out.indent = indent
 	}

@@ -143,15 +143,21 @@ input.sheets[0].rows.push(['appended', 'row']) // tweak the plain data
 await writeFile('out.xlsx', await writeXlsx(input))
 ```
 
-The round trip is **lossless for values, types, and sheet names/order**. What the writer does not
-yet model is carried across only where noted:
+The round trip is **lossless for values, types, sheet names/order, and cell styles**:
 
-| Round-trips losslessly | Not yet written (M4+) |
+| Round-trips losslessly | Not carried (yet) |
 | --- | --- |
-| string, number, boolean, `Date` values | custom number formats & styles (fonts, fills, borders) |
-| empty cells (sparse) | merged ranges, hyperlinks, comments |
-| sheet names & tab order | formulas (only the cached value survives) |
-| | error cells (written as their text), sheet visibility |
+| string, number, boolean, `Date` values | merged ranges, hyperlinks, comments |
+| number formats — built-in & custom codes | formulas (only the cached value survives) |
+| fonts, fills, borders, alignment | error cells (written as their text) |
+| colors: rgb, indexed, theme + tint (raw) | sheet visibility |
+| empty cells (sparse), incl. styled blanks | |
+| sheet names & tab order | |
+
+Two documented flattenings: row/column *default* styles resolve into per-cell styles (each cell
+keeps its effective format), and files authored under a **custom theme** keep their `{theme, tint}`
+color indexes but re-render against the standard Office theme after a rewrite — `rgb`/`indexed`
+colors are unaffected.
 
 ## Why
 

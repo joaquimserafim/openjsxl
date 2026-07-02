@@ -503,7 +503,7 @@ a date code re-reads as `date` (Excel-faithful; documented).
   format codes (or sheet/font names) for conforming readers.
 **Acceptance.** `numberFormat(ref)` returns the written code verbatim after round-trip.
 
-### F4.4 — Bridge carries styles (round-trip fidelity) ☐
+### F4.4 — Bridge carries styles (round-trip fidelity) ☑
 **Scope.** `workbookToInput` attaches `sheet.style(cell.ref)` per populated cell — `{value,
 style}` only when a style exists (unstyled v0.3-era workbooks produce identical input → the
 byte-identical path), including styled *empty* cells (`<c s/>`) it currently drops. Signature
@@ -513,10 +513,26 @@ files authored under a **custom theme** keep `{theme,tint}` indices but re-rende
 default theme after rewrite — documented loudly. Property test: bridge output must always pass
 `writeXlsx` validation.
 **Tasks**
-- [ ] Bridge style attachment (incl. styled empties); golden pins; Excel/openpyxl-authored
-  styled fixtures round-trip; README fidelity table update.
+- [x] Bridge style attachment (incl. styled empties); acid test on the openpyxl-authored fixture
+  (theme+tint, custom numFmts deep-equal across the bridge); README fidelity table update.
+- [x] Corpus property test: EVERY readable fixture round-trips losslessly or fails TYPED — it
+  found and pinned two pre-existing bugs (LibreOffice's explicitly-interned custom "General"
+  format read asymmetrically; a bare-`Error` crash on unaddressable cell refs).
+- [x] Review findings (5, all verified empirically after the verify agents rate-limited; fixed +
+  pinned): the reader's style model now DEGRADES every value the writer would reject — shared
+  bounds single-sourced in ooxml/styles (`HEX_COLOR` rgb gate, u32 caps on theme/indexed,
+  `MAX_INDENT`, empty/XML-unsafe font names, empty format codes; `isXmlSafe` moved to utils) —
+  so the bridge can never crash on a style the reader produced; plus Excel grid caps
+  (`MAX_ROW`/`MAX_COL` in a1.ts) in the bridge AND the writer — a hostile ref like
+  `A99999999999999` used to become `rows.length` and spin the writer for hours.
+- [x] Second full adversarial pass over the fixed changeset (3 CONFIRMED / 0 refuted, fixed +
+  pinned): custom format codes were the one field missing the `isXmlSafe` degrade (a control
+  char via `&#1;` in `formatCode` still crashed the bridge); case-variant duplicate refs (`A1`
+  vs `a1` — two reader identities, one grid slot) silently vanished a value — now a typed
+  refusal, while same-spelling duplicates keep the reader's own last-wins semantics.
 **Acceptance.** read → bridge → write → read gives deep-equal `style(ref)` for the supported
-style set; unstyled files byte-identical.
+style set (verified per-cell over the whole fixture corpus + openpyxl cross-check of the
+bridge-rewritten file); unstyled files rewrite byte-identically (even with dates).
 
 ### F4.5 — Sheet geometry: column widths, row heights, hidden, freeze panes ☐
 **Scope.** Read: three lazy accessors in the `mergedCells` idiom — `columns`

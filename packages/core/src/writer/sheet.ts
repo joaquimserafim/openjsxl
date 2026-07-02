@@ -1,5 +1,5 @@
 import { XlsxError } from "../errors"
-import { formatRef } from "../ooxml/a1"
+import { formatRef, MAX_COL, MAX_ROW } from "../ooxml/a1"
 import { dateToSerial } from "../ooxml/dates"
 import type { StyleRegistry } from "./styles"
 import type { CellInput, CellValue, StyledCell } from "./types"
@@ -148,6 +148,12 @@ export function worksheetXml(
 	let maxCol = 0
 	const rowXmls: string[] = []
 
+	// A workbook can't outgrow Excel's grid: refs past XFD1048576 make Excel refuse the file, and
+	// (mechanically) `rows.length` drives this loop — an absurd length would spin for hours.
+	if (rows.length > MAX_ROW) {
+		throw new XlsxError("invalid-input", `a sheet cannot have more than ${MAX_ROW} rows`)
+	}
+
 	for (let r = 0; r < rows.length; r++) {
 		const cells = rows[r]
 		// A missing row (array hole / undefined) is an empty row — skip it. Anything else that isn't
@@ -162,6 +168,12 @@ export function worksheetXml(
 			)
 		}
 		if (cells.length === 0) continue
+		if (cells.length > MAX_COL) {
+			throw new XlsxError(
+				"invalid-input",
+				`sheet row ${r + 1}: a row cannot have more than ${MAX_COL} cells`,
+			)
+		}
 		const rowNum = r + 1
 		const cellXmls: string[] = []
 		for (let c = 0; c < cells.length; c++) {

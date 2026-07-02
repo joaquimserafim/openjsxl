@@ -8,6 +8,14 @@ export interface CellRef {
 	readonly row: number
 }
 
+// Excel's grid limits (XFD1048576). The tolerant READER keeps cells beyond them, faithful to the
+// bytes; the WRITER and the bridge refuse them — a ref outside the grid is unopenable in Excel,
+// and an absurd row number would otherwise become the length of an array someone iterates.
+/** Highest row Excel supports (1,048,576). */
+export const MAX_ROW = 1_048_576
+/** Highest column Excel supports (16,384 = XFD). */
+export const MAX_COL = 16_384
+
 const CODE_UPPER_A = 65
 const CODE_UPPER_Z = 90
 const CODE_LOWER_A = 97

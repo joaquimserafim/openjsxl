@@ -12,7 +12,7 @@ import type {
 	UnderlineStyle,
 	VerticalAlignment,
 } from "../types"
-import { localName } from "../utils"
+import { isXmlSafe, localName } from "../utils"
 import { tokenize } from "../xml"
 
 // xl/styles.xml — the workbook's style tables. A cell's `s` attribute indexes `<cellXfs>`; each
@@ -133,22 +133,38 @@ function boolAttr(val: string | undefined): boolean {
 	return val !== "0" && val !== "false"
 }
 
+// Shared read/write bounds for style values. The reader DEGRADES anything outside them (a
+// tolerated file keeps opening; the malformed piece reads as absent) and the writer REJECTS them
+// (invalid-input) — sharing the constants makes the two ends of the bridge agree by construction:
+// whatever cellStyle() emits, the writer's validators accept, so read → modify → write can never
+// crash on a style the reader was happy to produce (adversarial review, F4.4).
+/** 6-digit RGB or 8-digit ARGB hex — the only rgb forms real files carry. */
+export const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/
+/** xsd:unsignedInt ceiling for theme/indexed color values. */
+export const MAX_COLOR_INDEX = 0xffffffff
+/** Excel's own maximum alignment indent. */
+export const MAX_INDENT = 250
+
 // A <color> / <fgColor> / <bgColor> element's attributes → the raw Color union. The spec allows
 // exactly one addressing mode per element; if a producer emits several, precedence follows what
-// consumers (and openpyxl) do: rgb > theme > indexed > auto. Malformed numerics yield undefined
-// (no color) rather than a NaN-carrying record.
+// consumers (and openpyxl) do: rgb > theme > indexed > auto. Malformed values — bad numerics,
+// non-hex rgb, out-of-range indexes — yield undefined (no color) rather than an unwritable record.
 function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color | undefined {
-	if (attrs.rgb !== undefined) return { rgb: attrs.rgb }
+	if (attrs.rgb !== undefined) {
+		return HEX_COLOR.test(attrs.rgb) ? { rgb: attrs.rgb } : undefined
+	}
 	if (attrs.theme !== undefined) {
 		const theme = Number(attrs.theme)
-		if (!Number.isInteger(theme) || theme < 0) return undefined
+		if (!Number.isInteger(theme) || theme < 0 || theme > MAX_COLOR_INDEX) return undefined
 		const tint = attrs.tint === undefined ? undefined : Number(attrs.tint)
 		if (tint !== undefined && Number.isFinite(tint)) return { theme, tint }
 		return { theme }
 	}
 	if (attrs.indexed !== undefined) {
 		const indexed = Number(attrs.indexed)
-		return Number.isInteger(indexed) && indexed >= 0 ? { indexed } : undefined
+		return Number.isInteger(indexed) && indexed >= 0 && indexed <= MAX_COLOR_INDEX
+			? { indexed }
+			: undefined
 	}
 	if (attrs.auto !== undefined && boolAttr(attrs.auto)) return { auto: true }
 	return undefined
@@ -239,7 +255,8 @@ function parseAlignment(
 	if (attrs.shrinkToFit !== undefined && boolAttr(attrs.shrinkToFit)) out.shrinkToFit = true
 	if (attrs.indent !== undefined) {
 		const indent = Number(attrs.indent)
-		if (Number.isInteger(indent) && indent > 0) out.indent = indent
+		// Excel's own indent ceiling; a larger value in a file is producer garbage — degrade.
+		if (Number.isInteger(indent) && indent > 0 && indent <= MAX_INDENT) out.indent = indent
 	}
 	if (attrs.textRotation !== undefined) {
 		// 0–180 per the spec (91–180 = downward). The legacy 255 "vertical stacked" marker is not
@@ -344,8 +361,12 @@ export function parseStyles(xml: string): StyleTable {
 				// every <xf>, … — silently emptying the tables and regressing even the date hot
 				// path (adversarial review, F4.1). Unmodelled font children (family, scheme,
 				// charset, vertAlign) simply aren't in the set and fall through harmlessly.
-				if (name === "name" && token.attrs.val !== undefined) font.name = token.attrs.val
-				else if (name === "sz") {
+				if (name === "name" && token.attrs.val !== undefined) {
+					// An empty or XML-unsafe name (a control character can arrive via a decoded
+					// numeric reference) is unwritable — degrade to "no per-cell font name".
+					const val = token.attrs.val
+					if (val !== "" && isXmlSafe(val)) font.name = val
+				} else if (name === "sz") {
 					const size = Number(token.attrs.val)
 					if (Number.isFinite(size) && size > 0) font.size = size
 				} else if (name === "b") {
@@ -523,11 +544,20 @@ export function parseStyles(xml: string): StyleTable {
 				border?: BorderStyle
 				alignment?: Alignment
 			} = {}
-			// numberFormat: id 0 is General — the absence of a format, not a format. Locale ids
-			// with no portable code stay absent (documented; nothing faithful to return).
+			// numberFormat: "General" is the absence of a format, not a format — whether as id 0
+			// or as an explicitly interned custom code (LibreOffice writes <numFmt numFmtId="164"
+			// formatCode="General"/> and points xfs at it). Normalizing it away here keeps the
+			// style model symmetric with the writer, which reverse-maps 'General' to id 0. Locale
+			// ids with no portable code stay absent too (documented; nothing faithful to return).
 			if (xf.numFmtId !== 0) {
 				const code = customFormats.get(xf.numFmtId) ?? BUILTIN_FORMATS[xf.numFmtId]
-				if (code !== undefined) style.numberFormat = code
+				// An EMPTY custom code is as meaningless as General — degrade both to "no format".
+				// An XML-UNSAFE code (a control character can arrive via a decoded numeric
+				// reference in formatCode) is unwritable, exactly like an unsafe font name —
+				// degrade it too, or the bridge would crash on a file the reader tolerated.
+				if (code !== undefined && code !== "" && code !== "General" && isXmlSafe(code)) {
+					style.numberFormat = code
+				}
 			}
 			// font: id 0 is the workbook default font — "no per-cell font", by definition. A
 			// non-zero id counts even if its content happens to match the default (content dedup

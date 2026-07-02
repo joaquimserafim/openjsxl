@@ -264,3 +264,67 @@ describe("parseStyles — cellStyle materialization", () => {
 		expect(table.cellStyle(1)).toBeUndefined() // cellStyleXfs entries must not leak in
 	})
 })
+
+describe("parseStyles — General normalization (F4.4 regression)", () => {
+	it('treats an explicitly interned custom "General" as no number format', () => {
+		// LibreOffice writes <numFmt numFmtId="164" formatCode="General"/> and references it from
+		// cellXfs. General is the absence of a format — the style model must say so regardless of
+		// whether it arrives as id 0 or as a custom entry, or the bridge (which reverse-maps
+		// 'General' to id 0 on write) could never round-trip such files symmetrically.
+		const table = parseStyles(
+			SHEET(
+				'<numFmts count="1"><numFmt numFmtId="164" formatCode="General"/></numFmts>' +
+					`<cellXfs count="3">${DEFAULTS.xf0}` +
+					'<xf numFmtId="164"/>' +
+					'<xf numFmtId="164"><alignment vertical="bottom"/></xf>' +
+					"</cellXfs>",
+			),
+		)
+		expect(table.cellStyle(1)).toBeUndefined()
+		expect(table.cellStyle(2)).toEqual({ alignment: { vertical: "bottom" } })
+		// numberFormat(ref)'s own accessor is unaffected: it still resolves the code.
+		expect(table.formatCode(1)).toBe("General")
+	})
+})
+
+describe("parseStyles — degrades unwritable producer values (F4.4 review regressions)", () => {
+	// The reader's style model must only emit what the writer accepts, or the bridge could crash
+	// on files the tolerant reader was happy to open. Everything outside the shared bounds
+	// degrades to "absent" — the same treatment as unknown enums.
+	it("drops a non-hex rgb, an out-of-range theme/indexed, an empty font name, an oversized indent, and an empty format code", () => {
+		const table = parseStyles(
+			SHEET(
+				'<numFmts count="1"><numFmt numFmtId="164" formatCode=""/></numFmts>' +
+					`<fonts count="4">${DEFAULTS.fonts}` +
+					'<font><color rgb="F00"/><b/></font>' +
+					'<font><color theme="1000000000000000000000"/></font>' +
+					'<font><name val=""/><i/></font>' +
+					"</fonts>" +
+					`<cellXfs count="6">${DEFAULTS.xf0}` +
+					'<xf fontId="1"/><xf fontId="2"/><xf fontId="3"/>' +
+					'<xf><alignment indent="999" wrapText="1"/></xf>' +
+					'<xf numFmtId="164"/>' +
+					"</cellXfs>",
+			),
+		)
+		expect(table.cellStyle(1)).toEqual({ font: { bold: true } }) // rgb "F00" dropped
+		expect(table.cellStyle(2)).toBeUndefined() // theme 1e21 dropped -> empty font
+		expect(table.cellStyle(3)).toEqual({ font: { italic: true } }) // "" name dropped
+		expect(table.cellStyle(4)).toEqual({ alignment: { wrapText: true } }) // indent 999 dropped
+		expect(table.cellStyle(5)).toBeUndefined() // "" format code -> no format
+	})
+
+	it("drops an XML-unsafe format code (control char via a decoded numeric reference)", () => {
+		// &#1; decodes to U+0001 in the attribute — legal to our tolerant entity decoder, illegal
+		// in any XML 1.0 document the writer could emit. Degrade like an unsafe font name.
+		const table = parseStyles(
+			SHEET(
+				'<numFmts count="1"><numFmt numFmtId="164" formatCode="0&#1;.00"/></numFmts>' +
+					`<cellXfs count="2">${DEFAULTS.xf0}` +
+					'<xf numFmtId="164"><alignment wrapText="1"/></xf>' +
+					"</cellXfs>",
+			),
+		)
+		expect(table.cellStyle(1)).toEqual({ alignment: { wrapText: true } })
+	})
+})
