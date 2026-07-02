@@ -5,8 +5,9 @@
 [![license: MIT](https://img.shields.io/npm/l/@openjsxl/core?color=blue)](./LICENSE)
 
 The zero-dependency OOXML engine behind [`openjsxl`](https://www.npmjs.com/package/openjsxl):
-the `zip → xml → ooxml → reader` layers that turn an `.xlsx` into typed cells, built only on
-platform Web APIs (`DecompressionStream`, `TextDecoder`, …). No runtime dependencies.
+the `zip → xml → ooxml → reader` layers that turn an `.xlsx` into typed cells — and the mirror
+`writer` layer that turns plain data back into `.xlsx` bytes. Built only on platform Web APIs
+(`DecompressionStream`, `CompressionStream`, `TextDecoder`, …). No runtime dependencies.
 
 **Most users should install [`openjsxl`](https://www.npmjs.com/package/openjsxl) instead** — it
 re-exports everything here and is the stable public surface. Install `@openjsxl/core` directly
@@ -39,9 +40,30 @@ Malformed input throws a typed `XlsxError` with a discriminating `.code`
 (`'not-a-zip' | 'not-xlsx' | 'missing-part' | 'corrupt-zip' | 'part-too-large' | …`), never a
 bare `TypeError` from a corrupt file.
 
+## Writing
+
+```ts
+import { writeXlsx, workbookToInput } from '@openjsxl/core'
+
+// Author from plain data — cell types inferred from the JS values.
+const bytes = await writeXlsx({
+	sheets: [{ name: 'Report', rows: [['Item', 'Added'], ['Apples', new Date('2024-01-15')]] }],
+})
+
+// Or read → modify → write.
+const input = await workbookToInput(await openXlsx(bytes))
+input.sheets[0].rows.push(['Pears', new Date('2024-02-01')])
+const updated = await writeXlsx(input)
+```
+
+Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet name, non-finite
+number, invalid `Date`, XML-illegal characters) throws `XlsxError` with `code: 'invalid-input'`.
+The round trip is lossless for values, types, and sheet names/order.
+
 ## Exports
 
 - **Reader:** `openXlsx`, `streamSheetRows`, `Workbook`, `Worksheet`, `ReadOptions`
+- **Writer:** `writeXlsx`, `workbookToInput`, `WorkbookInput`, `SheetInput`, `CellValue`, `WriteOptions`
 - **Errors:** `XlsxError`, `XlsxErrorCode`
 - **Types:** `Row`, `Cell`, `CellType`, `Comment`, `Hyperlink`, `SheetInfo`, `CellRef`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`

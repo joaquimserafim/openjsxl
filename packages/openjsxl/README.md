@@ -5,9 +5,9 @@
 [![types included](https://img.shields.io/npm/types/openjsxl)](https://www.npmjs.com/package/openjsxl)
 [![license: MIT](https://img.shields.io/npm/l/openjsxl?color=blue)](./LICENSE)
 
-Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader for JavaScript runtimes —
-Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports the
-[`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
+Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader **and writer** for JavaScript
+runtimes — Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports
+the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
 ```sh
 npm install openjsxl
@@ -32,6 +32,19 @@ for await (const row of wb.sheet(wb.sheets[0].name).rows()) {
 For very large sheets use `streamSheetRows` (constant memory); a worksheet also exposes
 `numberFormat`, `dimension`, `mergedCells`, `hyperlinks`, `comments`, and `visible`, and the
 reader throws a typed `XlsxError` (with a discriminating `code`) on malformed input.
+
+**Writing (0.3):** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
+inferred from the JS values:
+
+```ts
+import { writeXlsx } from 'openjsxl'
+
+const bytes = await writeXlsx({
+	sheets: [{ name: 'Report', rows: [['Item', 'Added'], ['Apples', new Date('2024-01-15')]] }],
+})
+```
+
+`workbookToInput` turns an open `Workbook` back into writer input for read → modify → write.
 
 See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
 design notes, and roadmap.

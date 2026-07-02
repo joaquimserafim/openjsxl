@@ -9,9 +9,10 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **reader — hardened, pre-1.0.** Read typed cells, number formats, merged ranges,
+> Status: **reader + writer — pre-1.0.** Read typed cells, number formats, merged ranges,
 > hyperlinks, and comments; stream large sheets in roughly constant memory; get typed errors on
-> malformed input. Published on npm; a writer is next. Built in the open, plan-first — see the
+> malformed input. **New in 0.3:** write `.xlsx` from plain data with `writeXlsx`, and read →
+> modify → write with `workbookToInput`. Published on npm. Built in the open, plan-first — see the
 > [roadmap](./ROADMAP.md) and [implementation plan](./IMPLEMENTATION.md).
 
 ## Quick start
@@ -97,6 +98,61 @@ sheet.comments           // [{ ref: "A1", author: "Ada", text: "note" }, …]
 sheet.visible            // false for hidden / very-hidden sheets
 ```
 
+## Writing
+
+Describe a workbook as plain data and `writeXlsx` returns the `.xlsx` bytes. The cell type is
+inferred from each JavaScript value — `string`, `number`, `boolean`, `Date` (written as a
+date-formatted serial), and `null`/`undefined` for an empty cell:
+
+```ts
+import { writeXlsx } from 'openjsxl'
+import { writeFile } from 'node:fs/promises'
+
+const bytes = await writeXlsx({
+	sheets: [
+		{
+			name: 'Report',
+			rows: [
+				['Item', 'Qty', 'Price', 'Added'],
+				['Apples', 120, 0.5, new Date('2024-01-15')],
+				['Pears', 80, 0.75, null],
+			],
+		},
+	],
+})
+
+await writeFile('report.xlsx', bytes) // opens cleanly in Excel and LibreOffice
+```
+
+The output is deterministic (identical input → identical bytes), strings are written inline (no
+shared-strings table), and input the format can't represent — no sheets, a bad or duplicate sheet
+name, a non-finite number, an invalid `Date`, or a string with XML-illegal characters — throws a
+typed `XlsxError` with `code: 'invalid-input'` rather than producing a file Excel must repair.
+
+### Read → modify → write
+
+`workbookToInput` turns an open `Workbook` back into writer input, so you can round-trip a file:
+
+```ts
+import { openXlsx, workbookToInput, writeXlsx } from 'openjsxl'
+import { readFile, writeFile } from 'node:fs/promises'
+
+const wb = await openXlsx(await readFile('in.xlsx'))
+const input = await workbookToInput(wb)
+input.sheets[0].rows.push(['appended', 'row']) // tweak the plain data
+await writeFile('out.xlsx', await writeXlsx(input))
+```
+
+The round trip is **lossless for values, types, and sheet names/order**. What the writer does not
+yet model is carried across only where noted:
+
+| Round-trips losslessly | Not yet written (M4+) |
+| --- | --- |
+| string, number, boolean, `Date` values | custom number formats & styles (fonts, fills, borders) |
+| empty cells (sparse) | merged ranges, hyperlinks, comments |
+| sheet names & tab order | formulas (only the cached value survives) |
+| | error cells (written as their text), sheet visibility |
+
 ## Why
 
 JavaScript has no Excel library that is, all at once, maintained, permissively licensed,
@@ -108,7 +164,8 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 ## Approach
 
-- **Read first, write later.** A fast, correct reader earns trust before we ship a writer.
+- **Read first, then write.** A fast, correct reader earned trust first; the writer (0.3) is its
+  mirror image — every byte it emits reads back through the reader.
 - **Zero runtime dependencies.** Zip inflate/deflate comes from the platform
   (`DecompressionStream` / `CompressionStream`), strings from `TextEncoder`/`TextDecoder`.
 - **Layered & swappable.** `zip → xml → ooxml → reader`, with the hot path behind an

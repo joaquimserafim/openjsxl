@@ -24,6 +24,7 @@ node examples/02-sheet-to-json.mjs   # sheet → JSON records
 node examples/03-stream-rows.mjs     # constant-memory streaming
 node examples/04-metadata.mjs        # number formats, merges, links, comments, visibility
 node examples/05-error-handling.mjs  # typed XlsxError on bad input
+node examples/06-write.mjs           # write .xlsx + read → modify → write
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.

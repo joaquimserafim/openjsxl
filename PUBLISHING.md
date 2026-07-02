@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.2.1` (already set) — skip this step. For a later
+For the current release the version is `0.3.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -94,7 +94,11 @@ git push -f origin v<version>
 - **`0.2.0`** — documentation release: self-contained per-package READMEs, a `PUBLISHING.md`
   runbook, and a runnable `examples/` workspace. Reader code unchanged from `0.1.0`.
 - **`0.2.1`** — drop published source maps (install size ~178 KB → ~55 KB). No API change.
-- **`1.0.0`** — bump once the API is settled (and, likely, once the writer lands). Follow semver.
+- **`0.3.0`** — the writer: `writeXlsx` (author an `.xlsx` from plain data — values, types, and
+  multiple sheets) and `workbookToInput` (read → modify → write). Round-trip is lossless for
+  values, types, and sheet names/order; verified against real fixtures and openpyxl. Reader
+  unchanged apart from a robustness fix (an out-of-range date serial now reads as a number).
+- **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
 
