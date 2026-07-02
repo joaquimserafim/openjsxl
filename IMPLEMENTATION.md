@@ -438,7 +438,7 @@ formats travel as **code strings**, never ids. Deferred (named, not silent): com
 helper, gradient fills, rich-text runs, cell protection, named-style (`cellStyleXfs`)
 inheritance, conditional formatting, autofilter, outline levels, split (non-frozen) panes.
 
-### F4.1 — Full style read model + `Worksheet.style(ref)` ☐
+### F4.1 — Full style read model + `Worksheet.style(ref)` ☑
 **Scope.** Extend `parseStyles`' single tokenize pass to also collect `<fonts>`, `<fills>`,
 `<borders>`, and each cellXfs `<xf>`'s component ids + `<alignment>`. `StyleTable` gains
 `cellStyle(styleIndex)` — materialized lazily, cached per xf index (reference-stable; this cache
@@ -450,11 +450,13 @@ inheritance (openpyxl-compatible). A fully-default xf resolves to `undefined` (t
 keeps the cell a bare value). Colors kept verbatim as the raw union; gradient fills and exotic
 underline/rotation values degrade to `undefined`, documented.
 **Tasks**
-- [ ] `CellStyle`/`FontStyle`/`FillStyle`/`BorderStyle`/`Alignment`/`Color` types (shared).
-- [ ] `parseStyles`: fonts/fills/borders/xf components + `cellStyle(i)` with caching.
-- [ ] `Worksheet.style(ref)` accessor + export from core index.
-- [ ] Styled fixtures (builder-generated + a real-producer/openpyxl-authored file); tests for
+- [x] `CellStyle`/`FontStyle`/`FillStyle`/`BorderStyle`/`Alignment`/`Color` types (shared).
+- [x] `parseStyles`: fonts/fills/borders/xf components + `cellStyle(i)` with caching.
+- [x] `Worksheet.style(ref)` accessor + export from core index.
+- [x] Styled fixtures (real-producer `openpyxl-styled.xlsx`, provenance in data/README); tests for
   fonts/fills/borders/alignment/colors incl. rgb/theme+tint/indexed; reference-stability.
+- [x] Review fixes: section closes flush dangling font/fill/border builders (misnested input no
+  longer swallows cellXfs or grafts `<dxf>` children onto cell styles); font dispatch name-gated.
 **Acceptance.** Styled fixtures read back verbatim; `style()` and `numberFormat()` agree on
 inherited (row/col-default) styles; unstyled cells → `undefined`.
 

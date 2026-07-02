@@ -163,7 +163,11 @@ describe('readRows — real basic.xlsx', () => {
 	})
 
 	it('promotes a date-styled number to a date when a style table is supplied', () => {
-		const styles: StyleTable = { isDateStyle: (i) => i === 1, formatCode: () => undefined }
+		const styles: StyleTable = {
+			isDateStyle: (i) => i === 1,
+			formatCode: () => undefined,
+			cellStyle: () => undefined,
+		}
 		const cells = byRef([
 			...readRows(
 				sheet('<row r="1"><c r="A1" s="1"><v>43831</v></c><c r="B1"><v>42</v></c></row>'),

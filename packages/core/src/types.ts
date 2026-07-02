@@ -49,3 +49,139 @@ export interface Hyperlink {
 	/** Display-text override for the link, if any. */
 	readonly display?: string
 }
+
+// ── Styles (M4) ────────────────────────────────────────────────────────────────────────────────
+// One shared style model: what `Worksheet.style(ref)` returns IS what the writer accepts, so the
+// read→modify→write bridge carries styles as a structural pass-through.
+
+/**
+ * A color as OOXML stores it — kept RAW, never resolved. `rgb` is ARGB hex (e.g. `"FFFF0000"`);
+ * `theme` indexes the workbook theme's color scheme with an optional `tint` (−1…1); `indexed` is
+ * a legacy palette index; `auto` lets the consumer pick (usually black). Theme colors are NOT
+ * resolved to rgb on read: resolution needs a theme1.xml parser and is lossy on rewrite (a
+ * theme-aware consumer could no longer re-tint) — the raw form is what round-trips faithfully,
+ * and it is exactly what openpyxl stores too.
+ */
+export type Color =
+	| { readonly rgb: string }
+	| { readonly theme: number; readonly tint?: number }
+	| { readonly indexed: number }
+	| { readonly auto: true }
+
+/**
+ * Underline style. The exotic accounting variants (`singleAccounting`/`doubleAccounting`)
+ * degrade to no underline on read and are rejected on write (deferred, documented).
+ */
+export type UnderlineStyle = 'single' | 'double'
+
+export interface FontStyle {
+	readonly name?: string
+	/** Font size in points. */
+	readonly size?: number
+	readonly bold?: boolean
+	readonly italic?: boolean
+	readonly underline?: UnderlineStyle
+	readonly strike?: boolean
+	readonly color?: Color
+}
+
+/** Fill pattern kinds (ECMA-376 §18.18.55). `gray125` is the workbook-reserved fill 1. */
+export type PatternType =
+	| 'none'
+	| 'solid'
+	| 'mediumGray'
+	| 'darkGray'
+	| 'lightGray'
+	| 'darkHorizontal'
+	| 'darkVertical'
+	| 'darkDown'
+	| 'darkUp'
+	| 'darkGrid'
+	| 'darkTrellis'
+	| 'lightHorizontal'
+	| 'lightVertical'
+	| 'lightDown'
+	| 'lightUp'
+	| 'lightGrid'
+	| 'lightTrellis'
+	| 'gray125'
+	| 'gray0625'
+
+/**
+ * A pattern fill. For the everyday solid fill, the visible color is `fgColor` (OOXML's rule —
+ * `bgColor` shows only through pattern gaps). Gradient fills are not modelled (deferred): a
+ * gradient-filled cell reads as having no fill.
+ */
+export interface FillStyle {
+	readonly patternType: PatternType
+	readonly fgColor?: Color
+	readonly bgColor?: Color
+}
+
+/** Border line styles (ECMA-376 §18.18.3). An edge with no style is simply absent. */
+export type BorderLineStyle =
+	| 'thin'
+	| 'medium'
+	| 'thick'
+	| 'dashed'
+	| 'dotted'
+	| 'double'
+	| 'hair'
+	| 'mediumDashed'
+	| 'dashDot'
+	| 'mediumDashDot'
+	| 'dashDotDot'
+	| 'mediumDashDotDot'
+	| 'slantDashDot'
+
+export interface BorderEdge {
+	readonly style: BorderLineStyle
+	readonly color?: Color
+}
+
+/** Per-edge borders. Diagonal borders are not modelled (deferred). */
+export interface BorderStyle {
+	readonly top?: BorderEdge
+	readonly right?: BorderEdge
+	readonly bottom?: BorderEdge
+	readonly left?: BorderEdge
+}
+
+export type HorizontalAlignment =
+	| 'left'
+	| 'center'
+	| 'right'
+	| 'justify'
+	| 'fill'
+	| 'centerContinuous'
+	| 'distributed'
+
+export type VerticalAlignment = 'top' | 'center' | 'bottom' | 'justify' | 'distributed'
+
+export interface Alignment {
+	readonly horizontal?: HorizontalAlignment
+	readonly vertical?: VerticalAlignment
+	readonly wrapText?: boolean
+	readonly shrinkToFit?: boolean
+	/** Indent level (whole units of about 3 spaces), 0–250. */
+	readonly indent?: number
+	/**
+	 * Text rotation in degrees, 0–180 (91–180 mean 1–90° downward, per the spec). The legacy
+	 * marker 255 ("vertical stacked") is not modelled and degrades to no rotation.
+	 */
+	readonly textRotation?: number
+}
+
+/**
+ * The resolved style of one cell. Every component is optional; a cell whose effective format is
+ * the workbook default resolves to no style at all (`Worksheet.style(ref)` returns `undefined`).
+ * `numberFormat` is always the format CODE string (e.g. `"yyyy-mm-dd"`, `"0.00%"`) — ids are a
+ * file-internal detail and never appear in the API.
+ */
+export interface CellStyle {
+	readonly numberFormat?: string
+	readonly font?: FontStyle
+	readonly fill?: FillStyle
+	readonly border?: BorderStyle
+	readonly alignment?: Alignment
+}

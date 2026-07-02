@@ -9,7 +9,7 @@ import {
 	resolveTarget,
 	type StyleTable,
 } from '../ooxml'
-import type { Cell, Comment, Hyperlink, SheetInfo } from '../types'
+import type { Cell, CellStyle, Comment, Hyperlink, SheetInfo } from '../types'
 import { openZip, type ZipArchive } from '../zip'
 import {
 	parseCellStyles,
@@ -128,6 +128,18 @@ export class Worksheet {
 	 */
 	numberFormat(ref: string): string | undefined {
 		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref))
+	}
+
+	/**
+	 * The resolved style of the cell at `ref` — number format code, font, fill, border, and
+	 * alignment (F4.1). Resolution shares the same effective-style map as {@link numberFormat}
+	 * (cell `s` → row `customFormat` default → column default), so the two always agree.
+	 * `undefined` for an unstyled cell, an absent cell, or a workbook with no style table —
+	 * "no style" and "the default style" are deliberately the same answer. Objects are cached
+	 * per distinct format record: two cells sharing a format return the same object.
+	 */
+	style(ref: string): CellStyle | undefined {
+		return this.#context.styles?.cellStyle(this.#cellStyleMap().get(ref))
 	}
 
 	/**

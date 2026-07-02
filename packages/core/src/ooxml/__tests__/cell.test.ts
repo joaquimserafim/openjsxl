@@ -93,7 +93,11 @@ describe('decodeCell', () => {
 
 describe('decodeCell — date detection (F2.1)', () => {
 	// A stub style table where style index 1 is a date format and everything else is not.
-	const dateStyles: StyleTable = { isDateStyle: (i) => i === 1, formatCode: () => undefined }
+	const dateStyles: StyleTable = {
+		isDateStyle: (i) => i === 1,
+		formatCode: () => undefined,
+		cellStyle: () => undefined,
+	}
 	const dateCtx: DecodeContext = { sharedStrings: ['hi'], styles: dateStyles }
 
 	it('decodes a date-styled number as a Date (1900 system)', () => {

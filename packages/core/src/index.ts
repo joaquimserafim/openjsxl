@@ -9,7 +9,26 @@ export { dateToSerial, serialToDate } from './ooxml/dates'
 // Reader API (F1.7) — open a workbook and read typed cells.
 export { openXlsx, type ReadOptions, streamSheetRows, Workbook, Worksheet } from './reader/workbook'
 export type { Row } from './reader/worksheet'
-export type { Cell, CellType, Comment, Hyperlink, SheetInfo } from './types'
+// Style model (F4.1) — shared by the reader (`Worksheet.style(ref)`) and, from F4.2, the writer.
+export type {
+	Alignment,
+	BorderEdge,
+	BorderLineStyle,
+	BorderStyle,
+	Cell,
+	CellStyle,
+	CellType,
+	Color,
+	Comment,
+	FillStyle,
+	FontStyle,
+	HorizontalAlignment,
+	Hyperlink,
+	PatternType,
+	SheetInfo,
+	UnderlineStyle,
+	VerticalAlignment,
+} from './types'
 // Writer API (F3.2) — serialize a workbook described as plain data to .xlsx bytes.
 // The bridge (F3.3) turns an open Workbook back into writer input, closing the round trip.
 export {

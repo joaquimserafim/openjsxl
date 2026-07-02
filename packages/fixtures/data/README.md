@@ -46,6 +46,13 @@ Excel / LibreOffice / openpyxl output. Their provenance and licenses are recorde
 back to its source. Differently-licensed files we only test against locally live in the
 git-ignored [`../local/`](../local) directory and are never committed.
 
+- **`openpyxl-styled.xlsx`** — authored by **openpyxl 3.1.5** (script kept in the F4.1 PR
+  description) to exercise the style read model: fonts (bold/italic/underline/strike, name,
+  size), rgb + theme-with-tint + indexed colors, solid and `lightGray` pattern fills, per-edge
+  borders with and without colors, alignment (horizontal/vertical/wrap/indent/rotation), and
+  built-in + custom (`"kg" 0.0`) number formats. One `Styled` sheet, 15 cells, each style on a
+  known ref — `reader/__tests__/cell-style.test.ts` asserts them verbatim.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

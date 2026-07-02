@@ -83,6 +83,7 @@ describe('inherited styles — no-r cells agree across accessors', () => {
 		styles: {
 			isDateStyle: (i) => i === 7,
 			formatCode: (i) => (i === 7 ? 'mm-dd-yy' : 'General'),
+			cellStyle: () => undefined,
 		},
 	}
 
