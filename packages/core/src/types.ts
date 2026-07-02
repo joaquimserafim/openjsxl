@@ -1,7 +1,7 @@
 // Public cell model. A discriminated union, so narrowing on `type` also narrows
 // `value`: `if (cell.type === 'date') { cell.value /* : Date */ }`.
 
-export type CellType = 'empty' | 'string' | 'number' | 'boolean' | 'date' | 'error'
+export type CellType = "empty" | "string" | "number" | "boolean" | "date" | "error"
 
 interface CellBase {
 	/** A1 reference, e.g. "B2". */
@@ -9,12 +9,12 @@ interface CellBase {
 }
 
 export type Cell =
-	| (CellBase & { readonly type: 'empty'; readonly value: null })
-	| (CellBase & { readonly type: 'string'; readonly value: string })
-	| (CellBase & { readonly type: 'number'; readonly value: number })
-	| (CellBase & { readonly type: 'boolean'; readonly value: boolean })
-	| (CellBase & { readonly type: 'date'; readonly value: Date })
-	| (CellBase & { readonly type: 'error'; readonly value: string })
+	| (CellBase & { readonly type: "empty"; readonly value: null })
+	| (CellBase & { readonly type: "string"; readonly value: string })
+	| (CellBase & { readonly type: "number"; readonly value: number })
+	| (CellBase & { readonly type: "boolean"; readonly value: boolean })
+	| (CellBase & { readonly type: "date"; readonly value: Date })
+	| (CellBase & { readonly type: "error"; readonly value: string })
 
 export interface SheetInfo {
 	/** Sheet name as shown on Excel's tab. */
@@ -72,7 +72,7 @@ export type Color =
  * Underline style. The exotic accounting variants (`singleAccounting`/`doubleAccounting`)
  * degrade to no underline on read and are rejected on write (deferred, documented).
  */
-export type UnderlineStyle = 'single' | 'double'
+export type UnderlineStyle = "single" | "double"
 
 export interface FontStyle {
 	readonly name?: string
@@ -87,25 +87,25 @@ export interface FontStyle {
 
 /** Fill pattern kinds (ECMA-376 §18.18.55). `gray125` is the workbook-reserved fill 1. */
 export type PatternType =
-	| 'none'
-	| 'solid'
-	| 'mediumGray'
-	| 'darkGray'
-	| 'lightGray'
-	| 'darkHorizontal'
-	| 'darkVertical'
-	| 'darkDown'
-	| 'darkUp'
-	| 'darkGrid'
-	| 'darkTrellis'
-	| 'lightHorizontal'
-	| 'lightVertical'
-	| 'lightDown'
-	| 'lightUp'
-	| 'lightGrid'
-	| 'lightTrellis'
-	| 'gray125'
-	| 'gray0625'
+	| "none"
+	| "solid"
+	| "mediumGray"
+	| "darkGray"
+	| "lightGray"
+	| "darkHorizontal"
+	| "darkVertical"
+	| "darkDown"
+	| "darkUp"
+	| "darkGrid"
+	| "darkTrellis"
+	| "lightHorizontal"
+	| "lightVertical"
+	| "lightDown"
+	| "lightUp"
+	| "lightGrid"
+	| "lightTrellis"
+	| "gray125"
+	| "gray0625"
 
 /**
  * A pattern fill. For the everyday solid fill, the visible color is `fgColor` (OOXML's rule —
@@ -120,19 +120,19 @@ export interface FillStyle {
 
 /** Border line styles (ECMA-376 §18.18.3). An edge with no style is simply absent. */
 export type BorderLineStyle =
-	| 'thin'
-	| 'medium'
-	| 'thick'
-	| 'dashed'
-	| 'dotted'
-	| 'double'
-	| 'hair'
-	| 'mediumDashed'
-	| 'dashDot'
-	| 'mediumDashDot'
-	| 'dashDotDot'
-	| 'mediumDashDotDot'
-	| 'slantDashDot'
+	| "thin"
+	| "medium"
+	| "thick"
+	| "dashed"
+	| "dotted"
+	| "double"
+	| "hair"
+	| "mediumDashed"
+	| "dashDot"
+	| "mediumDashDot"
+	| "dashDotDot"
+	| "mediumDashDotDot"
+	| "slantDashDot"
 
 export interface BorderEdge {
 	readonly style: BorderLineStyle
@@ -148,15 +148,15 @@ export interface BorderStyle {
 }
 
 export type HorizontalAlignment =
-	| 'left'
-	| 'center'
-	| 'right'
-	| 'justify'
-	| 'fill'
-	| 'centerContinuous'
-	| 'distributed'
+	| "left"
+	| "center"
+	| "right"
+	| "justify"
+	| "fill"
+	| "centerContinuous"
+	| "distributed"
 
-export type VerticalAlignment = 'top' | 'center' | 'bottom' | 'justify' | 'distributed'
+export type VerticalAlignment = "top" | "center" | "bottom" | "justify" | "distributed"
 
 export interface Alignment {
 	readonly horizontal?: HorizontalAlignment

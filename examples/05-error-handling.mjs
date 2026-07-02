@@ -7,8 +7,8 @@
 // `XlsxError` whose `code` you can branch on ('not-a-zip' | 'not-xlsx' | 'missing-part' |
 // 'corrupt-zip' | 'unsupported' | 'no-such-sheet' | 'part-too-large').
 
-import { readFile } from 'node:fs/promises'
-import { openXlsx, XlsxError } from 'openjsxl'
+import { readFile } from "node:fs/promises"
+import { openXlsx, XlsxError } from "openjsxl"
 
 // 1) Garbage bytes — not a zip at all.
 try {
@@ -20,8 +20,8 @@ try {
 
 // 2) A valid workbook, but asking for a sheet that isn't there.
 try {
-	const wb = await openXlsx(await readFile(new URL('./data/sample.xlsx', import.meta.url)))
-	wb.sheet('Does Not Exist')
+	const wb = await openXlsx(await readFile(new URL("./data/sample.xlsx", import.meta.url)))
+	wb.sheet("Does Not Exist")
 } catch (err) {
 	if (!(err instanceof XlsxError)) throw err
 	console.log(`missing sheet   → XlsxError code="${err.code}"`)
@@ -29,7 +29,7 @@ try {
 
 // 3) The zip-bomb guard: cap any single decompressed part.
 try {
-	const bytes = await readFile(new URL('./data/sample.xlsx', import.meta.url))
+	const bytes = await readFile(new URL("./data/sample.xlsx", import.meta.url))
 	await openXlsx(bytes, { maxPartBytes: 32 })
 } catch (err) {
 	if (!(err instanceof XlsxError)) throw err

@@ -1,6 +1,6 @@
-import { XlsxError } from '../errors'
-import { crc32 } from './crc32'
-import { deflateRaw } from './deflate'
+import { XlsxError } from "../errors"
+import { crc32 } from "./crc32"
+import { deflateRaw } from "./deflate"
 
 // Write the OPC/ZIP container that wraps every .xlsx — the mirror image of zip/central-directory.ts.
 // Given a list of named byte-parts, emit an archive whose bytes re-read byte-identically through
@@ -81,7 +81,7 @@ export interface ZipInput {
 export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array> {
 	if (entries.length >= MAX_ENTRIES) {
 		throw new XlsxError(
-			'unsupported',
+			"unsupported",
 			`too many zip entries (${entries.length}); would require ZIP64, which is not supported`,
 		)
 	}
@@ -95,7 +95,7 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 		// A name ending in `/` is a ZIP directory placeholder: the reader skips it (line 108 of
 		// central-directory.ts) so it never enters the entries map. Writing a real part under such
 		// a name would emit bytes that vanish on read — refuse it rather than break the round-trip.
-		if (entry.name.endsWith('/')) {
+		if (entry.name.endsWith("/")) {
 			throw new Error(`invalid zip entry name (directory placeholder): ${entry.name}`)
 		}
 		if (seen.has(entry.name)) throw new Error(`duplicate zip entry name: ${entry.name}`)
@@ -108,7 +108,7 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 		// corrupting the archive. Guard it like the other classic-ZIP ceilings.
 		if (name.length > 0xffff) {
 			throw new XlsxError(
-				'unsupported',
+				"unsupported",
 				`zip entry name too long (${name.length} bytes); exceeds the classic-ZIP name-length field`,
 			)
 		}
@@ -129,7 +129,7 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 			offset >= U32_CEILING
 		) {
 			throw new XlsxError(
-				'unsupported',
+				"unsupported",
 				`zip entry ${entry.name} too large for a classic (ZIP64-free) archive`,
 			)
 		}
@@ -181,8 +181,8 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 	// directory begins. Guard it and the directory size against the same u32 ceiling.
 	if (offset >= U32_CEILING || directory.length >= U32_CEILING) {
 		throw new XlsxError(
-			'unsupported',
-			'zip archive too large for a classic (ZIP64-free) archive',
+			"unsupported",
+			"zip archive too large for a classic (ZIP64-free) archive",
 		)
 	}
 

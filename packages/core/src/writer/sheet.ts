@@ -1,9 +1,9 @@
-import { XlsxError } from '../errors'
-import { formatRef } from '../ooxml/a1'
-import { dateToSerial } from '../ooxml/dates'
-import type { StyleRegistry } from './styles'
-import type { CellInput, CellValue, StyledCell } from './types'
-import { escapeText, isXmlSafe, preserveAttr } from './xml'
+import { XlsxError } from "../errors"
+import { formatRef } from "../ooxml/a1"
+import { dateToSerial } from "../ooxml/dates"
+import type { StyleRegistry } from "./styles"
+import type { CellInput, CellValue, StyledCell } from "./types"
+import { escapeText, isXmlSafe, preserveAttr } from "./xml"
 
 // Serialize one sheet's rows into worksheet XML (`xl/worksheets/sheetN.xml`). The element order the
 // schema requires here is <dimension> then <sheetData>; within <sheetData>, rows ascend by index and
@@ -15,7 +15,7 @@ import { escapeText, isXmlSafe, preserveAttr } from './xml'
 // the dimension, which is how a border or fill lands on an empty cell.
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
 // A finite JS number as it appears in <v>. String() gives the shortest decimal that parses back to
 // the same double via the reader's Number() — so the value round-trips exactly. Non-finite values
@@ -34,25 +34,25 @@ function splitInput(
 	input: CellInput,
 ): { readonly value: CellValue; readonly styled: StyledCell | undefined } {
 	if (input === null || input === undefined) return { value: input, styled: undefined }
-	if (typeof input !== 'object' || input instanceof Date) {
+	if (typeof input !== "object" || input instanceof Date) {
 		return { value: input, styled: undefined }
 	}
 	const ref = formatRef({ col, row })
 	if (Array.isArray(input)) {
-		throw new XlsxError('invalid-input', `cell ${ref}: an array is not a cell value`)
+		throw new XlsxError("invalid-input", `cell ${ref}: an array is not a cell value`)
 	}
 	const record = input as unknown as Record<string, unknown>
 	for (const key of Object.keys(record)) {
-		if (key !== 'value' && key !== 'style') {
+		if (key !== "value" && key !== "style") {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`cell ${ref}: a styled cell allows only "value" and "style" (got "${key}")`,
 			)
 		}
 	}
-	if (!('value' in record)) {
+	if (!("value" in record)) {
 		throw new XlsxError(
-			'invalid-input',
+			"invalid-input",
 			`cell ${ref}: an object cell must be { value, style? } — did you mean a StyledCell?`,
 		)
 	}
@@ -62,11 +62,11 @@ function splitInput(
 	if (
 		value !== null &&
 		value !== undefined &&
-		typeof value === 'object' &&
+		typeof value === "object" &&
 		!(value instanceof Date)
 	) {
 		throw new XlsxError(
-			'invalid-input',
+			"invalid-input",
 			`cell ${ref}: a styled cell's value cannot be an object`,
 		)
 	}
@@ -95,40 +95,40 @@ function renderCell(
 	} else if (styled?.style !== undefined) {
 		xf = styles.xfIndexFor(styled.style, false, ref)
 	}
-	const sAttr = xf === 0 ? '' : ` s="${xf}"`
+	const sAttr = xf === 0 ? "" : ` s="${xf}"`
 
 	if (value === null || value === undefined) {
 		// A styled blank emits a valueless cell; an unstyled (or default-styled) empty is omitted.
 		return xf === 0 ? undefined : `<c r="${ref}"${sAttr}/>`
 	}
-	if (typeof value === 'string') {
+	if (typeof value === "string") {
 		// A forbidden control character or lone surrogate would make the part not well-formed (or be
 		// silently mangled to U+FFFD by TextEncoder) — reject rather than emit a broken/lossy file.
 		if (!isXmlSafe(value)) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`cell ${ref}: string contains a character not allowed in XML (a control character or lone surrogate)`,
 			)
 		}
 		return `<c r="${ref}"${sAttr} t="inlineStr"><is><t${preserveAttr(value)}>${escapeText(value)}</t></is></c>`
 	}
-	if (typeof value === 'boolean') {
+	if (typeof value === "boolean") {
 		return `<c r="${ref}"${sAttr} t="b"><v>${value ? 1 : 0}</v></c>`
 	}
-	if (typeof value === 'number') {
+	if (typeof value === "number") {
 		if (!Number.isFinite(value)) {
-			throw new XlsxError('invalid-input', `cell ${ref}: ${value} is not a finite number`)
+			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`)
 		}
 		return `<c r="${ref}"${sAttr}><v>${numberToXml(value)}</v></c>`
 	}
 	if (value instanceof Date) {
 		const serial = dateToSerial(value, date1904)
 		if (!Number.isFinite(serial)) {
-			throw new XlsxError('invalid-input', `cell ${ref}: invalid Date`)
+			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`)
 		}
 		return `<c r="${ref}"${sAttr}><v>${numberToXml(serial)}</v></c>`
 	}
-	throw new XlsxError('invalid-input', `cell ${ref}: unsupported cell value type`)
+	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`)
 }
 
 export interface WorksheetResult {
@@ -157,7 +157,7 @@ export function worksheetXml(
 		if (cells === undefined) continue
 		if (!Array.isArray(cells)) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`sheet row ${r + 1}: a row must be an array of cell values`,
 			)
 		}
@@ -174,20 +174,20 @@ export function worksheetXml(
 			if (colNum > maxCol) maxCol = colNum
 			cellXmls.push(rendered)
 		}
-		if (cellXmls.length > 0) rowXmls.push(`<row r="${rowNum}">${cellXmls.join('')}</row>`)
+		if (cellXmls.length > 0) rowXmls.push(`<row r="${rowNum}">${cellXmls.join("")}</row>`)
 	}
 
 	// Bounding box of the populated cells, in A1 notation. An entirely empty sheet is "A1" (Excel's
 	// convention); a single cell collapses to that one ref rather than a degenerate "X:X" range.
 	const dimension =
 		minRow === 0
-			? 'A1'
+			? "A1"
 			: minRow === maxRow && minCol === maxCol
 				? formatRef({ col: minCol, row: minRow })
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`
 
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"><dimension ref="${dimension}"/><sheetData>${rowXmls.join(
-		'',
+		"",
 	)}</sheetData></worksheet>`
 	return { xml }
 }

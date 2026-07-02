@@ -1,9 +1,9 @@
-import { loadFixture } from '@openjsxl/fixtures'
-import { describe, expect, it } from 'vitest'
-import { XlsxError } from '../errors'
-import { openXlsx, streamSheetRows } from '../reader/workbook'
-import { createXmlStream, tokenize } from '../xml'
-import { openZip } from '../zip'
+import { loadFixture } from "@openjsxl/fixtures"
+import { describe, expect, it } from "vitest"
+import { XlsxError } from "../errors"
+import { openXlsx, streamSheetRows } from "../reader/workbook"
+import { createXmlStream, tokenize } from "../xml"
+import { openZip } from "../zip"
 
 // Robustness by fuzzing (F2.4e): for ANY input the tokenizer must not throw or hang, and the
 // zip/reader must either parse or throw a typed XlsxError — never a bare TypeError/RangeError
@@ -23,7 +23,7 @@ function rng(seed: number): () => number {
 const XML_CHARS = `<>/&;"'= \t\nabcxyz0![]CDATA-?xmlkr:`
 
 function randomXmlish(r: () => number, maxLen: number): string {
-	let s = ''
+	let s = ""
 	const len = Math.floor(r() * maxLen)
 	for (let i = 0; i < len; i++) s += XML_CHARS.charAt(Math.floor(r() * XML_CHARS.length))
 	return s
@@ -43,8 +43,8 @@ function mutate(base: Uint8Array, r: () => number): Uint8Array {
 	return bytes
 }
 
-describe('fuzz — tokenizer never throws or hangs', () => {
-	it('tokenizes arbitrary XML-ish strings to completion', () => {
+describe("fuzz — tokenizer never throws or hangs", () => {
+	it("tokenizes arbitrary XML-ish strings to completion", () => {
 		const r = rng(1)
 		for (let n = 0; n < 3000; n++) {
 			const s = randomXmlish(r, 80)
@@ -52,7 +52,7 @@ describe('fuzz — tokenizer never throws or hangs', () => {
 		}
 	})
 
-	it('feeds arbitrary strings through the chunk stream in random splits', () => {
+	it("feeds arbitrary strings through the chunk stream in random splits", () => {
 		const r = rng(2)
 		for (let n = 0; n < 2000; n++) {
 			const s = randomXmlish(r, 80)
@@ -69,8 +69,8 @@ describe('fuzz — tokenizer never throws or hangs', () => {
 	})
 })
 
-describe('fuzz — openZip only ever throws XlsxError', () => {
-	it('on random byte buffers', () => {
+describe("fuzz — openZip only ever throws XlsxError", () => {
+	it("on random byte buffers", () => {
 		const r = rng(3)
 		for (let n = 0; n < 3000; n++) {
 			const bytes = randomBytes(r, 260)
@@ -82,9 +82,9 @@ describe('fuzz — openZip only ever throws XlsxError', () => {
 		}
 	})
 
-	it('on a mutated valid archive (including reading each part)', async () => {
+	it("on a mutated valid archive (including reading each part)", async () => {
 		const r = rng(4)
-		const base = await loadFixture('basic.xlsx')
+		const base = await loadFixture("basic.xlsx")
 		for (let n = 0; n < 400; n++) {
 			try {
 				const zip = openZip(mutate(base, r))
@@ -102,10 +102,10 @@ describe('fuzz — openZip only ever throws XlsxError', () => {
 	})
 })
 
-describe('fuzz — openXlsx only ever throws XlsxError', () => {
-	it('on a mutated valid workbook (draining every row)', async () => {
+describe("fuzz — openXlsx only ever throws XlsxError", () => {
+	it("on a mutated valid workbook (draining every row)", async () => {
 		const r = rng(5)
-		const base = await loadFixture('basic.xlsx')
+		const base = await loadFixture("basic.xlsx")
 		for (let n = 0; n < 400; n++) {
 			try {
 				const wb = await openXlsx(mutate(base, r))
@@ -123,25 +123,25 @@ describe('fuzz — openXlsx only ever throws XlsxError', () => {
 	})
 })
 
-describe('regression — adversarial inputs the random seed cannot reach', () => {
+describe("regression — adversarial inputs the random seed cannot reach", () => {
 	// Caught by an adversarial review, not the seeded fuzz: a column ref long enough to overflow
 	// columnToIndex to a non-integer used to be *returned* (not thrown), poisoning lastCol; a
 	// following cell without an `r` attribute then formatted { col: Infinity }, throwing a bare
 	// Error out of the read path. The reader must degrade gracefully — no throw, or an XlsxError.
 	// edge-overflow-col.xlsx is a valid package whose one row's first cell uses a 300-letter
 	// column ref, followed by a cell with no `r`.
-	it('reads the row via positional fallback instead of throwing (Worksheet.rows())', async () => {
-		const bytes = await loadFixture('edge-overflow-col.xlsx')
+	it("reads the row via positional fallback instead of throwing (Worksheet.rows())", async () => {
+		const bytes = await loadFixture("edge-overflow-col.xlsx")
 		const wb = await openXlsx(bytes)
 		const rows = []
-		for await (const row of wb.sheet('S').rows()) rows.push(row)
+		for await (const row of wb.sheet("S").rows()) rows.push(row)
 		// One row survives; the overflowing ref is kept verbatim and the next cell is positioned.
 		expect(rows).toHaveLength(1)
 		expect(rows[0]?.cells).toHaveLength(2)
 	})
 
-	it('reads the row via positional fallback instead of throwing (streamSheetRows())', async () => {
-		const bytes = await loadFixture('edge-overflow-col.xlsx')
+	it("reads the row via positional fallback instead of throwing (streamSheetRows())", async () => {
+		const bytes = await loadFixture("edge-overflow-col.xlsx")
 		const rows = []
 		for await (const row of streamSheetRows(bytes)) rows.push(row)
 		expect(rows).toHaveLength(1)
@@ -149,13 +149,13 @@ describe('regression — adversarial inputs the random seed cannot reach', () =>
 	})
 })
 
-describe('fuzz — streamSheetRows only ever throws XlsxError', () => {
+describe("fuzz — streamSheetRows only ever throws XlsxError", () => {
 	// The constant-memory streaming reader (F2.2) is a separate path from Worksheet.rows(): it
 	// tokenizes the worksheet chunk by chunk rather than as one string. Fuzz it directly so the
 	// streaming row/cell state machine is exercised on garbage, not just the in-memory path.
-	it('on a mutated valid workbook (draining the stream)', async () => {
+	it("on a mutated valid workbook (draining the stream)", async () => {
 		const r = rng(6)
-		const base = await loadFixture('basic.xlsx')
+		const base = await loadFixture("basic.xlsx")
 		for (let n = 0; n < 400; n++) {
 			try {
 				let seen = 0

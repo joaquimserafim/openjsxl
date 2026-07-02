@@ -14,7 +14,7 @@ const CODE_LOWER_A = 97
 const CODE_LOWER_Z = 122
 
 export function columnToIndex(letters: string): number {
-	if (letters.length === 0) throw new Error('empty column reference')
+	if (letters.length === 0) throw new Error("empty column reference")
 	let index = 0
 	for (let i = 0; i < letters.length; i++) {
 		const code = letters.charCodeAt(i)
@@ -37,7 +37,7 @@ export function columnToIndex(letters: string): number {
 export function indexToColumn(index: number): string {
 	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid column index: ${index}`)
 	let remaining = index
-	let letters = ''
+	let letters = ""
 	while (remaining > 0) {
 		const digit = (remaining - 1) % 26
 		letters = String.fromCharCode(CODE_UPPER_A + digit) + letters

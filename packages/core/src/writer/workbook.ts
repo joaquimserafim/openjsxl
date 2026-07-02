@@ -1,10 +1,10 @@
-import { XlsxError } from '../errors'
-import { worksheetXml } from './sheet'
-import { createStyleRegistry } from './styles'
-import { DEFAULT_THEME_XML } from './theme'
-import type { WorkbookInput, WriteOptions } from './types'
-import { escapeAttr, isXmlSafe } from './xml'
-import { writeZip, type ZipInput } from './zip'
+import { XlsxError } from "../errors"
+import { worksheetXml } from "./sheet"
+import { createStyleRegistry } from "./styles"
+import { DEFAULT_THEME_XML } from "./theme"
+import type { WorkbookInput, WriteOptions } from "./types"
+import { escapeAttr, isXmlSafe } from "./xml"
+import { writeZip, type ZipInput } from "./zip"
 
 // writeXlsx — the public workbook writer (F3.2, styled cells F4.2). Given a workbook described as
 // plain data, emit the minimal valid OPC part set and pack it with writeZip. The output re-reads
@@ -28,12 +28,12 @@ import { writeZip, type ZipInput } from './zip'
 const encoder = new TextEncoder()
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 
-const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-const NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-const NS_PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
-const NS_CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
-const CT_BASE = 'application/vnd.openxmlformats-officedocument.spreadsheetml'
-const CT_RELS = 'application/vnd.openxmlformats-package.relationships+xml'
+const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+const NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+const NS_CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+const CT_BASE = "application/vnd.openxmlformats-officedocument.spreadsheetml"
+const CT_RELS = "application/vnd.openxmlformats-package.relationships+xml"
 
 // Excel's sheet-name rules: 1–31 chars, none of \ / ? * [ ] :, and unique ignoring case. A file that
 // breaks these opens with a "repair" prompt, so we refuse to write it.
@@ -43,23 +43,23 @@ const FORBIDDEN_SHEET_NAME = /[\\/?*[\]:]/
 function validate(workbook: WorkbookInput): void {
 	const sheets = workbook?.sheets
 	if (!Array.isArray(sheets) || sheets.length === 0) {
-		throw new XlsxError('invalid-input', 'a workbook needs at least one sheet')
+		throw new XlsxError("invalid-input", "a workbook needs at least one sheet")
 	}
 	const seen = new Set<string>()
 	for (const sheet of sheets) {
 		const name = sheet?.name
-		if (typeof name !== 'string' || name.length === 0) {
-			throw new XlsxError('invalid-input', 'a sheet name must be a non-empty string')
+		if (typeof name !== "string" || name.length === 0) {
+			throw new XlsxError("invalid-input", "a sheet name must be a non-empty string")
 		}
 		if (name.length > MAX_SHEET_NAME) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`sheet name "${name}" exceeds ${MAX_SHEET_NAME} characters`,
 			)
 		}
 		if (FORBIDDEN_SHEET_NAME.test(name)) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`sheet name "${name}" contains a forbidden character (\\ / ? * [ ] :)`,
 			)
 		}
@@ -67,7 +67,7 @@ function validate(workbook: WorkbookInput): void {
 		// the same way it would a cell — the whole file would then fail to open.
 		if (!isXmlSafe(name)) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`sheet name "${name}" contains a character not allowed in XML`,
 			)
 		}
@@ -75,13 +75,13 @@ function validate(workbook: WorkbookInput): void {
 		const key = name.toLowerCase()
 		if (seen.has(key)) {
 			throw new XlsxError(
-				'invalid-input',
+				"invalid-input",
 				`duplicate sheet name "${name}" (case-insensitive)`,
 			)
 		}
 		seen.add(key)
 		if (!Array.isArray(sheet.rows)) {
-			throw new XlsxError('invalid-input', `sheet "${name}": rows must be an array`)
+			throw new XlsxError("invalid-input", `sheet "${name}": rows must be an array`)
 		}
 	}
 }
@@ -128,28 +128,28 @@ export async function writeXlsx(
 					'<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>',
 				]
 			: []),
-	].join('')
+	].join("")
 	add(
-		'[Content_Types].xml',
+		"[Content_Types].xml",
 		`${XML_DECL}\n<Types xmlns="${NS_CT}"><Default Extension="rels" ContentType="${CT_RELS}"/><Default Extension="xml" ContentType="application/xml"/>${overrides}</Types>`,
 	)
 
 	// _rels/.rels — the package's single relationship: officeDocument → the workbook.
 	add(
-		'_rels/.rels',
+		"_rels/.rels",
 		`${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}"><Relationship Id="rId1" Type="${NS_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
 	)
 
 	// xl/workbook.xml — the sheet list. rId(i+1) links each <sheet> to its worksheet rel below.
-	const workbookPr = date1904 ? '<workbookPr date1904="1"/>' : ''
+	const workbookPr = date1904 ? '<workbookPr date1904="1"/>' : ""
 	const sheetsXml = sheets
 		.map(
 			(sheet, i) =>
 				`<sheet name="${escapeAttr(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`,
 		)
-		.join('')
+		.join("")
 	add(
-		'xl/workbook.xml',
+		"xl/workbook.xml",
 		`${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}<sheets>${sheetsXml}</sheets></workbook>`,
 	)
 
@@ -170,14 +170,14 @@ export async function writeXlsx(
 					`<Relationship Id="rId${sheets.length + (needStyles ? 2 : 1)}" Type="${NS_REL}/theme" Target="theme/theme1.xml"/>`,
 				]
 			: []),
-	].join('')
+	].join("")
 	add(
-		'xl/_rels/workbook.xml.rels',
+		"xl/_rels/workbook.xml.rels",
 		`${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${relItems}</Relationships>`,
 	)
 
-	if (needStyles) add('xl/styles.xml', styles.stylesXml())
-	if (needTheme) add('xl/theme/theme1.xml', DEFAULT_THEME_XML)
+	if (needStyles) add("xl/styles.xml", styles.stylesXml())
+	if (needTheme) add("xl/theme/theme1.xml", DEFAULT_THEME_XML)
 
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml)

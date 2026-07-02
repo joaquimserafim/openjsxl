@@ -6,7 +6,7 @@
 // numeric character references for anything else — the bytes go out as UTF-8.
 
 export function escapeText(s: string): string {
-	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 export function escapeAttr(s: string): string {
@@ -16,10 +16,10 @@ export function escapeAttr(s: string): string {
 	// are exempt from normalization, so emitting &#9;/&#10;/&#13; keeps the value verbatim for
 	// every consumer. Element TEXT is not normalized, so escapeText stays as-is.
 	return escapeText(s)
-		.replace(/"/g, '&quot;')
-		.replace(/\t/g, '&#9;')
-		.replace(/\n/g, '&#10;')
-		.replace(/\r/g, '&#13;')
+		.replace(/"/g, "&quot;")
+		.replace(/\t/g, "&#9;")
+		.replace(/\n/g, "&#10;")
+		.replace(/\r/g, "&#13;")
 }
 
 // Whether `s` can be serialized into XML text/attributes without corrupting the document or the
@@ -60,5 +60,5 @@ export function needsPreserve(s: string): boolean {
 
 /** The ` xml:space="preserve"` attribute (with leading space) when `s` needs it, else `''`. */
 export function preserveAttr(s: string): string {
-	return needsPreserve(s) ? ' xml:space="preserve"' : ''
+	return needsPreserve(s) ? ' xml:space="preserve"' : ""
 }

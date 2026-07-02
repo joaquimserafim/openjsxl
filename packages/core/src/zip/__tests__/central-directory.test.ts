@@ -1,50 +1,50 @@
-import { loadFixture } from '@openjsxl/fixtures'
-import { describe, expect, it } from 'vitest'
-import { XlsxError } from '../../errors'
-import { openZip } from '../central-directory'
+import { loadFixture } from "@openjsxl/fixtures"
+import { describe, expect, it } from "vitest"
+import { XlsxError } from "../../errors"
+import { openZip } from "../central-directory"
 
 const PARTS = [
-	'[Content_Types].xml',
-	'_rels/.rels',
-	'xl/_rels/workbook.xml.rels',
-	'xl/sharedStrings.xml',
-	'xl/styles.xml',
-	'xl/workbook.xml',
-	'xl/worksheets/sheet1.xml',
+	"[Content_Types].xml",
+	"_rels/.rels",
+	"xl/_rels/workbook.xml.rels",
+	"xl/sharedStrings.xml",
+	"xl/styles.xml",
+	"xl/workbook.xml",
+	"xl/worksheets/sheet1.xml",
 ]
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
-describe('openZip — real fixture (stored entries)', () => {
-	it('lists every part of basic.xlsx', async () => {
-		const zip = openZip(await loadFixture('basic.xlsx'))
+describe("openZip — real fixture (stored entries)", () => {
+	it("lists every part of basic.xlsx", async () => {
+		const zip = openZip(await loadFixture("basic.xlsx"))
 		expect([...zip.entries.keys()].sort()).toEqual([...PARTS].sort())
 	})
 
-	it('reads parts back to their exact bytes', async () => {
-		const zip = openZip(await loadFixture('basic.xlsx'))
+	it("reads parts back to their exact bytes", async () => {
+		const zip = openZip(await loadFixture("basic.xlsx"))
 
-		const contentTypes = decode(await zip.read('[Content_Types].xml'))
-		expect(contentTypes).toContain('<Types')
-		expect(contentTypes).toContain('spreadsheetml.sheet.main+xml')
+		const contentTypes = decode(await zip.read("[Content_Types].xml"))
+		expect(contentTypes).toContain("<Types")
+		expect(contentTypes).toContain("spreadsheetml.sheet.main+xml")
 
-		const sheet = decode(await zip.read('xl/worksheets/sheet1.xml'))
+		const sheet = decode(await zip.read("xl/worksheets/sheet1.xml"))
 		expect(sheet).toContain('<c r="A1" t="s"><v>0</v></c>')
-		expect(sheet).toContain('<f>B1*2</f><v>84</v>')
+		expect(sheet).toContain("<f>B1*2</f><v>84</v>")
 
-		const shared = decode(await zip.read('xl/sharedStrings.xml'))
-		expect(shared).toContain('<t>hello</t>')
-		expect(shared).toContain('<t>world</t>')
+		const shared = decode(await zip.read("xl/sharedStrings.xml"))
+		expect(shared).toContain("<t>hello</t>")
+		expect(shared).toContain("<t>world</t>")
 	})
 
-	it('reports membership and rejects unknown entries', async () => {
-		const zip = openZip(await loadFixture('basic.xlsx'))
-		expect(zip.has('xl/workbook.xml')).toBe(true)
-		expect(zip.has('nope.xml')).toBe(false)
-		await expect(zip.read('nope.xml')).rejects.toThrow()
+	it("reports membership and rejects unknown entries", async () => {
+		const zip = openZip(await loadFixture("basic.xlsx"))
+		expect(zip.has("xl/workbook.xml")).toBe(true)
+		expect(zip.has("nope.xml")).toBe(false)
+		await expect(zip.read("nope.xml")).rejects.toThrow()
 	})
 
-	it('throws on a buffer that is not a zip', () => {
+	it("throws on a buffer that is not a zip", () => {
 		expect(() => openZip(new Uint8Array([1, 2, 3, 4]))).toThrow(/not a zip/)
 	})
 })
@@ -87,7 +87,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 async function deflateRaw(data: Uint8Array): Promise<Uint8Array> {
 	const stream = new Blob([data as unknown as BlobPart])
 		.stream()
-		.pipeThrough(new CompressionStream('deflate-raw'))
+		.pipeThrough(new CompressionStream("deflate-raw"))
 	return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
@@ -181,109 +181,109 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 	return concat([localBlock, central, eocd])
 }
 
-describe('openZip — deflate and real-world layouts', () => {
-	it('inflates a plain deflate (method 8) entry', async () => {
-		const content = 'deflate me '.repeat(500)
-		const zip = openZip(await buildZip({ name: 'big.xml', content }))
-		expect(zip.entries.get('big.xml')?.method).toBe(8)
-		expect(decode(await zip.read('big.xml'))).toBe(content)
+describe("openZip — deflate and real-world layouts", () => {
+	it("inflates a plain deflate (method 8) entry", async () => {
+		const content = "deflate me ".repeat(500)
+		const zip = openZip(await buildZip({ name: "big.xml", content }))
+		expect(zip.entries.get("big.xml")?.method).toBe(8)
+		expect(decode(await zip.read("big.xml"))).toBe(content)
 	})
 
-	it('reads a data-descriptor entry (GP bit 3, zeroed local sizes, real central sizes)', async () => {
-		const content = 'rows '.repeat(400)
+	it("reads a data-descriptor entry (GP bit 3, zeroed local sizes, real central sizes)", async () => {
+		const content = "rows ".repeat(400)
 		for (const descriptorSignature of [false, true]) {
 			const zip = openZip(
 				await buildZip({
-					name: 'sheet.xml',
+					name: "sheet.xml",
 					content,
 					dataDescriptor: true,
 					descriptorSignature,
 				}),
 			)
-			expect(decode(await zip.read('sheet.xml'))).toBe(content)
+			expect(decode(await zip.read("sheet.xml"))).toBe(content)
 		}
 	})
 
-	it('uses the local (not central) extra-field length to locate the data', async () => {
-		const content = 'extra fields differ '.repeat(50)
+	it("uses the local (not central) extra-field length to locate the data", async () => {
+		const content = "extra fields differ ".repeat(50)
 		const zip = openZip(
-			await buildZip({ name: 'p.xml', content, localExtra: 12, centralExtra: 0 }),
+			await buildZip({ name: "p.xml", content, localExtra: 12, centralExtra: 0 }),
 		)
-		expect(decode(await zip.read('p.xml'))).toBe(content)
+		expect(decode(await zip.read("p.xml"))).toBe(content)
 	})
 
-	it('caps inflate at the declared uncompressed size (decompression-bomb guard)', async () => {
+	it("caps inflate at the declared uncompressed size (decompression-bomb guard)", async () => {
 		const zip = openZip(
 			await buildZip({
-				name: 'bomb.xml',
-				content: 'x'.repeat(10000),
+				name: "bomb.xml",
+				content: "x".repeat(10000),
 				centralUncompressedSize: 16,
 			}),
 		)
-		await expect(zip.read('bomb.xml')).rejects.toThrow(/failed to inflate/)
+		await expect(zip.read("bomb.xml")).rejects.toThrow(/failed to inflate/)
 	})
 
-	it('wraps inflate failures with the part name', async () => {
+	it("wraps inflate failures with the part name", async () => {
 		const zip = openZip(
-			await buildZip({ name: 'bad.xml', content: 'whatever', corruptPayload: true }),
+			await buildZip({ name: "bad.xml", content: "whatever", corruptPayload: true }),
 		)
-		await expect(zip.read('bad.xml')).rejects.toThrow(/corrupt zip: failed to inflate bad\.xml/)
-		await expect(zip.read('bad.xml')).rejects.toMatchObject({ code: 'corrupt-zip' })
+		await expect(zip.read("bad.xml")).rejects.toThrow(/corrupt zip: failed to inflate bad\.xml/)
+		await expect(zip.read("bad.xml")).rejects.toMatchObject({ code: "corrupt-zip" })
 	})
 
-	it('returns empty bytes for a zero-length deflate entry', async () => {
+	it("returns empty bytes for a zero-length deflate entry", async () => {
 		const zip = openZip(
 			await buildZip({
-				name: 'empty.xml',
-				content: '',
+				name: "empty.xml",
+				content: "",
 				centralCompressedSize: 0,
 				centralUncompressedSize: 0,
 			}),
 		)
-		expect((await zip.read('empty.xml')).length).toBe(0)
+		expect((await zip.read("empty.xml")).length).toBe(0)
 	})
 
-	it('rejects ZIP64 archives with an explicit error', async () => {
-		const zip = await buildZip({ name: 'p.xml', content: 'x', centralLocalOffset: 0xffffffff })
+	it("rejects ZIP64 archives with an explicit error", async () => {
+		const zip = await buildZip({ name: "p.xml", content: "x", centralLocalOffset: 0xffffffff })
 		expect(() => openZip(zip)).toThrow(/ZIP64/)
 		expect(() => openZip(zip)).toThrow(XlsxError)
 		try {
 			openZip(zip)
 		} catch (e) {
-			expect((e as XlsxError).code).toBe('unsupported')
+			expect((e as XlsxError).code).toBe("unsupported")
 		}
 	})
 
-	it('rejects a part whose declared size exceeds maxPartBytes', async () => {
+	it("rejects a part whose declared size exceeds maxPartBytes", async () => {
 		const bytes = await buildZip({
-			name: 'big.xml',
-			content: 'x',
+			name: "big.xml",
+			content: "x",
 			centralUncompressedSize: 10000,
 		})
 		const zip = openZip(bytes, { maxPartBytes: 100 })
-		await expect(zip.read('big.xml')).rejects.toMatchObject({ code: 'part-too-large' })
+		await expect(zip.read("big.xml")).rejects.toMatchObject({ code: "part-too-large" })
 	})
 })
 
-describe('openZip — entry policy', () => {
-	it('rejects a zip with duplicate entry names', async () => {
-		const bytes = await loadFixture('edge-duplicate-entry.xlsx')
+describe("openZip — entry policy", () => {
+	it("rejects a zip with duplicate entry names", async () => {
+		const bytes = await loadFixture("edge-duplicate-entry.xlsx")
 		expect(() => openZip(bytes)).toThrow(/duplicate entry name/)
 		try {
 			openZip(bytes)
 		} catch (e) {
-			expect((e as XlsxError).code).toBe('corrupt-zip')
+			expect((e as XlsxError).code).toBe("corrupt-zip")
 		}
 	})
 
-	it('skips directory placeholder entries, keeping real parts', async () => {
-		const zip = openZip(await loadFixture('edge-with-directory.xlsx'))
-		expect(zip.entries.has('sub/')).toBe(false)
-		expect(zip.has('keep.xml')).toBe(true)
+	it("skips directory placeholder entries, keeping real parts", async () => {
+		const zip = openZip(await loadFixture("edge-with-directory.xlsx"))
+		expect(zip.entries.has("sub/")).toBe(false)
+		expect(zip.has("keep.xml")).toBe(true)
 	})
 })
 
-describe('readStream', () => {
+describe("readStream", () => {
 	async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
 		const parts: Uint8Array[] = []
 		let total = 0
@@ -300,8 +300,8 @@ describe('readStream', () => {
 		return out
 	}
 
-	it('streams the same bytes as read() for every part', async () => {
-		const zip = openZip(await loadFixture('basic.xlsx'))
+	it("streams the same bytes as read() for every part", async () => {
+		const zip = openZip(await loadFixture("basic.xlsx"))
 		for (const part of PARTS) {
 			expect(decode(await collect(zip.readStream(part)))).toBe(decode(await zip.read(part)))
 		}

@@ -1,7 +1,7 @@
-import { type DecodeContext, decodeCell, formatRef, parseRef, type Relationship } from '../ooxml'
-import type { Cell, Comment, Hyperlink } from '../types'
-import { localName, relationshipId } from '../utils'
-import { createXmlStream, tokenize, type XmlToken } from '../xml'
+import { type DecodeContext, decodeCell, formatRef, parseRef, type Relationship } from "../ooxml"
+import type { Cell, Comment, Hyperlink } from "../types"
+import { localName, relationshipId } from "../utils"
+import { createXmlStream, tokenize, type XmlToken } from "../xml"
 
 // Turn a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
 // tokenizer event stream rather than building a DOM, so peak memory tracks one row, not the
@@ -67,7 +67,7 @@ function columnStyleFromToken(attrs: Readonly<Record<string, string>>): ColumnSt
 // `s` is "only applied if the customFormat attribute is '1'". Writers routinely emit a bookkeeping
 // `s` on ordinary rows, so without this gate we would restyle cells the file never meant to format.
 function rowDefaultStyleFromToken(attrs: Readonly<Record<string, string>>): number | undefined {
-	if (attrs.customFormat !== '1' && attrs.customFormat !== 'true') return undefined
+	if (attrs.customFormat !== "1" && attrs.customFormat !== "true") return undefined
 	if (attrs.s === undefined) return undefined
 	const s = Number(attrs.s)
 	return Number.isInteger(s) ? s : undefined
@@ -118,11 +118,11 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	let rowDefault: number | undefined
 
 	let inCell = false
-	let cellRef = ''
+	let cellRef = ""
 	let cellType: string | undefined
 	let cellStyle: number | undefined // the `s` attribute (index into cellXfs)
 	let cellIsInline = false // type === 'inlineStr': value lives in <is>, not <v>
-	let cellValue = ''
+	let cellValue = ""
 	let hasValue = false // the value channel's element was present (even if empty)
 	let inValue = false // inside <v>
 	let inInline = false // inside <is>
@@ -149,23 +149,23 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	function push(token: XmlToken): Row[] {
 		const out: Row[] = []
 
-		if (token.kind === 'open') {
+		if (token.kind === "open") {
 			const name = localName(token.name)
 
-			if (name === 'sheetData') {
+			if (name === "sheetData") {
 				if (!token.selfClosing) inSheetData = true
 				return out
 			}
 			// `<col>` lives in `<cols>`, a sibling that precedes `<sheetData>` — capture its
 			// default style before the inSheetData guard below would skip it.
-			if (name === 'col') {
+			if (name === "col") {
 				const cs = columnStyleFromToken(token.attrs)
 				if (cs !== undefined) columns.push(cs)
 				return out
 			}
 			if (!inSheetData) return out
 
-			if (name === 'row') {
+			if (name === "row") {
 				flushCell()
 				if (inRow) out.push({ index: rowIndex, cells })
 				const r = token.attrs.r
@@ -186,7 +186,7 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			}
 			if (!inRow) return out
 
-			if (name === 'c') {
+			if (name === "c") {
 				flushCell()
 				const r = token.attrs.r
 				// The cell's column index, needed to resolve a `<col>` default style. Known even
@@ -204,8 +204,8 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				cellType = token.attrs.t
 				// Effective style: cell `s` → row default → column default → style 0.
 				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns)
-				cellIsInline = cellType === 'inlineStr'
-				cellValue = ''
+				cellIsInline = cellType === "inlineStr"
+				cellValue = ""
 				hasValue = false
 				inValue = false
 				inInline = false
@@ -231,22 +231,22 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			// element opens, so an explicit but empty <v></v> or <is><t></t></is> reads as ""
 			// rather than collapsing to a blank cell.
 			if (cellIsInline) {
-				if (name === 'is') {
+				if (name === "is") {
 					hasValue = true
 					if (!token.selfClosing) inInline = true
-				} else if (name === 't') {
+				} else if (name === "t") {
 					if (inInline && !token.selfClosing) textDepth++
-				} else if (name === 'rPh' || name === 'phoneticPr') {
+				} else if (name === "rPh" || name === "phoneticPr") {
 					if (inInline && !token.selfClosing) phoneticDepth++
 				}
-			} else if (name === 'v') {
+			} else if (name === "v") {
 				hasValue = true
 				if (!token.selfClosing) inValue = true
 			}
 			return out
 		}
 
-		if (token.kind === 'text') {
+		if (token.kind === "text") {
 			const collect = cellIsInline
 				? inInline && textDepth > 0 && phoneticDepth === 0
 				: inValue
@@ -259,7 +259,7 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 
 		// close
 		const name = localName(token.name)
-		if (name === 'sheetData') {
+		if (name === "sheetData") {
 			flushCell()
 			if (inRow) {
 				out.push({ index: rowIndex, cells })
@@ -268,7 +268,7 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			inSheetData = false
 			return out
 		}
-		if (name === 'row') {
+		if (name === "row") {
 			if (inRow) {
 				flushCell()
 				out.push({ index: rowIndex, cells })
@@ -277,12 +277,12 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			return out
 		}
 		if (!inCell) return out
-		if (name === 'c') flushCell()
-		else if (name === 'v') inValue = false
-		else if (name === 'is') inInline = false
-		else if (name === 't') {
+		if (name === "c") flushCell()
+		else if (name === "v") inValue = false
+		else if (name === "is") inInline = false
+		else if (name === "t") {
 			if (textDepth > 0) textDepth--
-		} else if (name === 'rPh' || name === 'phoneticPr') {
+		} else if (name === "rPh" || name === "phoneticPr") {
 			if (phoneticDepth > 0) phoneticDepth--
 		}
 		return out
@@ -315,52 +315,52 @@ export function parseComments(xml: string): Comment[] {
 	let current: { ref: string; authorId: number } | undefined // inside a <comment>
 	let inText = false // inside the current comment's <text>
 	let tDepth = 0 // open <t> within <text>
-	let text = ''
+	let text = ""
 
 	for (const token of tokenize(xml)) {
-		if (token.kind === 'open') {
+		if (token.kind === "open") {
 			const name = localName(token.name)
-			if (name === 'authors') {
+			if (name === "authors") {
 				if (!token.selfClosing) inAuthors = true
-			} else if (name === 'author' && inAuthors) {
-				if (token.selfClosing) authors.push('')
-				else authorText = ''
-			} else if (name === 'comment') {
+			} else if (name === "author" && inAuthors) {
+				if (token.selfClosing) authors.push("")
+				else authorText = ""
+			} else if (name === "comment") {
 				const ref = token.attrs.ref
 				// A missing/empty/non-integer authorId is unresolved (-1) so the author is omitted,
 				// rather than falling through Number('')===0 to author 0 — don't fabricate an
 				// attribution the file never made.
 				const rawId = token.attrs.authorId
 				const authorId =
-					rawId !== undefined && rawId !== '' && Number.isInteger(Number(rawId))
+					rawId !== undefined && rawId !== "" && Number.isInteger(Number(rawId))
 						? Number(rawId)
 						: -1
-				current = ref !== undefined && ref !== '' ? { ref, authorId } : undefined
-				text = ''
+				current = ref !== undefined && ref !== "" ? { ref, authorId } : undefined
+				text = ""
 				inText = false
 				tDepth = 0
-			} else if (name === 'text' && current !== undefined) {
+			} else if (name === "text" && current !== undefined) {
 				if (!token.selfClosing) inText = true
-			} else if (name === 't' && inText) {
+			} else if (name === "t" && inText) {
 				if (!token.selfClosing) tDepth++
 			}
-		} else if (token.kind === 'text') {
+		} else if (token.kind === "text") {
 			if (authorText !== undefined) authorText += token.value
 			else if (inText && tDepth > 0) text += token.value
 		} else {
 			const name = localName(token.name)
-			if (name === 'authors') inAuthors = false
-			else if (name === 'author' && authorText !== undefined) {
+			if (name === "authors") inAuthors = false
+			else if (name === "author" && authorText !== undefined) {
 				authors.push(authorText)
 				authorText = undefined
-			} else if (name === 't') {
+			} else if (name === "t") {
 				if (tDepth > 0) tDepth--
-			} else if (name === 'text') inText = false
-			else if (name === 'comment' && current !== undefined) {
+			} else if (name === "text") inText = false
+			else if (name === "comment" && current !== undefined) {
 				const author = authors[current.authorId]
 				comments.push({
 					ref: current.ref,
-					...(author !== undefined && author !== '' ? { author } : {}),
+					...(author !== undefined && author !== "" ? { author } : {}),
 					text,
 				})
 				current = undefined
@@ -377,9 +377,9 @@ export function parseComments(xml: string): Comment[] {
  */
 export function parseDimension(xml: string): string | undefined {
 	for (const token of tokenize(xml)) {
-		if (token.kind === 'open' && localName(token.name) === 'dimension') {
+		if (token.kind === "open" && localName(token.name) === "dimension") {
 			const ref = token.attrs.ref
-			if (ref !== undefined && ref !== '') return ref
+			if (ref !== undefined && ref !== "") return ref
 		}
 	}
 	return undefined
@@ -404,14 +404,14 @@ export function parseCellStyles(xml: string): Map<string, number> {
 	let rowIndex = 0
 	let lastCol = 0
 	for (const token of tokenize(xml)) {
-		if (token.kind !== 'open') continue
+		if (token.kind !== "open") continue
 		const name = localName(token.name)
-		if (name === 'col') {
+		if (name === "col") {
 			const cs = columnStyleFromToken(token.attrs)
 			if (cs !== undefined) columns.push(cs)
 			continue
 		}
-		if (name === 'row') {
+		if (name === "row") {
 			const r = token.attrs.r
 			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
 			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
@@ -420,7 +420,7 @@ export function parseCellStyles(xml: string): Map<string, number> {
 			lastCol = 0
 			continue
 		}
-		if (name !== 'c') continue
+		if (name !== "c") continue
 		// Resolve the cell's ref and column with the same positional rule as the assembler.
 		const r = token.attrs.r
 		let ref: string
@@ -456,9 +456,9 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
 export function parseMergedCells(xml: string): string[] {
 	const ranges: string[] = []
 	for (const token of tokenize(xml)) {
-		if (token.kind === 'open' && localName(token.name) === 'mergeCell') {
+		if (token.kind === "open" && localName(token.name) === "mergeCell") {
 			const ref = token.attrs.ref
-			if (ref !== undefined && ref !== '') ranges.push(ref)
+			if (ref !== undefined && ref !== "") ranges.push(ref)
 		}
 	}
 	return ranges
@@ -475,9 +475,9 @@ export function parseMergedCells(xml: string): string[] {
 export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): Hyperlink[] {
 	const links: Hyperlink[] = []
 	for (const token of tokenize(xml)) {
-		if (token.kind !== 'open' || localName(token.name) !== 'hyperlink') continue
+		if (token.kind !== "open" || localName(token.name) !== "hyperlink") continue
 		const ref = token.attrs.ref
-		if (ref === undefined || ref === '') continue
+		if (ref === undefined || ref === "") continue
 
 		// Built immutably (Hyperlink is readonly): include only the attributes that are present.
 		const rid = relationshipId(token.attrs)
@@ -488,7 +488,7 @@ export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): 
 		links.push({
 			ref,
 			...(target !== undefined ? { target } : {}),
-			...(location !== undefined && location !== '' ? { location } : {}),
+			...(location !== undefined && location !== "" ? { location } : {}),
 			...(tooltip !== undefined ? { tooltip } : {}),
 			...(display !== undefined ? { display } : {}),
 		})
@@ -512,11 +512,11 @@ export async function* streamRows(
 
 	for await (const bytes of chunks) {
 		const text = decoder.decode(bytes, { stream: true })
-		if (text === '') continue
+		if (text === "") continue
 		for (const token of xml.push(text)) yield* assembler.push(token)
 	}
 	const tail = decoder.decode() // finalize any pending multi-byte sequence
-	if (tail !== '') for (const token of xml.push(tail)) yield* assembler.push(token)
+	if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token)
 	for (const token of xml.flush()) yield* assembler.push(token)
 	yield* assembler.flush()
 }

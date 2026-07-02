@@ -1,12 +1,12 @@
-import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { readFile } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
 
 // Test corpus access. Real .xlsx binaries live under ./data — both programmatic
 // fixtures (see scripts/generate.mjs, F0.2) and files produced by Excel, LibreOffice,
 // and Google Sheets.
 
-const dataDir = fileURLToPath(new URL('../data/', import.meta.url))
-const localDir = fileURLToPath(new URL('../local/', import.meta.url))
+const dataDir = fileURLToPath(new URL("../data/", import.meta.url))
+const localDir = fileURLToPath(new URL("../local/", import.meta.url))
 
 /** Absolute path to a committed fixture file under packages/fixtures/data. */
 export function fixturePath(name: string): string {

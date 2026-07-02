@@ -5,17 +5,17 @@
 //
 // Rows and cells are sparse: only populated cells appear, each carrying its own A1 `ref`.
 
-import { readFile } from 'node:fs/promises'
-import { openXlsx } from 'openjsxl'
+import { readFile } from "node:fs/promises"
+import { openXlsx } from "openjsxl"
 
-const wb = await openXlsx(await readFile(new URL('./data/sample.xlsx', import.meta.url)))
-const sheet = wb.sheet('Sales')
+const wb = await openXlsx(await readFile(new URL("./data/sample.xlsx", import.meta.url)))
+const sheet = wb.sheet("Sales")
 
 const rows = []
 for await (const row of sheet.rows()) rows.push(row)
 
 // Column letter → header label, from the first row.
-const colOf = (ref) => ref.replace(/\d+$/, '')
+const colOf = (ref) => ref.replace(/\d+$/, "")
 const header = {}
 for (const cell of rows[0].cells) header[colOf(cell.ref)] = cell.value
 

@@ -13,7 +13,7 @@ export async function inflateRaw(
 	// The Blob accepts our bytes at runtime; the cast sidesteps a TS lib / @types/node
 	// disagreement over whether the backing buffer is an ArrayBuffer or SharedArrayBuffer.
 	const blob = new Blob([data as BlobPart])
-	const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader()
 
 	const chunks: Uint8Array[] = []
 	let total = 0
@@ -45,7 +45,7 @@ export async function* inflateRawStream(
 	maxBytes = Number.POSITIVE_INFINITY,
 ): AsyncGenerator<Uint8Array> {
 	const blob = new Blob([data as BlobPart])
-	const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader()
 
 	let total = 0
 	try {

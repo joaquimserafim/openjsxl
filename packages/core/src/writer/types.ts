@@ -3,7 +3,7 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
-import type { CellStyle } from '../types'
+import type { CellStyle } from "../types"
 
 /**
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:

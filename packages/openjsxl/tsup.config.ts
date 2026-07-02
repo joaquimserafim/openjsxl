@@ -1,9 +1,9 @@
-import { defineConfig } from 'tsup'
+import { defineConfig } from "tsup"
 
 export default defineConfig({
-	entry: ['src/index.ts'],
-	format: ['esm'],
-	target: 'node24',
+	entry: ["src/index.ts"],
+	format: ["esm"],
+	target: "node24",
 	dts: true,
 	clean: true,
 	treeshake: true,
@@ -13,5 +13,5 @@ export default defineConfig({
 	// A single copy keeps `instanceof XlsxError` consistent whether a consumer imports from
 	// `openjsxl` or `@openjsxl/core`, and aligns the runtime with the type re-export. npm still
 	// installs core automatically as a dependency, so `npm i openjsxl` stays one command.
-	external: ['@openjsxl/core'],
+	external: ["@openjsxl/core"],
 })

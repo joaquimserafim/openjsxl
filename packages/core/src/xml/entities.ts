@@ -8,23 +8,23 @@
 const ENTITY_PATTERN = /&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);/g
 
 export function decodeXmlEntities(input: string): string {
-	if (!input.includes('&')) return input
+	if (!input.includes("&")) return input
 	return input.replace(ENTITY_PATTERN, (match, body: string) => {
 		switch (body) {
-			case 'amp':
-				return '&'
-			case 'lt':
-				return '<'
-			case 'gt':
-				return '>'
-			case 'quot':
+			case "amp":
+				return "&"
+			case "lt":
+				return "<"
+			case "gt":
+				return ">"
+			case "quot":
 				return '"'
-			case 'apos':
+			case "apos":
 				return "'"
 			default: {
 				// Numeric reference: body is "#NNN" (decimal) or "#xHHH" (hex).
 				const code =
-					body[1] === 'x'
+					body[1] === "x"
 						? Number.parseInt(body.slice(2), 16)
 						: Number.parseInt(body.slice(1), 10)
 				// Reject out-of-range values and lone surrogates (U+D800–U+DFFF): both would

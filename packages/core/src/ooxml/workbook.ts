@@ -1,5 +1,5 @@
-import { localName, relationshipId } from '../utils'
-import { tokenize } from '../xml'
+import { localName, relationshipId } from "../utils"
+import { tokenize } from "../xml"
 
 // xl/workbook.xml lists the workbook's sheets in tab order. Each <sheet> gives a display
 // name and an r:id — NOT a filename — that points into workbook.xml.rels to locate the
@@ -25,17 +25,17 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 	const sheets: WorkbookSheet[] = []
 	let date1904 = false
 	for (const token of tokenize(xml)) {
-		if (token.kind !== 'open') continue
+		if (token.kind !== "open") continue
 		const tag = localName(token.name)
-		if (tag === 'workbookPr') {
+		if (tag === "workbookPr") {
 			const flag = token.attrs.date1904
-			if (flag === '1' || flag === 'true') date1904 = true
-		} else if (tag === 'sheet') {
+			if (flag === "1" || flag === "true") date1904 = true
+		} else if (tag === "sheet") {
 			const name = token.attrs.name
 			const rid = relationshipId(token.attrs)
 			if (name === undefined || rid === undefined) continue
 			const state = token.attrs.state
-			sheets.push({ name, rid, visible: state !== 'hidden' && state !== 'veryHidden' })
+			sheets.push({ name, rid, visible: state !== "hidden" && state !== "veryHidden" })
 		}
 	}
 	return { sheets, date1904 }

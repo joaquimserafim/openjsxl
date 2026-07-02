@@ -11,9 +11,9 @@ import type {
 	PatternType,
 	UnderlineStyle,
 	VerticalAlignment,
-} from '../types'
-import { localName } from '../utils'
-import { tokenize } from '../xml'
+} from "../types"
+import { localName } from "../utils"
+import { tokenize } from "../xml"
 
 // xl/styles.xml — the workbook's style tables. A cell's `s` attribute indexes `<cellXfs>`; each
 // `<xf>` names a numFmtId plus fontId/fillId/borderId into the component tables and may carry an
@@ -58,38 +58,38 @@ export interface StyleTable {
 // Exported: the writer reverse-maps exact code matches to these ids (F4.3), so the two tables
 // can never drift.
 export const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
-	0: 'General',
-	1: '0',
-	2: '0.00',
-	3: '#,##0',
-	4: '#,##0.00',
+	0: "General",
+	1: "0",
+	2: "0.00",
+	3: "#,##0",
+	4: "#,##0.00",
 	5: '"$"#,##0_);("$"#,##0)',
 	6: '"$"#,##0_);[Red]("$"#,##0)',
 	7: '"$"#,##0.00_);("$"#,##0.00)',
 	8: '"$"#,##0.00_);[Red]("$"#,##0.00)',
-	9: '0%',
-	10: '0.00%',
-	11: '0.00E+00',
-	12: '# ?/?',
-	13: '# ??/??',
-	14: 'mm-dd-yy',
-	15: 'd-mmm-yy',
-	16: 'd-mmm',
-	17: 'mmm-yy',
-	18: 'h:mm AM/PM',
-	19: 'h:mm:ss AM/PM',
-	20: 'h:mm',
-	21: 'h:mm:ss',
-	22: 'm/d/yy h:mm',
-	37: '#,##0_);(#,##0)',
-	38: '#,##0_);[Red](#,##0)',
-	39: '#,##0.00_);(#,##0.00)',
-	40: '#,##0.00_);[Red](#,##0.00)',
-	45: 'mm:ss',
-	46: '[h]:mm:ss',
-	47: 'mmss.0',
-	48: '##0.0E+0',
-	49: '@',
+	9: "0%",
+	10: "0.00%",
+	11: "0.00E+00",
+	12: "# ?/?",
+	13: "# ??/??",
+	14: "mm-dd-yy",
+	15: "d-mmm-yy",
+	16: "d-mmm",
+	17: "mmm-yy",
+	18: "h:mm AM/PM",
+	19: "h:mm:ss AM/PM",
+	20: "h:mm",
+	21: "h:mm:ss",
+	22: "m/d/yy h:mm",
+	37: "#,##0_);(#,##0)",
+	38: "#,##0_);[Red](#,##0)",
+	39: "#,##0.00_);(#,##0.00)",
+	40: "#,##0.00_);[Red](#,##0.00)",
+	45: "mm:ss",
+	46: "[h]:mm:ss",
+	47: "mmss.0",
+	48: "##0.0E+0",
+	49: "@",
 }
 
 function isBuiltinDateId(id: number): boolean {
@@ -119,9 +119,9 @@ const BRACKETS = /\[[^\]]*\]/g
 const DATE_TOKEN = /[dmyhs]/i
 
 export function isDateFormatCode(formatCode: string): boolean {
-	const withoutLiterals = formatCode.replace(LITERALS, '')
+	const withoutLiterals = formatCode.replace(LITERALS, "")
 	if (ELAPSED_TIME.test(withoutLiterals)) return true
-	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ''))
+	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ""))
 }
 
 // ── Attribute parsing helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ export function isDateFormatCode(formatCode: string): boolean {
 // val="0"/"false" negates it. Anything else (including absence of the element) is handled by the
 // caller — this decides only what a PRESENT element with this `val` means.
 function boolAttr(val: string | undefined): boolean {
-	return val !== '0' && val !== 'false'
+	return val !== "0" && val !== "false"
 }
 
 // A <color> / <fgColor> / <bgColor> element's attributes → the raw Color union. The spec allows
@@ -158,62 +158,62 @@ function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color 
 // spec's literal sets — garbage degrades to "absent", never leaks into the typed model. Exported:
 // the writer validates its style input against the SAME sets, so reader and writer cannot drift.
 export const PATTERN_TYPES = new Set<PatternType>([
-	'none',
-	'solid',
-	'mediumGray',
-	'darkGray',
-	'lightGray',
-	'darkHorizontal',
-	'darkVertical',
-	'darkDown',
-	'darkUp',
-	'darkGrid',
-	'darkTrellis',
-	'lightHorizontal',
-	'lightVertical',
-	'lightDown',
-	'lightUp',
-	'lightGrid',
-	'lightTrellis',
-	'gray125',
-	'gray0625',
+	"none",
+	"solid",
+	"mediumGray",
+	"darkGray",
+	"lightGray",
+	"darkHorizontal",
+	"darkVertical",
+	"darkDown",
+	"darkUp",
+	"darkGrid",
+	"darkTrellis",
+	"lightHorizontal",
+	"lightVertical",
+	"lightDown",
+	"lightUp",
+	"lightGrid",
+	"lightTrellis",
+	"gray125",
+	"gray0625",
 ])
 export const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
-	'thin',
-	'medium',
-	'thick',
-	'dashed',
-	'dotted',
-	'double',
-	'hair',
-	'mediumDashed',
-	'dashDot',
-	'mediumDashDot',
-	'dashDotDot',
-	'mediumDashDotDot',
-	'slantDashDot',
+	"thin",
+	"medium",
+	"thick",
+	"dashed",
+	"dotted",
+	"double",
+	"hair",
+	"mediumDashed",
+	"dashDot",
+	"mediumDashDot",
+	"dashDotDot",
+	"mediumDashDotDot",
+	"slantDashDot",
 ])
 export const H_ALIGNMENTS = new Set<HorizontalAlignment>([
-	'left',
-	'center',
-	'right',
-	'justify',
-	'fill',
-	'centerContinuous',
-	'distributed',
+	"left",
+	"center",
+	"right",
+	"justify",
+	"fill",
+	"centerContinuous",
+	"distributed",
 ])
 export const V_ALIGNMENTS = new Set<VerticalAlignment>([
-	'top',
-	'center',
-	'bottom',
-	'justify',
-	'distributed',
+	"top",
+	"center",
+	"bottom",
+	"justify",
+	"distributed",
 ])
 
 // The <font> child elements the model reads. The font-children dispatch branch is gated on THIS
 // set (not just "a font is open") so a dangling unclosed <font> can never swallow structural
 // tokens like <fills> or <xf> — see the dispatch chain below.
-const FONT_CHILDREN = new Set(['name', 'sz', 'b', 'i', 'u', 'strike', 'color'])
+const FONT_CHILDREN = new Set(["name", "sz", "b", "i", "u", "strike", "color"])
 
 function parseAlignment(
 	attrs: Readonly<Record<string, string | undefined>>,
@@ -302,7 +302,7 @@ export function parseStyles(xml: string): StyleTable {
 	let border:
 		| { top?: BorderEdge; right?: BorderEdge; bottom?: BorderEdge; left?: BorderEdge }
 		| undefined
-	let edgeName: 'top' | 'right' | 'bottom' | 'left' | undefined
+	let edgeName: "top" | "right" | "bottom" | "left" | undefined
 	let edgeStyle: BorderLineStyle | undefined
 	let edgeColor: Color | undefined
 
@@ -319,19 +319,19 @@ export function parseStyles(xml: string): StyleTable {
 	}
 
 	for (const token of tokenize(xml)) {
-		if (token.kind === 'text') continue
+		if (token.kind === "text") continue
 		const name = localName(token.name)
 
-		if (token.kind === 'open') {
-			if (name === 'numFmts') {
+		if (token.kind === "open") {
+			if (name === "numFmts") {
 				if (!token.selfClosing) inNumFmts = true
-			} else if (name === 'numFmt' && inNumFmts) {
+			} else if (name === "numFmt" && inNumFmts) {
 				const id = Number(token.attrs.numFmtId)
 				const code = token.attrs.formatCode
 				if (Number.isInteger(id) && code !== undefined) customFormats.set(id, code)
-			} else if (name === 'fonts') {
+			} else if (name === "fonts") {
 				if (!token.selfClosing) inFonts = true
-			} else if (name === 'font' && inFonts) {
+			} else if (name === "font" && inFonts) {
 				font = {}
 				if (token.selfClosing) {
 					fonts.push({})
@@ -344,54 +344,54 @@ export function parseStyles(xml: string): StyleTable {
 				// every <xf>, … — silently emptying the tables and regressing even the date hot
 				// path (adversarial review, F4.1). Unmodelled font children (family, scheme,
 				// charset, vertAlign) simply aren't in the set and fall through harmlessly.
-				if (name === 'name' && token.attrs.val !== undefined) font.name = token.attrs.val
-				else if (name === 'sz') {
+				if (name === "name" && token.attrs.val !== undefined) font.name = token.attrs.val
+				else if (name === "sz") {
 					const size = Number(token.attrs.val)
 					if (Number.isFinite(size) && size > 0) font.size = size
-				} else if (name === 'b') {
+				} else if (name === "b") {
 					if (boolAttr(token.attrs.val)) font.bold = true
-				} else if (name === 'i') {
+				} else if (name === "i") {
 					if (boolAttr(token.attrs.val)) font.italic = true
-				} else if (name === 'u') {
+				} else if (name === "u") {
 					// <u/> is single; val names the variant. Accounting variants degrade (deferred).
-					const val = token.attrs.val ?? 'single'
-					if (val === 'single' || val === 'double') font.underline = val
-				} else if (name === 'strike') {
+					const val = token.attrs.val ?? "single"
+					if (val === "single" || val === "double") font.underline = val
+				} else if (name === "strike") {
 					if (boolAttr(token.attrs.val)) font.strike = true
-				} else if (name === 'color') {
+				} else if (name === "color") {
 					const color = parseColor(token.attrs)
 					if (color !== undefined) font.color = color
 				}
-			} else if (name === 'fills') {
+			} else if (name === "fills") {
 				if (!token.selfClosing) inFills = true
-			} else if (name === 'fill' && inFills) {
+			} else if (name === "fill" && inFills) {
 				if (token.selfClosing) fills.push(undefined)
 				else {
 					inFill = true
 					fill = undefined
 				}
-			} else if (name === 'patternFill' && inFill) {
+			} else if (name === "patternFill" && inFill) {
 				const patternType = token.attrs.patternType
 				fill = {
 					patternType:
 						patternType !== undefined && PATTERN_TYPES.has(patternType as PatternType)
 							? (patternType as PatternType)
-							: 'none',
+							: "none",
 				}
-			} else if (name === 'fgColor' && fill !== undefined) {
+			} else if (name === "fgColor" && fill !== undefined) {
 				const color = parseColor(token.attrs)
 				if (color !== undefined) fill.fgColor = color
-			} else if (name === 'bgColor' && fill !== undefined) {
+			} else if (name === "bgColor" && fill !== undefined) {
 				const color = parseColor(token.attrs)
 				if (color !== undefined) fill.bgColor = color
-			} else if (name === 'borders') {
+			} else if (name === "borders") {
 				if (!token.selfClosing) inBorders = true
-			} else if (name === 'border' && inBorders) {
+			} else if (name === "border" && inBorders) {
 				if (token.selfClosing) borders.push({})
 				else border = {}
 			} else if (
 				border !== undefined &&
-				(name === 'left' || name === 'right' || name === 'top' || name === 'bottom')
+				(name === "left" || name === "right" || name === "top" || name === "bottom")
 			) {
 				const style = token.attrs.style
 				const lineStyle =
@@ -407,16 +407,16 @@ export function parseStyles(xml: string): StyleTable {
 					edgeStyle = lineStyle
 					edgeColor = undefined
 				}
-			} else if (name === 'color' && edgeName !== undefined) {
+			} else if (name === "color" && edgeName !== undefined) {
 				const color = parseColor(token.attrs)
 				if (color !== undefined) edgeColor = color
-			} else if (name === 'cellXfs') {
+			} else if (name === "cellXfs") {
 				if (!token.selfClosing) inCellXfs = true
-			} else if (name === 'xf' && inCellXfs) {
-				const numFmtId = Number(token.attrs.numFmtId ?? '0')
-				const fontId = Number(token.attrs.fontId ?? '0')
-				const fillId = Number(token.attrs.fillId ?? '0')
-				const borderId = Number(token.attrs.borderId ?? '0')
+			} else if (name === "xf" && inCellXfs) {
+				const numFmtId = Number(token.attrs.numFmtId ?? "0")
+				const fontId = Number(token.attrs.fontId ?? "0")
+				const fillId = Number(token.attrs.fillId ?? "0")
+				const borderId = Number(token.attrs.borderId ?? "0")
 				xfs.push({
 					numFmtId: Number.isInteger(numFmtId) ? numFmtId : 0,
 					fontId: Number.isInteger(fontId) ? fontId : 0,
@@ -425,7 +425,7 @@ export function parseStyles(xml: string): StyleTable {
 					alignment: undefined,
 				})
 				if (!token.selfClosing) inXf = true
-			} else if (name === 'alignment' && inXf) {
+			} else if (name === "alignment" && inXf) {
 				// Inline alignment belongs to the last-opened cellXfs <xf>.
 				const alignment = parseAlignment(token.attrs)
 				if (alignment !== undefined && xfs.length > 0) {
@@ -433,57 +433,57 @@ export function parseStyles(xml: string): StyleTable {
 					xfs[xfs.length - 1] = { ...last, alignment }
 				}
 			}
-		} else if (token.kind === 'close') {
+		} else if (token.kind === "close") {
 			// Section closes FLUSH any dangling builder (a record whose own close tag never came —
 			// misnested input the non-validating tokenizer passes through). Flushing rather than
 			// discarding keeps the table index aligned with what the producer wrote, and clearing
 			// the builder stops it from capturing look-alike elements later in the document (a
 			// <dxf> block legitimately contains <font>/<fill>/<border> children — adversarial
 			// review showed a leaked builder grafting a dxf fill/color onto cell styles).
-			if (name === 'numFmts') inNumFmts = false
-			else if (name === 'fonts') {
+			if (name === "numFmts") inNumFmts = false
+			else if (name === "fonts") {
 				inFonts = false
 				if (font !== undefined) {
 					fonts.push(font)
 					font = undefined
 				}
-			} else if (name === 'font') {
+			} else if (name === "font") {
 				if (font !== undefined) {
 					fonts.push(font)
 					font = undefined
 				}
-			} else if (name === 'fills') {
+			} else if (name === "fills") {
 				inFills = false
 				if (inFill) {
 					fills.push(fill)
 					fill = undefined
 					inFill = false
 				}
-			} else if (name === 'fill') {
+			} else if (name === "fill") {
 				if (inFill) {
 					fills.push(fill)
 					fill = undefined
 					inFill = false
 				}
-			} else if (name === 'borders') {
+			} else if (name === "borders") {
 				inBorders = false
 				if (border !== undefined) {
 					commitEdge()
 					borders.push(border)
 					border = undefined
 				}
-			} else if (name === 'border') {
+			} else if (name === "border") {
 				if (border !== undefined) {
 					commitEdge()
 					borders.push(border)
 					border = undefined
 				}
-			} else if (name === 'left' || name === 'right' || name === 'top' || name === 'bottom') {
+			} else if (name === "left" || name === "right" || name === "top" || name === "bottom") {
 				if (edgeName === name) commitEdge()
-			} else if (name === 'cellXfs') {
+			} else if (name === "cellXfs") {
 				inCellXfs = false
 				inXf = false
-			} else if (name === 'xf') inXf = false
+			} else if (name === "xf") inXf = false
 		}
 	}
 
@@ -539,7 +539,7 @@ export function parseStyles(xml: string): StyleTable {
 			// fill: judged by VALUE, not id — fill 0 is 'none' by spec, and any other id whose
 			// pattern is 'none' paints nothing either.
 			const fillRecord = fills[xf.fillId]
-			if (fillRecord !== undefined && fillRecord.patternType !== 'none')
+			if (fillRecord !== undefined && fillRecord.patternType !== "none")
 				style.fill = fillRecord
 			// border: only when at least one edge draws a line.
 			const borderRecord = borders[xf.borderId]

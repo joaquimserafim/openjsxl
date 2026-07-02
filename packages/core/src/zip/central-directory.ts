@@ -1,5 +1,5 @@
-import { XlsxError } from '../errors'
-import { inflateRaw, inflateRawStream } from './inflate'
+import { XlsxError } from "../errors"
+import { inflateRaw, inflateRawStream } from "./inflate"
 
 // Minimal reader for the ZIP (OPC) container that wraps every .xlsx. We locate the
 // End-Of-Central-Directory record, walk the central directory to find each entry, and read
@@ -65,17 +65,17 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 	const eocd = findEocd(view, len)
 	if (eocd === -1) {
 		throw new XlsxError(
-			'not-a-zip',
-			'not a zip archive: end-of-central-directory record not found',
+			"not-a-zip",
+			"not a zip archive: end-of-central-directory record not found",
 		)
 	}
 
 	const entryCount = view.getUint16(eocd + 10, true)
 	const cdOffset = view.getUint32(eocd + 16, true)
 	if (cdOffset === ZIP64_SENTINEL)
-		throw new XlsxError('unsupported', 'ZIP64 archives are not supported')
+		throw new XlsxError("unsupported", "ZIP64 archives are not supported")
 	if (cdOffset > len) {
-		throw new XlsxError('corrupt-zip', 'corrupt zip: central directory offset past end of file')
+		throw new XlsxError("corrupt-zip", "corrupt zip: central directory offset past end of file")
 	}
 
 	const decoder = new TextDecoder()
@@ -84,7 +84,7 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 	for (let i = 0; i < entryCount; i++) {
 		if (pos + 46 > len || view.getUint32(pos, true) !== SIG_CENTRAL) {
 			throw new XlsxError(
-				'corrupt-zip',
+				"corrupt-zip",
 				`corrupt zip: bad central directory header at offset ${pos}`,
 			)
 		}
@@ -100,16 +100,16 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 			uncompressedSize === ZIP64_SENTINEL ||
 			localHeaderOffset === ZIP64_SENTINEL
 		) {
-			throw new XlsxError('unsupported', 'ZIP64 archives are not supported')
+			throw new XlsxError("unsupported", "ZIP64 archives are not supported")
 		}
 		const name = decoder.decode(bytes.subarray(pos + 46, pos + 46 + nameLen))
 		pos += 46 + nameLen + extraLen + commentLen
 		// Directory entries (`name/`) are placeholders, not parts — skip them.
-		if (name.endsWith('/')) continue
+		if (name.endsWith("/")) continue
 		// OPC forbids duplicate part names; a duplicate makes the package ambiguous (a
 		// zip-confusion vector), so refuse it rather than silently resolving to one entry.
 		if (entries.has(name)) {
-			throw new XlsxError('corrupt-zip', `corrupt zip: duplicate entry name ${name}`)
+			throw new XlsxError("corrupt-zip", `corrupt zip: duplicate entry name ${name}`)
 		}
 		entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset })
 	}
@@ -119,23 +119,23 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 	// where the data actually starts.
 	function locate(name: string): { entry: ZipEntry; payload: Uint8Array } {
 		const entry = entries.get(name)
-		if (entry === undefined) throw new XlsxError('missing-part', `zip entry not found: ${name}`)
+		if (entry === undefined) throw new XlsxError("missing-part", `zip entry not found: ${name}`)
 		if (maxPartBytes !== undefined && entry.uncompressedSize > maxPartBytes) {
 			throw new XlsxError(
-				'part-too-large',
+				"part-too-large",
 				`zip part ${name} declares ${entry.uncompressedSize} bytes, over the ${maxPartBytes}-byte limit`,
 			)
 		}
 		const header = entry.localHeaderOffset
 		if (header + 30 > len || view.getUint32(header, true) !== SIG_LOCAL) {
-			throw new XlsxError('corrupt-zip', `corrupt zip: bad local header for ${name}`)
+			throw new XlsxError("corrupt-zip", `corrupt zip: bad local header for ${name}`)
 		}
 		const nameLen = view.getUint16(header + 26, true)
 		const extraLen = view.getUint16(header + 28, true)
 		const dataStart = header + 30 + nameLen + extraLen
 		if (dataStart + entry.compressedSize > len) {
 			throw new XlsxError(
-				'corrupt-zip',
+				"corrupt-zip",
 				`corrupt zip: entry data for ${name} runs past end of file`,
 			)
 		}
@@ -150,13 +150,13 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 			try {
 				return await inflateRaw(payload, entry.uncompressedSize)
 			} catch (cause) {
-				throw new XlsxError('corrupt-zip', `corrupt zip: failed to inflate ${name}`, {
+				throw new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, {
 					cause,
 				})
 			}
 		}
 		throw new XlsxError(
-			'unsupported',
+			"unsupported",
 			`unsupported zip compression method ${entry.method} for ${name}`,
 		)
 	}
@@ -174,14 +174,14 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 			try {
 				yield* inflateRawStream(payload, entry.uncompressedSize)
 			} catch (cause) {
-				throw new XlsxError('corrupt-zip', `corrupt zip: failed to inflate ${name}`, {
+				throw new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, {
 					cause,
 				})
 			}
 			return
 		}
 		throw new XlsxError(
-			'unsupported',
+			"unsupported",
 			`unsupported zip compression method ${entry.method} for ${name}`,
 		)
 	}

@@ -123,11 +123,11 @@ function zipStore(files) {
 	return concat([...local, directory, eocd])
 }
 
-const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-const CT = 'application/vnd.openxmlformats-officedocument.spreadsheetml'
+const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+const CT = "application/vnd.openxmlformats-officedocument.spreadsheetml"
 
-const escapeText = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const escapeAttr = (s) => escapeText(s).replace(/"/g, '&quot;')
+const escapeText = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+const escapeAttr = (s) => escapeText(s).replace(/"/g, "&quot;")
 const needsPreserve = (s) => s !== s.trim()
 const rowOf = (ref) => Number(/\d+$/.exec(ref)?.[0])
 
@@ -138,10 +138,10 @@ function relsPart(rels) {
 		.map(
 			(r) =>
 				`<Relationship Id="${r.id}" Type="${r.type}" Target="${escapeAttr(r.target)}"${
-					r.mode === 'External' ? ' TargetMode="External"' : ''
+					r.mode === "External" ? ' TargetMode="External"' : ""
 				}/>`,
 		)
-		.join('')
+		.join("")
 	return `${XML_DECL}\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items}</Relationships>`
 }
 
@@ -166,9 +166,9 @@ function makeSharedStrings() {
 			const items = list
 				.map(
 					(s) =>
-						`<si><t${needsPreserve(s) ? ' xml:space="preserve"' : ''}>${escapeText(s)}</t></si>`,
+						`<si><t${needsPreserve(s) ? ' xml:space="preserve"' : ""}>${escapeText(s)}</t></si>`,
 				)
-				.join('')
+				.join("")
 			return `${XML_DECL}\n<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${total}" uniqueCount="${list.length}">${items}</sst>`
 		},
 	}
@@ -185,8 +185,8 @@ function makeStyles() {
 		has: () => xfs.length > 1 || custom.size > 0,
 		indexFor(cell) {
 			let numFmtId
-			if (typeof cell.numFmtId === 'number') numFmtId = cell.numFmtId
-			else if (typeof cell.numFmt === 'string') {
+			if (typeof cell.numFmtId === "number") numFmtId = cell.numFmtId
+			else if (typeof cell.numFmt === "string") {
 				numFmtId = custom.get(cell.numFmt)
 				if (numFmtId === undefined) {
 					numFmtId = nextCustom++
@@ -209,16 +209,16 @@ function makeStyles() {
 							([code, id]) =>
 								`<numFmt numFmtId="${id}" formatCode="${escapeAttr(code)}"/>`,
 						)
-						.join('')}</numFmts>`
-				: ''
+						.join("")}</numFmts>`
+				: ""
 			const cellXfs = xfs
 				.map(
 					(id) =>
 						`<xf numFmtId="${id}" fontId="0" fillId="0" borderId="0" xfId="0"${
-							id !== 0 ? ' applyNumberFormat="1"' : ''
+							id !== 0 ? ' applyNumberFormat="1"' : ""
 						}/>`,
 				)
-				.join('')
+				.join("")
 			return `${XML_DECL}
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${numFmtsBlock}<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${cellXfs}</cellXfs></styleSheet>`
 		},
@@ -227,13 +227,13 @@ function makeStyles() {
 
 function cellXml(cell, sst, styles) {
 	const s = styles.indexFor(cell)
-	const sAttr = s !== undefined ? ` s="${s}"` : ''
+	const sAttr = s !== undefined ? ` s="${s}"` : ""
 	if (cell.text !== undefined)
 		return `<c r="${cell.ref}"${sAttr} t="s"><v>${sst.ref(cell.text)}</v></c>`
 	if (cell.bool !== undefined)
 		return `<c r="${cell.ref}"${sAttr} t="b"><v>${cell.bool ? 1 : 0}</v></c>`
 	if (cell.formula !== undefined) {
-		const v = cell.number !== undefined ? `<v>${cell.number}</v>` : ''
+		const v = cell.number !== undefined ? `<v>${cell.number}</v>` : ""
 		return `<c r="${cell.ref}"${sAttr}><f>${escapeText(cell.formula)}</f>${v}</c>`
 	}
 	if (cell.serial !== undefined) return `<c r="${cell.ref}"${sAttr}><v>${cell.serial}</v></c>`
@@ -255,10 +255,10 @@ function sheetDataXml(cells, sst, styles, rowStyles) {
 			// under customFormat). Cells that set their own `s` still override it.
 			const rowStyle = rowStyles?.[r]
 			const idx = rowStyle !== undefined ? styles.indexFor(rowStyle) : undefined
-			const attrs = idx !== undefined ? ` s="${idx}" customFormat="1"` : ''
-			return `<row r="${r}"${attrs}>${rows.get(r).join('')}</row>`
+			const attrs = idx !== undefined ? ` s="${idx}" customFormat="1"` : ""
+			return `<row r="${r}"${attrs}>${rows.get(r).join("")}</row>`
 		})
-		.join('')
+		.join("")
 }
 
 function commentsXml(comments) {
@@ -276,12 +276,12 @@ function commentsXml(comments) {
 	const list = comments
 		.map(
 			(c) =>
-				`<comment ref="${c.ref}" authorId="${idFor(c.author ?? '')}"><text><t xml:space="preserve">${escapeText(
+				`<comment ref="${c.ref}" authorId="${idFor(c.author ?? "")}"><text><t xml:space="preserve">${escapeText(
 					c.text,
 				)}</t></text></comment>`,
 		)
-		.join('')
-	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join('')
+		.join("")
+	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join("")
 	return `${XML_DECL}
 <comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>${authorsXml}</authors><commentList>${list}</commentList></comments>`
 }
@@ -299,26 +299,26 @@ export function buildWorkbook(spec) {
 		const num = i + 1
 		const wsRels = []
 
-		let hyperlinksXml = ''
+		let hyperlinksXml = ""
 		if (sheet.hyperlinks?.length) {
 			const links = sheet.hyperlinks.map((h) => {
-				let rid = ''
+				let rid = ""
 				if (h.target !== undefined) {
 					const id = `rId${wsRels.length + 1}`
 					wsRels.push({
 						id,
 						type: `${REL}/hyperlink`,
 						target: h.target,
-						mode: 'External',
+						mode: "External",
 					})
 					rid = ` r:id="${id}"`
 				}
-				const loc = h.location !== undefined ? ` location="${escapeAttr(h.location)}"` : ''
-				const tip = h.tooltip !== undefined ? ` tooltip="${escapeAttr(h.tooltip)}"` : ''
-				const disp = h.display !== undefined ? ` display="${escapeAttr(h.display)}"` : ''
+				const loc = h.location !== undefined ? ` location="${escapeAttr(h.location)}"` : ""
+				const tip = h.tooltip !== undefined ? ` tooltip="${escapeAttr(h.tooltip)}"` : ""
+				const disp = h.display !== undefined ? ` display="${escapeAttr(h.display)}"` : ""
 				return `<hyperlink ref="${h.ref}"${loc}${tip}${disp}${rid}/>`
 			})
-			hyperlinksXml = `<hyperlinks xmlns:r="${REL}">${links.join('')}</hyperlinks>`
+			hyperlinksXml = `<hyperlinks xmlns:r="${REL}">${links.join("")}</hyperlinks>`
 		}
 
 		if (sheet.comments?.length) {
@@ -337,18 +337,18 @@ export function buildWorkbook(spec) {
 		const merges = sheet.merges?.length
 			? `<mergeCells count="${sheet.merges.length}">${sheet.merges
 					.map((r) => `<mergeCell ref="${r}"/>`)
-					.join('')}</mergeCells>`
-			: ''
-		const dim = sheet.dimension ? `<dimension ref="${sheet.dimension}"/>` : ''
+					.join("")}</mergeCells>`
+			: ""
+		const dim = sheet.dimension ? `<dimension ref="${sheet.dimension}"/>` : ""
 		const cols = sheet.columns?.length
 			? `<cols>${sheet.columns
 					.map((c) => {
 						const idx = styles.indexFor(c)
-						const style = idx !== undefined ? ` style="${idx}"` : ''
+						const style = idx !== undefined ? ` style="${idx}"` : ""
 						return `<col min="${c.min}" max="${c.max}"${style}/>`
 					})
-					.join('')}</cols>`
-			: ''
+					.join("")}</cols>`
+			: ""
 		const data = sheetDataXml(sheet.cells ?? [], sst, styles, sheet.rowStyles)
 		parts.push({
 			name: `xl/worksheets/sheet${num}.xml`,
@@ -375,59 +375,59 @@ export function buildWorkbook(spec) {
 	const optionalOverrides = []
 	let nextRid = sheets.length + 1
 	if (styles.has()) {
-		wbRels.push({ id: `rId${nextRid++}`, type: `${REL}/styles`, target: 'styles.xml' })
-		optionalFiles.push({ name: 'xl/styles.xml', xml: styles.xml() })
-		optionalOverrides.push({ part: '/xl/styles.xml', type: `${CT}.styles+xml` })
+		wbRels.push({ id: `rId${nextRid++}`, type: `${REL}/styles`, target: "styles.xml" })
+		optionalFiles.push({ name: "xl/styles.xml", xml: styles.xml() })
+		optionalOverrides.push({ part: "/xl/styles.xml", type: `${CT}.styles+xml` })
 	}
 	if (sst.has()) {
 		wbRels.push({
 			id: `rId${nextRid++}`,
 			type: `${REL}/sharedStrings`,
-			target: 'sharedStrings.xml',
+			target: "sharedStrings.xml",
 		})
-		optionalFiles.push({ name: 'xl/sharedStrings.xml', xml: sst.xml() })
-		optionalOverrides.push({ part: '/xl/sharedStrings.xml', type: `${CT}.sharedStrings+xml` })
+		optionalFiles.push({ name: "xl/sharedStrings.xml", xml: sst.xml() })
+		optionalOverrides.push({ part: "/xl/sharedStrings.xml", type: `${CT}.sharedStrings+xml` })
 	}
 
-	const workbookPr = spec.date1904 ? '<workbookPr date1904="1"/>' : ''
+	const workbookPr = spec.date1904 ? '<workbookPr date1904="1"/>' : ""
 	const sheetsXml = sheets
 		.map((s, i) => {
 			const state =
-				s.visible === false || s.visible === 'hidden'
+				s.visible === false || s.visible === "hidden"
 					? ' state="hidden"'
-					: s.visible === 'veryHidden'
+					: s.visible === "veryHidden"
 						? ' state="veryHidden"'
-						: ''
+						: ""
 			return `<sheet name="${escapeAttr(s.name)}" sheetId="${i + 1}"${state} r:id="rId${i + 1}"/>`
 		})
-		.join('')
+		.join("")
 
 	const allOverrides = [
-		{ part: '/xl/workbook.xml', type: `${CT}.sheet.main+xml` },
+		{ part: "/xl/workbook.xml", type: `${CT}.sheet.main+xml` },
 		...overrides,
 		...optionalOverrides,
 	]
 
 	const files = [
 		{
-			name: '[Content_Types].xml',
+			name: "[Content_Types].xml",
 			xml: `${XML_DECL}
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${allOverrides
 				.map((o) => `<Override PartName="${o.part}" ContentType="${o.type}"/>`)
-				.join('')}</Types>`,
+				.join("")}</Types>`,
 		},
 		{
-			name: '_rels/.rels',
+			name: "_rels/.rels",
 			xml: relsPart([
-				{ id: 'rId1', type: `${REL}/officeDocument`, target: 'xl/workbook.xml' },
+				{ id: "rId1", type: `${REL}/officeDocument`, target: "xl/workbook.xml" },
 			]),
 		},
 		{
-			name: 'xl/workbook.xml',
+			name: "xl/workbook.xml",
 			xml: `${XML_DECL}
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${REL}">${workbookPr}<sheets>${sheetsXml}</sheets></workbook>`,
 		},
-		{ name: 'xl/_rels/workbook.xml.rels', xml: relsPart(wbRels) },
+		{ name: "xl/_rels/workbook.xml.rels", xml: relsPart(wbRels) },
 		...parts,
 		...optionalFiles,
 	]

@@ -11,7 +11,7 @@ export async function deflateRaw(data: Uint8Array): Promise<Uint8Array> {
 	// The Blob accepts our bytes at runtime; the cast sidesteps a TS lib / @types/node
 	// disagreement over whether the backing buffer is an ArrayBuffer or SharedArrayBuffer.
 	const blob = new Blob([data as BlobPart])
-	const reader = blob.stream().pipeThrough(new CompressionStream('deflate-raw')).getReader()
+	const reader = blob.stream().pipeThrough(new CompressionStream("deflate-raw")).getReader()
 
 	const chunks: Uint8Array[] = []
 	let total = 0

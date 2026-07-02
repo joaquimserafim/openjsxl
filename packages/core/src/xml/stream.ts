@@ -1,4 +1,4 @@
-import { tokenize, type XmlToken } from './tokenizer'
+import { tokenize, type XmlToken } from "./tokenizer"
 
 // A chunk-fed wrapper around the streaming tokenizer (./tokenizer). Decompressed worksheet
 // text arrives in arbitrary chunks, and a single token — a tag, a comment, a CDATA section,
@@ -17,8 +17,8 @@ export interface XmlStream {
 	flush(): XmlToken[]
 }
 
-const CDATA_OPEN = '<![CDATA['
-const COMMENT_OPEN = '<!--'
+const CDATA_OPEN = "<![CDATA["
+const COMMENT_OPEN = "<!--"
 
 // A real entity reference is short (`&#x10FFFF;` is 10 chars). If a `&` in trailing text is
 // further than this from the end with no `;`, it cannot be a split entity — it is a literal
@@ -41,15 +41,15 @@ function safeBoundary(buf: string): number {
 	let safe = 0 // end of the last complete construct (the cut point)
 
 	while (i < len) {
-		const lt = buf.indexOf('<', i)
+		const lt = buf.indexOf("<", i)
 
 		if (lt === -1) {
 			// Trailing text with no following markup. It is safe except for a split entity
 			// (e.g. "&amp" awaiting its ";"): keep from an unterminated "&" onward — but only
 			// while it could still be a short entity, so a stray literal "&" doesn't pin it.
-			const amp = buf.lastIndexOf('&')
+			const amp = buf.lastIndexOf("&")
 			const splitEntity =
-				amp >= i && buf.indexOf(';', amp) === -1 && len - amp <= MAX_ENTITY_TAIL
+				amp >= i && buf.indexOf(";", amp) === -1 && len - amp <= MAX_ENTITY_TAIL
 			return splitEntity ? amp : len
 		}
 
@@ -61,30 +61,30 @@ function safeBoundary(buf: string): number {
 
 		let end: number
 		if (buf.startsWith(COMMENT_OPEN, lt)) {
-			end = buf.indexOf('-->', lt + COMMENT_OPEN.length)
+			end = buf.indexOf("-->", lt + COMMENT_OPEN.length)
 			if (end === -1) return lt
 			i = end + 3
 		} else if (buf.startsWith(CDATA_OPEN, lt)) {
-			end = buf.indexOf(']]>', lt + CDATA_OPEN.length)
+			end = buf.indexOf("]]>", lt + CDATA_OPEN.length)
 			if (end === -1) return lt
 			i = end + 3
-		} else if (buf[lt + 1] === '?') {
-			end = buf.indexOf('?>', lt + 2)
+		} else if (buf[lt + 1] === "?") {
+			end = buf.indexOf("?>", lt + 2)
 			if (end === -1) return lt
 			i = end + 2
 		} else {
 			// A tag (open/close/declaration). Scan for its '>', skipping quoted attribute
 			// values so a '>' inside a value can't end it early.
 			let k = lt + 1
-			let quote = ''
+			let quote = ""
 			let close = -1
 			while (k < len) {
 				const ch = buf[k]
-				if (quote !== '') {
-					if (ch === quote) quote = ''
+				if (quote !== "") {
+					if (ch === quote) quote = ""
 				} else if (ch === '"' || ch === "'") {
 					quote = ch
-				} else if (ch === '>') {
+				} else if (ch === ">") {
 					close = k
 					break
 				}
@@ -100,7 +100,7 @@ function safeBoundary(buf: string): number {
 }
 
 export function createXmlStream(): XmlStream {
-	let buffer = ''
+	let buffer = ""
 
 	return {
 		push(text: string): XmlToken[] {
@@ -112,9 +112,9 @@ export function createXmlStream(): XmlStream {
 			return tokens
 		},
 		flush(): XmlToken[] {
-			if (buffer === '') return []
+			if (buffer === "") return []
 			const tokens = [...tokenize(buffer)]
-			buffer = ''
+			buffer = ""
 			return tokens
 		},
 	}

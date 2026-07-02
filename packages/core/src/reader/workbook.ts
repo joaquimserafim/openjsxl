@@ -1,4 +1,4 @@
-import { XlsxError } from '../errors'
+import { XlsxError } from "../errors"
 import {
 	type DecodeContext,
 	parseRels,
@@ -8,9 +8,9 @@ import {
 	type Relationship,
 	resolveTarget,
 	type StyleTable,
-} from '../ooxml'
-import type { Cell, CellStyle, Comment, Hyperlink, SheetInfo } from '../types'
-import { openZip, type ZipArchive } from '../zip'
+} from "../ooxml"
+import type { Cell, CellStyle, Comment, Hyperlink, SheetInfo } from "../types"
+import { openZip, type ZipArchive } from "../zip"
 import {
 	parseCellStyles,
 	parseComments,
@@ -20,7 +20,7 @@ import {
 	type Row,
 	readRows,
 	streamRows,
-} from './worksheet'
+} from "./worksheet"
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -33,27 +33,27 @@ const decoder = new TextDecoder()
 
 // Relationship type URIs end in these segments; matching the suffix avoids hard-coding the
 // 2006 namespace and tolerates the strict/transitional variants.
-const REL_OFFICE_DOCUMENT = '/officeDocument'
-const REL_SHARED_STRINGS = '/sharedStrings'
-const REL_STYLES = '/styles'
-const REL_COMMENTS = '/comments'
+const REL_OFFICE_DOCUMENT = "/officeDocument"
+const REL_SHARED_STRINGS = "/sharedStrings"
+const REL_STYLES = "/styles"
+const REL_COMMENTS = "/comments"
 
 function directoryOf(path: string): string {
-	const slash = path.lastIndexOf('/')
-	return slash === -1 ? '' : path.slice(0, slash)
+	const slash = path.lastIndexOf("/")
+	return slash === -1 ? "" : path.slice(0, slash)
 }
 
 // The relationships for a part live in `<dir>/_rels/<file>.rels`.
 function relsPathFor(path: string): string {
-	const slash = path.lastIndexOf('/')
-	const dir = slash === -1 ? '' : path.slice(0, slash)
+	const slash = path.lastIndexOf("/")
+	const dir = slash === -1 ? "" : path.slice(0, slash)
 	const file = slash === -1 ? path : path.slice(slash + 1)
-	return dir === '' ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`
+	return dir === "" ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`
 }
 
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))
-		throw new XlsxError('missing-part', `xlsx is missing a required part: ${path}`)
+		throw new XlsxError("missing-part", `xlsx is missing a required part: ${path}`)
 	return decoder.decode(await zip.read(path))
 }
 
@@ -173,7 +173,7 @@ export class Worksheet {
 
 	/** The cell at an A1 reference. Absent cells read as `empty` (Excel treats them blank). */
 	cell(ref: string): Cell {
-		return this.#index().get(ref) ?? { ref, type: 'empty', value: null }
+		return this.#index().get(ref) ?? { ref, type: "empty", value: null }
 	}
 
 	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
@@ -209,9 +209,9 @@ export class Workbook {
 	sheet(name: string): Worksheet {
 		const worksheet = this.#byName.get(name)
 		if (worksheet === undefined) {
-			const available = this.sheets.map((s) => s.name).join(', ')
+			const available = this.sheets.map((s) => s.name).join(", ")
 			throw new XlsxError(
-				'no-such-sheet',
+				"no-such-sheet",
 				`no sheet named ${JSON.stringify(name)}; available: ${available}`,
 			)
 		}
@@ -239,12 +239,12 @@ async function loadWorkbook(
 	const zip = openZip(bytes, options)
 
 	// Package relationships → the workbook part.
-	const packageRels = parseRels(await readText(zip, '_rels/.rels'))
+	const packageRels = parseRels(await readText(zip, "_rels/.rels"))
 	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT))
 	if (office === undefined) {
-		throw new XlsxError('not-xlsx', 'not an xlsx: no officeDocument relationship')
+		throw new XlsxError("not-xlsx", "not an xlsx: no officeDocument relationship")
 	}
-	const workbookPath = resolveTarget('', office.target)
+	const workbookPath = resolveTarget("", office.target)
 	const workbookDir = directoryOf(workbookPath)
 
 	// Workbook sheet list + date system + the workbook's own relationships.
@@ -254,7 +254,7 @@ async function loadWorkbook(
 	// Shared string table (optional — a workbook may use only inline strings).
 	let sharedStrings: string[] = []
 	const sst = [...workbookRels.values()].find((r) => r.type.endsWith(REL_SHARED_STRINGS))
-	if (sst !== undefined && sst.targetMode !== 'External') {
+	if (sst !== undefined && sst.targetMode !== "External") {
 		const sstPath = resolveTarget(workbookDir, sst.target)
 		if (zip.has(sstPath)) {
 			sharedStrings = parseSharedStrings(decoder.decode(await zip.read(sstPath)))
@@ -264,7 +264,7 @@ async function loadWorkbook(
 	// Style table (optional) — needed to tell date-styled numbers from plain ones.
 	let styles: StyleTable | undefined
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES))
-	if (stylesRel !== undefined && stylesRel.targetMode !== 'External') {
+	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const stylesPath = resolveTarget(workbookDir, stylesRel.target)
 		if (zip.has(stylesPath)) {
 			styles = parseStyles(decoder.decode(await zip.read(stylesPath)))
@@ -277,7 +277,7 @@ async function loadWorkbook(
 	const sheets: Array<{ info: SheetInfo; path: string }> = []
 	for (const entry of workbookSheets) {
 		const rel = workbookRels.get(entry.rid)
-		if (rel === undefined || rel.targetMode === 'External') continue
+		if (rel === undefined || rel.targetMode === "External") continue
 		const path = resolveTarget(workbookDir, rel.target)
 		if (!zip.has(path)) continue
 		sheets.push({ info: { name: entry.name, path, visible: entry.visible }, path })
@@ -315,7 +315,7 @@ export async function openXlsx(
 		// Comments live in a separate part linked from the worksheet rels.
 		let commentsXml: string | undefined
 		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS))
-		if (commentsRel !== undefined && commentsRel.targetMode !== 'External') {
+		if (commentsRel !== undefined && commentsRel.targetMode !== "External") {
 			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target)
 			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath))
 		}
@@ -343,15 +343,15 @@ export async function* streamSheetRows(
 ): AsyncGenerator<Row> {
 	const { zip, context, sheets } = await loadWorkbook(source, options)
 	const first = sheets[0]
-	if (first === undefined) throw new XlsxError('not-xlsx', 'xlsx has no readable worksheets')
+	if (first === undefined) throw new XlsxError("not-xlsx", "xlsx has no readable worksheets")
 
 	let path = first.path
 	if (sheetName !== undefined) {
 		const match = sheets.find((s) => s.info.name === sheetName)
 		if (match === undefined) {
-			const available = sheets.map((s) => s.info.name).join(', ')
+			const available = sheets.map((s) => s.info.name).join(", ")
 			throw new XlsxError(
-				'no-such-sheet',
+				"no-such-sheet",
 				`no sheet named ${JSON.stringify(sheetName)}; available: ${available}`,
 			)
 		}

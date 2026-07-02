@@ -1,11 +1,11 @@
-import { XlsxError } from '../errors'
+import { XlsxError } from "../errors"
 import {
 	BORDER_LINE_STYLES,
 	BUILTIN_FORMATS,
 	H_ALIGNMENTS,
 	PATTERN_TYPES,
 	V_ALIGNMENTS,
-} from '../ooxml/styles'
+} from "../ooxml/styles"
 import type {
 	Alignment,
 	BorderEdge,
@@ -18,8 +18,8 @@ import type {
 	HorizontalAlignment,
 	PatternType,
 	VerticalAlignment,
-} from '../types'
-import { escapeAttr, isXmlSafe } from './xml'
+} from "../types"
+import { escapeAttr, isXmlSafe } from "./xml"
 
 // The writer's style registry (F4.2): validates CellStyle input, interns each distinct component
 // (font / fill / border / alignment) and cell format (xf) STRUCTURALLY — identical styles collapse
@@ -44,7 +44,7 @@ import { escapeAttr, isXmlSafe } from './xml'
 // not errors — they normalize away so `{ bold: false }` interns identically to `{}`.
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
 // The built-in date numFmt a bare Date cell gets (mm-dd-yy); the reader maps it back to `date`.
 const DATE_NUMFMT_ID = 14
@@ -73,7 +73,7 @@ const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/
 const MAX_U32 = 0xffffffff
 
 function invalid(ref: string, message: string): never {
-	throw new XlsxError('invalid-input', `cell ${ref}: ${message}`)
+	throw new XlsxError("invalid-input", `cell ${ref}: ${message}`)
 }
 
 // STRICTLY plain objects: prototype null or Object.prototype. A Map/Set/Date/class instance has
@@ -81,7 +81,7 @@ function invalid(ref: string, message: string): never {
 // PROTOTYPE (adversarial review: a Map's .size getter validated as font size 2) — reject the
 // whole shape instead.
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-	if (typeof value !== 'object' || value === null) return false
+	if (typeof value !== "object" || value === null) return false
 	const proto = Object.getPrototypeOf(value)
 	return proto === null || proto === Object.prototype
 }
@@ -108,32 +108,32 @@ function checkKeys(
 // (adversarial review demonstrated attribute injection into styles.xml that way).
 function validateColor(ref: string, what: string, raw: unknown): Color {
 	if (!isPlainObject(raw)) invalid(ref, `${what} must be a color object`)
-	if ('rgb' in raw) {
-		checkKeys(ref, what, raw, ['rgb'])
+	if ("rgb" in raw) {
+		checkKeys(ref, what, raw, ["rgb"])
 		const rgb = raw.rgb
-		if (typeof rgb !== 'string' || !HEX_COLOR.test(rgb)) {
+		if (typeof rgb !== "string" || !HEX_COLOR.test(rgb)) {
 			invalid(ref, `${what}.rgb must be 6- or 8-digit hex (got ${JSON.stringify(rgb)})`)
 		}
 		return { rgb }
 	}
-	if ('theme' in raw) {
-		checkKeys(ref, what, raw, ['theme', 'tint'])
+	if ("theme" in raw) {
+		checkKeys(ref, what, raw, ["theme", "tint"])
 		const theme = raw.theme
-		if (typeof theme !== 'number' || !Number.isInteger(theme) || theme < 0 || theme > MAX_U32) {
+		if (typeof theme !== "number" || !Number.isInteger(theme) || theme < 0 || theme > MAX_U32) {
 			invalid(ref, `${what}.theme must be an integer between 0 and ${MAX_U32}`)
 		}
 		const tint = raw.tint
 		if (tint === undefined) return { theme }
-		if (typeof tint !== 'number' || !Number.isFinite(tint)) {
+		if (typeof tint !== "number" || !Number.isFinite(tint)) {
 			invalid(ref, `${what}.tint must be a finite number`)
 		}
 		return { theme, tint }
 	}
-	if ('indexed' in raw) {
-		checkKeys(ref, what, raw, ['indexed'])
+	if ("indexed" in raw) {
+		checkKeys(ref, what, raw, ["indexed"])
 		const indexed = raw.indexed
 		if (
-			typeof indexed !== 'number' ||
+			typeof indexed !== "number" ||
 			!Number.isInteger(indexed) ||
 			indexed < 0 ||
 			indexed > MAX_U32
@@ -142,8 +142,8 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 		}
 		return { indexed }
 	}
-	if ('auto' in raw) {
-		checkKeys(ref, what, raw, ['auto'])
+	if ("auto" in raw) {
+		checkKeys(ref, what, raw, ["auto"])
 		if (raw.auto !== true) invalid(ref, `${what}.auto must be true`)
 		return { auto: true }
 	}
@@ -151,22 +151,22 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 }
 
 function validateFont(ref: string, raw: unknown): FontStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, 'style.font must be an object')
-	checkKeys(ref, 'style.font', raw, [
-		'name',
-		'size',
-		'bold',
-		'italic',
-		'underline',
-		'strike',
-		'color',
+	if (!isPlainObject(raw)) invalid(ref, "style.font must be an object")
+	checkKeys(ref, "style.font", raw, [
+		"name",
+		"size",
+		"bold",
+		"italic",
+		"underline",
+		"strike",
+		"color",
 	])
 	const out: {
 		name?: string
 		size?: number
 		bold?: boolean
 		italic?: boolean
-		underline?: 'single' | 'double'
+		underline?: "single" | "double"
 		strike?: boolean
 		color?: Color
 	} = {}
@@ -174,34 +174,34 @@ function validateFont(ref: string, raw: unknown): FontStyle | undefined {
 	if (name !== undefined) {
 		// The one free-form string in the whole style path — gate it like cell strings and sheet
 		// names, or a control character / lone surrogate would corrupt styles.xml itself.
-		if (typeof name !== 'string' || name.length === 0) {
-			invalid(ref, 'style.font.name must be a non-empty string')
+		if (typeof name !== "string" || name.length === 0) {
+			invalid(ref, "style.font.name must be a non-empty string")
 		}
 		if (!isXmlSafe(name)) {
 			invalid(
 				ref,
-				'style.font.name contains a character not allowed in XML (a control character or lone surrogate)',
+				"style.font.name contains a character not allowed in XML (a control character or lone surrogate)",
 			)
 		}
 		out.name = name
 	}
 	const size = raw.size
 	if (size !== undefined) {
-		if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) {
-			invalid(ref, 'style.font.size must be a positive number')
+		if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
+			invalid(ref, "style.font.size must be a positive number")
 		}
 		out.size = size
 	}
-	for (const flag of ['bold', 'italic', 'strike'] as const) {
+	for (const flag of ["bold", "italic", "strike"] as const) {
 		const value = raw[flag]
 		if (value !== undefined) {
-			if (typeof value !== 'boolean') invalid(ref, `style.font.${flag} must be a boolean`)
+			if (typeof value !== "boolean") invalid(ref, `style.font.${flag} must be a boolean`)
 			if (value) out[flag] = true // false is the default — normalizes away
 		}
 	}
 	const underline = raw.underline
 	if (underline !== undefined) {
-		if (underline !== 'single' && underline !== 'double') {
+		if (underline !== "single" && underline !== "double") {
 			invalid(
 				ref,
 				`style.font.underline must be "single" or "double" (accounting variants are not supported)`,
@@ -210,24 +210,24 @@ function validateFont(ref: string, raw: unknown): FontStyle | undefined {
 		out.underline = underline
 	}
 	const color = raw.color
-	if (color !== undefined) out.color = validateColor(ref, 'style.font.color', color)
+	if (color !== undefined) out.color = validateColor(ref, "style.font.color", color)
 	return Object.keys(out).length > 0 ? out : undefined
 }
 
 function validateFill(ref: string, raw: unknown): FillStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, 'style.fill must be an object')
-	checkKeys(ref, 'style.fill', raw, ['patternType', 'fgColor', 'bgColor'])
+	if (!isPlainObject(raw)) invalid(ref, "style.fill must be an object")
+	checkKeys(ref, "style.fill", raw, ["patternType", "fgColor", "bgColor"])
 	const patternType = raw.patternType
-	if (typeof patternType !== 'string' || !PATTERN_TYPES.has(patternType as never)) {
+	if (typeof patternType !== "string" || !PATTERN_TYPES.has(patternType as never)) {
 		invalid(ref, `style.fill.patternType must be one of the OOXML pattern types`)
 	}
 	const rawFg = raw.fgColor
 	const fgColor =
-		rawFg === undefined ? undefined : validateColor(ref, 'style.fill.fgColor', rawFg)
+		rawFg === undefined ? undefined : validateColor(ref, "style.fill.fgColor", rawFg)
 	const rawBg = raw.bgColor
 	const bgColor =
-		rawBg === undefined ? undefined : validateColor(ref, 'style.fill.bgColor', rawBg)
-	if (patternType === 'none') {
+		rawBg === undefined ? undefined : validateColor(ref, "style.fill.bgColor", rawBg)
+	if (patternType === "none") {
 		// "none" paints nothing; colors on it would be silently dead — reject rather than pretend.
 		if (fgColor !== undefined || bgColor !== undefined) {
 			invalid(ref, 'style.fill with patternType "none" cannot carry colors')
@@ -244,9 +244,9 @@ function validateFill(ref: string, raw: unknown): FillStyle | undefined {
 
 function validateEdge(ref: string, what: string, raw: unknown): BorderEdge {
 	if (!isPlainObject(raw)) invalid(ref, `${what} must be an object`)
-	checkKeys(ref, what, raw, ['style', 'color'])
+	checkKeys(ref, what, raw, ["style", "color"])
 	const style = raw.style
-	if (typeof style !== 'string' || !BORDER_LINE_STYLES.has(style as never)) {
+	if (typeof style !== "string" || !BORDER_LINE_STYLES.has(style as never)) {
 		invalid(ref, `${what}.style must be one of the OOXML border line styles`)
 	}
 	const color = raw.color
@@ -258,11 +258,11 @@ function validateEdge(ref: string, what: string, raw: unknown): BorderEdge {
 }
 
 function validateBorder(ref: string, raw: unknown): BorderStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, 'style.border must be an object')
+	if (!isPlainObject(raw)) invalid(ref, "style.border must be an object")
 	// Diagonal borders are deferred (they need diagonalUp/Down flags the model doesn't carry).
-	checkKeys(ref, 'style.border', raw, ['top', 'right', 'bottom', 'left'])
+	checkKeys(ref, "style.border", raw, ["top", "right", "bottom", "left"])
 	const out: { top?: BorderEdge; right?: BorderEdge; bottom?: BorderEdge; left?: BorderEdge } = {}
-	for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
+	for (const edge of ["top", "right", "bottom", "left"] as const) {
 		const value = raw[edge]
 		if (value !== undefined) out[edge] = validateEdge(ref, `style.border.${edge}`, value)
 	}
@@ -270,14 +270,14 @@ function validateBorder(ref: string, raw: unknown): BorderStyle | undefined {
 }
 
 function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
-	if (!isPlainObject(raw)) invalid(ref, 'style.alignment must be an object')
-	checkKeys(ref, 'style.alignment', raw, [
-		'horizontal',
-		'vertical',
-		'wrapText',
-		'shrinkToFit',
-		'indent',
-		'textRotation',
+	if (!isPlainObject(raw)) invalid(ref, "style.alignment must be an object")
+	checkKeys(ref, "style.alignment", raw, [
+		"horizontal",
+		"vertical",
+		"wrapText",
+		"shrinkToFit",
+		"indent",
+		"textRotation",
 	])
 	const out: {
 		horizontal?: HorizontalAlignment
@@ -289,42 +289,42 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 	} = {}
 	const horizontal = raw.horizontal
 	if (horizontal !== undefined) {
-		if (typeof horizontal !== 'string' || !H_ALIGNMENTS.has(horizontal as never)) {
-			invalid(ref, 'style.alignment.horizontal is not a valid value')
+		if (typeof horizontal !== "string" || !H_ALIGNMENTS.has(horizontal as never)) {
+			invalid(ref, "style.alignment.horizontal is not a valid value")
 		}
 		out.horizontal = horizontal as HorizontalAlignment
 	}
 	const vertical = raw.vertical
 	if (vertical !== undefined) {
-		if (typeof vertical !== 'string' || !V_ALIGNMENTS.has(vertical as never)) {
-			invalid(ref, 'style.alignment.vertical is not a valid value')
+		if (typeof vertical !== "string" || !V_ALIGNMENTS.has(vertical as never)) {
+			invalid(ref, "style.alignment.vertical is not a valid value")
 		}
 		out.vertical = vertical as VerticalAlignment
 	}
-	for (const flag of ['wrapText', 'shrinkToFit'] as const) {
+	for (const flag of ["wrapText", "shrinkToFit"] as const) {
 		const value = raw[flag]
 		if (value !== undefined) {
-			if (typeof value !== 'boolean')
+			if (typeof value !== "boolean")
 				invalid(ref, `style.alignment.${flag} must be a boolean`)
 			if (value) out[flag] = true
 		}
 	}
 	const indent = raw.indent
 	if (indent !== undefined) {
-		if (typeof indent !== 'number' || !Number.isInteger(indent) || indent < 0 || indent > 250) {
-			invalid(ref, 'style.alignment.indent must be an integer between 0 and 250')
+		if (typeof indent !== "number" || !Number.isInteger(indent) || indent < 0 || indent > 250) {
+			invalid(ref, "style.alignment.indent must be an integer between 0 and 250")
 		}
 		if (indent > 0) out.indent = indent
 	}
 	const textRotation = raw.textRotation
 	if (textRotation !== undefined) {
 		if (
-			typeof textRotation !== 'number' ||
+			typeof textRotation !== "number" ||
 			!Number.isInteger(textRotation) ||
 			textRotation < 0 ||
 			textRotation > 180
 		) {
-			invalid(ref, 'style.alignment.textRotation must be an integer between 0 and 180')
+			invalid(ref, "style.alignment.textRotation must be an integer between 0 and 180")
 		}
 		if (textRotation > 0) out.textRotation = textRotation
 	}
@@ -335,40 +335,40 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 // The validators build normalized objects with a FIXED key insertion order, so JSON.stringify is
 // a stable structural identity: two styles that mean the same thing produce the same key.
 
-const keyOf = (o: object | undefined): string => (o === undefined ? '' : JSON.stringify(o))
+const keyOf = (o: object | undefined): string => (o === undefined ? "" : JSON.stringify(o))
 
 // ── XML emission ───────────────────────────────────────────────────────────────────────────────
 
 function colorXml(tag: string, color: Color): string {
-	if ('rgb' in color) return `<${tag} rgb="${color.rgb}"/>`
-	if ('theme' in color) {
-		const tint = color.tint !== undefined ? ` tint="${String(color.tint)}"` : ''
+	if ("rgb" in color) return `<${tag} rgb="${color.rgb}"/>`
+	if ("theme" in color) {
+		const tint = color.tint !== undefined ? ` tint="${String(color.tint)}"` : ""
 		return `<${tag} theme="${color.theme}"${tint}/>`
 	}
-	if ('indexed' in color) return `<${tag} indexed="${color.indexed}"/>`
+	if ("indexed" in color) return `<${tag} indexed="${color.indexed}"/>`
 	return `<${tag} auto="1"/>`
 }
 
 function fontXml(font: FontStyle): string {
 	// Fixed child order (bold/italic/strike/underline, then size, color, name). Font 0 is
 	// preseeded as a literal and never passes through here.
-	let out = '<font>'
-	if (font.bold) out += '<b/>'
-	if (font.italic) out += '<i/>'
-	if (font.strike) out += '<strike/>'
+	let out = "<font>"
+	if (font.bold) out += "<b/>"
+	if (font.italic) out += "<i/>"
+	if (font.strike) out += "<strike/>"
 	if (font.underline !== undefined) {
-		out += font.underline === 'single' ? '<u/>' : '<u val="double"/>'
+		out += font.underline === "single" ? "<u/>" : '<u val="double"/>'
 	}
 	if (font.size !== undefined) out += `<sz val="${String(font.size)}"/>`
-	if (font.color !== undefined) out += colorXml('color', font.color)
+	if (font.color !== undefined) out += colorXml("color", font.color)
 	if (font.name !== undefined) out += `<name val="${escapeAttr(font.name)}"/>`
 	return `${out}</font>`
 }
 
 function fillXml(fill: FillStyle): string {
-	const fg = fill.fgColor !== undefined ? colorXml('fgColor', fill.fgColor) : ''
-	const bg = fill.bgColor !== undefined ? colorXml('bgColor', fill.bgColor) : ''
-	if (fg === '' && bg === '') {
+	const fg = fill.fgColor !== undefined ? colorXml("fgColor", fill.fgColor) : ""
+	const bg = fill.bgColor !== undefined ? colorXml("bgColor", fill.bgColor) : ""
+	if (fg === "" && bg === "") {
 		return `<fill><patternFill patternType="${fill.patternType}"/></fill>`
 	}
 	return `<fill><patternFill patternType="${fill.patternType}">${fg}${bg}</patternFill></fill>`
@@ -378,20 +378,20 @@ function borderXml(border: BorderStyle): string {
 	// Schema order: left, right, top, bottom. Only edges that draw are emitted; an edge with a
 	// color wraps it as a child.
 	const edge = (tag: string, e: BorderEdge | undefined): string => {
-		if (e === undefined) return ''
+		if (e === undefined) return ""
 		if (e.color === undefined) return `<${tag} style="${e.style}"/>`
-		return `<${tag} style="${e.style}">${colorXml('color', e.color)}</${tag}>`
+		return `<${tag} style="${e.style}">${colorXml("color", e.color)}</${tag}>`
 	}
 	const inner =
-		edge('left', border.left) +
-		edge('right', border.right) +
-		edge('top', border.top) +
-		edge('bottom', border.bottom)
-	return inner === '' ? '<border/>' : `<border>${inner}</border>`
+		edge("left", border.left) +
+		edge("right", border.right) +
+		edge("top", border.top) +
+		edge("bottom", border.bottom)
+	return inner === "" ? "<border/>" : `<border>${inner}</border>`
 }
 
 function alignmentXml(alignment: Alignment): string {
-	let attrs = ''
+	let attrs = ""
 	if (alignment.horizontal !== undefined) attrs += ` horizontal="${alignment.horizontal}"`
 	if (alignment.vertical !== undefined) attrs += ` vertical="${alignment.vertical}"`
 	if (alignment.textRotation !== undefined) attrs += ` textRotation="${alignment.textRotation}"`
@@ -402,7 +402,7 @@ function alignmentXml(alignment: Alignment): string {
 }
 
 function colorUsesTheme(color: Color | undefined): boolean {
-	return color !== undefined && 'theme' in color
+	return color !== undefined && "theme" in color
 }
 
 // ── The registry ───────────────────────────────────────────────────────────────────────────────
@@ -435,8 +435,8 @@ export function createStyleRegistry(): StyleRegistry {
 	// table pairs the emitted XML per slot with an intern map from canonical key → slot.
 	const fonts: string[] = ['<font><sz val="11"/><name val="Calibri"/></font>']
 	const fontIndex = new Map<string, number>([
-		[keyOf({ name: 'Calibri', size: 11 }), 0],
-		['', 0],
+		[keyOf({ name: "Calibri", size: 11 }), 0],
+		["", 0],
 	])
 
 	const fills: string[] = [
@@ -444,17 +444,17 @@ export function createStyleRegistry(): StyleRegistry {
 		'<fill><patternFill patternType="gray125"/></fill>',
 	]
 	const fillIndex = new Map<string, number>([
-		['', 0],
-		[keyOf({ patternType: 'gray125' }), 1],
+		["", 0],
+		[keyOf({ patternType: "gray125" }), 1],
 	])
 
-	const borders: string[] = ['<border/>']
-	const borderIndex = new Map<string, number>([['', 0]])
+	const borders: string[] = ["<border/>"]
+	const borderIndex = new Map<string, number>([["", 0]])
 
 	const xfs: XfRecord[] = [
 		{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, alignment: undefined },
 	]
-	const xfIndex = new Map<string, number>([['0/0/0/0/', 0]])
+	const xfIndex = new Map<string, number>([["0/0/0/0/", 0]])
 
 	// Custom number formats (F4.3): code → id from 164 up, deduped, in first-encounter order.
 	// Codes exactly matching a built-in reuse its id instead and never appear here.
@@ -521,26 +521,26 @@ export function createStyleRegistry(): StyleRegistry {
 		let alignment: Alignment | undefined
 		let numFmtCode: string | undefined
 		if (style !== undefined) {
-			if (!isPlainObject(style)) invalid(ref, 'style must be an object')
-			checkKeys(ref, 'style', style as Record<string, unknown>, [
-				'font',
-				'fill',
-				'border',
-				'alignment',
-				'numberFormat',
+			if (!isPlainObject(style)) invalid(ref, "style must be an object")
+			checkKeys(ref, "style", style as Record<string, unknown>, [
+				"font",
+				"fill",
+				"border",
+				"alignment",
+				"numberFormat",
 			])
 			// Single-read each component (see the validator note above) before validating it.
 			const rawCode = style.numberFormat
 			if (rawCode !== undefined) {
 				// A format CODE string — what Excel's Custom dialog shows and numberFormat(ref)
 				// returns. Ids are file-internal and never part of the API.
-				if (typeof rawCode !== 'string' || rawCode.length === 0) {
-					invalid(ref, 'style.numberFormat must be a non-empty format code string')
+				if (typeof rawCode !== "string" || rawCode.length === 0) {
+					invalid(ref, "style.numberFormat must be a non-empty format code string")
 				}
 				if (!isXmlSafe(rawCode)) {
 					invalid(
 						ref,
-						'style.numberFormat contains a character not allowed in XML (a control character or lone surrogate)',
+						"style.numberFormat contains a character not allowed in XML (a control character or lone surrogate)",
 					)
 				}
 				numFmtCode = rawCode
@@ -590,20 +590,20 @@ export function createStyleRegistry(): StyleRegistry {
 		// (e.g. "kg" 0.0).
 		const numFmts =
 			customFormats.size === 0
-				? ''
+				? ""
 				: `<numFmts count="${customFormats.size}">${[...customFormats]
 						.map(
 							([code, id]) =>
 								`<numFmt numFmtId="${id}" formatCode="${escapeAttr(code)}"/>`,
 						)
-						.join('')}</numFmts>`
+						.join("")}</numFmts>`
 		return (
 			`${XML_DECL}\n<styleSheet xmlns="${NS_MAIN}">${numFmts}` +
-			`<fonts count="${fonts.length}">${fonts.join('')}</fonts>` +
-			`<fills count="${fills.length}">${fills.join('')}</fills>` +
-			`<borders count="${borders.length}">${borders.join('')}</borders>` +
+			`<fonts count="${fonts.length}">${fonts.join("")}</fonts>` +
+			`<fills count="${fills.length}">${fills.join("")}</fills>` +
+			`<borders count="${borders.length}">${borders.join("")}</borders>` +
 			'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-			`<cellXfs count="${xfs.length}">${xfs.map(xfXml).join('')}</cellXfs>` +
+			`<cellXfs count="${xfs.length}">${xfs.map(xfXml).join("")}</cellXfs>` +
 			'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
 		)
 	}
