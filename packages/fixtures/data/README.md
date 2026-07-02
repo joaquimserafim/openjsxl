@@ -53,6 +53,12 @@ git-ignored [`../local/`](../local) directory and are never committed.
   built-in + custom (`"kg" 0.0`) number formats. One `Styled` sheet, 15 cells, each style on a
   known ref — `reader/__tests__/cell-style.test.ts` asserts them verbatim.
 
+- **`openpyxl-geometry.xlsx`** — authored by **openpyxl 3.1.5** to exercise the sheet-geometry
+  read model (F4.5): column widths (incl. a hidden column carrying openpyxl's default width 13),
+  row heights, a hidden property-only row (row 4 has no cells), a frozen pane (`B3` — 2 rows +
+  1 column), and a second `Plain` sheet with no geometry at all.
+  `reader/__tests__/geometry.test.ts` asserts it verbatim.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

@@ -326,8 +326,8 @@ describe("writeXlsx — hostile style input (adversarial-review regressions)", (
 		expect(
 			await code(() =>
 				writeXlsx({
-					// biome-ignore lint/suspicious/noExplicitAny: hostile input on purpose
 					sheets: [
+						// biome-ignore lint/suspicious/noExplicitAny: hostile input on purpose
 						{ name: "S", rows: [[{ value: 1, style: { fill: new Date() as any } }]] },
 					],
 				}),

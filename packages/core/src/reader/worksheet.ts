@@ -1,5 +1,15 @@
-import { type DecodeContext, decodeCell, formatRef, parseRef, type Relationship } from "../ooxml"
-import type { Cell, Comment, Hyperlink } from "../types"
+import {
+	type DecodeContext,
+	decodeCell,
+	formatRef,
+	MAX_COL,
+	MAX_COL_WIDTH,
+	MAX_ROW,
+	MAX_ROW_HEIGHT,
+	parseRef,
+	type Relationship,
+} from "../ooxml"
+import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
 import { localName, relationshipId } from "../utils"
 import { createXmlStream, tokenize, type XmlToken } from "../xml"
 
@@ -519,4 +529,122 @@ export async function* streamRows(
 	if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token)
 	for (const token of xml.flush()) yield* assembler.push(token)
 	yield* assembler.flush()
+}
+
+// ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
+// Dedicated scans in the mergedCells idiom — lazy, off the hot row path. Like the style model,
+// these DEGRADE anything outside the shared reader/writer bounds (grid limits, width/height
+// ceilings), so whatever they return, the writer accepts — the bridge can carry geometry without
+// ever crashing on a tolerated file.
+
+const boolFlag = (val: string | undefined): boolean => val === "1" || val === "true"
+
+/**
+ * Column width/visibility declarations from `<cols>`, in document order. Entries carrying only a
+ * default STYLE (no width, not hidden) are style plumbing, not geometry — they are omitted here
+ * (style resolution already honors them). Ranges outside Excel's grid and out-of-ceiling widths
+ * degrade to absent.
+ */
+export function parseColumnProps(xml: string): ColumnProps[] {
+	const out: ColumnProps[] = []
+	for (const token of tokenize(xml)) {
+		if (token.kind !== "open") continue
+		const name = localName(token.name)
+		// <cols> always precedes <sheetData>; a col-named element after it (extension lists,
+		// alternate content) is not column geometry — stop scanning at the cell region.
+		if (name === "sheetData") break
+		if (name !== "col") continue
+		const min = Number(token.attrs.min)
+		const max = Number(token.attrs.max)
+		if (!Number.isInteger(min) || !Number.isInteger(max)) continue
+		if (min < 1 || max < min || max > MAX_COL) continue
+		const props: { min: number; max: number; width?: number; hidden?: boolean } = { min, max }
+		if (token.attrs.width !== undefined) {
+			const width = Number(token.attrs.width)
+			if (Number.isFinite(width) && width > 0 && width <= MAX_COL_WIDTH) props.width = width
+		}
+		if (boolFlag(token.attrs.hidden)) props.hidden = true
+		if (props.width !== undefined || props.hidden) out.push(props)
+	}
+	return out
+}
+
+/**
+ * Per-row height/visibility from `<row ht hidden>` attributes, keyed by 1-based row index (the
+ * `r` attribute, or positional — one past the previous row — when absent, matching the row
+ * assembler). Rows with neither property are absent; heights outside (0, 409.5] degrade.
+ */
+export function parseRowProperties(xml: string): Map<number, RowProps> {
+	const out = new Map<number, RowProps>()
+	let lastRow = 0
+	let inSheetData = false
+	for (const token of tokenize(xml)) {
+		if (token.kind === "text") continue
+		const name = localName(token.name)
+		if (token.kind === "close") {
+			if (name === "sheetData") inSheetData = false
+			continue
+		}
+		if (name === "sheetData") {
+			if (!token.selfClosing) inSheetData = true
+			continue
+		}
+		if (!inSheetData || name !== "row") continue
+		// Resolve the row index with the EXACT rule the row assembler uses (parseInt, positional
+		// fallback) — Number() disagrees with parseInt on tolerated-malformed values ("1e3",
+		// "3abc"), which would attach a height to a different row than its cells and cascade the
+		// positional counter for every r-less row after it (adversarial review, F4.5).
+		const rAttr = token.attrs.r
+		const parsed = rAttr !== undefined ? Number.parseInt(rAttr, 10) : Number.NaN
+		const rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
+		lastRow = rowIndex
+		if (rowIndex > MAX_ROW) continue
+		const props: { height?: number; hidden?: boolean } = {}
+		if (token.attrs.ht !== undefined) {
+			const height = Number(token.attrs.ht)
+			if (Number.isFinite(height) && height > 0 && height <= MAX_ROW_HEIGHT) {
+				props.height = height
+			}
+		}
+		if (boolFlag(token.attrs.hidden)) props.hidden = true
+		if (props.height !== undefined || props.hidden) out.set(rowIndex, props)
+	}
+	return out
+}
+
+/**
+ * The sheet's frozen pane from the `<sheetViews>` block's `<pane>`, or `undefined` when none.
+ * Only `state="frozen"` is modelled: for frozen panes xSplit/ySplit are whole column/row counts,
+ * while split (and frozenSplit) panes measure in twentieths of a point — a different world,
+ * deferred and read as no freeze.
+ *
+ * The scan is SCOPED to `<sheetViews>`: `<pane>` also appears inside `<customSheetViews>` (a
+ * saved Custom View, after `<sheetData>`), and picking that one up would fabricate a freeze the
+ * active view doesn't have (adversarial review, F4.5).
+ */
+export function parseFreezePane(xml: string): FreezePane | undefined {
+	let inSheetViews = false
+	for (const token of tokenize(xml)) {
+		if (token.kind === "text") continue
+		const name = localName(token.name)
+		if (name === "sheetViews") {
+			// The block closed (or was empty) without a pane: nothing is frozen. sheetViews
+			// precedes sheetData, so stopping here also skips the whole cell region.
+			if (token.kind === "close" || token.selfClosing) return undefined
+			inSheetViews = true
+			continue
+		}
+		if (!inSheetViews || token.kind !== "open" || name !== "pane") continue
+		if (token.attrs.state !== "frozen") return undefined
+		const x = token.attrs.xSplit === undefined ? 0 : Number(token.attrs.xSplit)
+		const y = token.attrs.ySplit === undefined ? 0 : Number(token.attrs.ySplit)
+		const cols = Number.isInteger(x) && x > 0 && x < MAX_COL ? x : 0
+		const rows = Number.isInteger(y) && y > 0 && y < MAX_ROW ? y : 0
+		if (cols === 0 && rows === 0) return undefined
+		const out: { rows?: number; cols?: number } = {}
+		if (rows > 0) out.rows = rows
+		if (cols > 0) out.cols = cols
+		return out
+	}
+	return undefined
 }

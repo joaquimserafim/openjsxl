@@ -1,7 +1,7 @@
 import { XlsxError } from "../errors"
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1"
 import type { Workbook, Worksheet } from "../reader/workbook"
-import type { Cell } from "../types"
+import type { Cell, ColumnProps, FreezePane, RowProps } from "../types"
 import type { CellInput, SheetInput, WorkbookInput } from "./types"
 
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
@@ -15,6 +15,7 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 //   - formulas               → only the cached value survives (its type/number)
 //   - error cells            → written as their literal text (e.g. "#DIV/0!"), so they become strings
 //   - merges, hyperlinks, comments, sheet visibility → dropped (F4.6 closes most of this)
+//   (column widths, row heights, hidden flags, and frozen panes DO carry across — F4.5)
 //   - locale-only number formats (ids 23–36, 50–58) → no portable code exists; the format flattens
 //     (a date keeps its value and date-ness via the implicit format)
 // Two documented style FLATTENINGS (values stay exact; the file's internal structure normalizes):
@@ -97,7 +98,22 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 				rowArr[col - 1] = cellToInput(worksheet, cell)
 			}
 		}
-		sheets.push({ name: info.name, rows })
+		// Geometry (F4.5): carried only when present, so a geometry-free workbook produces the
+		// exact same WorkbookInput — and the exact same bytes — as before.
+		const sheet: {
+			name: string
+			rows: CellInput[][]
+			columns?: readonly ColumnProps[]
+			rowProperties?: Readonly<Record<number, RowProps>>
+			freeze?: FreezePane
+		} = { name: info.name, rows }
+		const columns = worksheet.columns
+		if (columns.length > 0) sheet.columns = columns
+		const rowProperties = worksheet.rowProperties
+		if (rowProperties.size > 0) sheet.rowProperties = Object.fromEntries(rowProperties)
+		const freeze = worksheet.freeze
+		if (freeze !== undefined) sheet.freeze = freeze
+		sheets.push(sheet)
 	}
 	return { sheets }
 }

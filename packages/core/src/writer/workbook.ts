@@ -104,7 +104,7 @@ export async function writeXlsx(
 	// interning every style into one shared registry. What the registry saw decides whether
 	// styles.xml (any non-default format) and theme1.xml (any theme color) are emitted at all.
 	const styles = createStyleRegistry()
-	const worksheets = sheets.map((sheet) => worksheetXml(sheet.rows, date1904, styles))
+	const worksheets = sheets.map((sheet) => worksheetXml(sheet, date1904, styles))
 	const needStyles = styles.needed()
 	const needTheme = styles.usesTheme()
 

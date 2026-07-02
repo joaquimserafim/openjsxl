@@ -50,6 +50,34 @@ export interface Hyperlink {
 	readonly display?: string
 }
 
+// ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
+// One shared model, like styles: what the reader's accessors return IS what the writer accepts.
+
+/** Width/visibility for a 1-based column range (`min`–`max` inclusive), from `<cols>`. */
+export interface ColumnProps {
+	readonly min: number
+	readonly max: number
+	/** Column width in characters of the default font (Excel's unit), 0 < width ≤ 255. */
+	readonly width?: number
+	readonly hidden?: boolean
+}
+
+/** Height/visibility of one row, from `<row ht hidden>`. */
+export interface RowProps {
+	/** Row height in points, 0 < height ≤ 409.5 (Excel's ceiling). */
+	readonly height?: number
+	readonly hidden?: boolean
+}
+
+/**
+ * A frozen pane: the top `rows` rows and/or leftmost `cols` columns stay visible while the rest
+ * scrolls. Split (non-frozen) panes are not modelled and read as no freeze.
+ */
+export interface FreezePane {
+	readonly rows?: number
+	readonly cols?: number
+}
+
 // ── Styles (M4) ────────────────────────────────────────────────────────────────────────────────
 // One shared style model: what `Worksheet.style(ref)` returns IS what the writer accepts, so the
 // read→modify→write bridge carries styles as a structural pass-through.

@@ -9,14 +9,26 @@ import {
 	resolveTarget,
 	type StyleTable,
 } from "../ooxml"
-import type { Cell, CellStyle, Comment, Hyperlink, SheetInfo } from "../types"
+import type {
+	Cell,
+	CellStyle,
+	ColumnProps,
+	Comment,
+	FreezePane,
+	Hyperlink,
+	RowProps,
+	SheetInfo,
+} from "../types"
 import { openZip, type ZipArchive } from "../zip"
 import {
 	parseCellStyles,
+	parseColumnProps,
 	parseComments,
 	parseDimension,
+	parseFreezePane,
 	parseHyperlinks,
 	parseMergedCells,
+	parseRowProperties,
 	type Row,
 	readRows,
 	streamRows,
@@ -73,6 +85,10 @@ export class Worksheet {
 	#dimension: string | undefined
 	#dimensionRead = false
 	#comments: readonly Comment[] | undefined
+	#columns: readonly ColumnProps[] | undefined
+	#rowProps: ReadonlyMap<number, RowProps> | undefined
+	#freeze: FreezePane | undefined
+	#freezeRead = false
 
 	constructor(
 		info: SheetInfo,
@@ -164,6 +180,37 @@ export class Worksheet {
 			this.#comments = this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml)
 		}
 		return this.#comments
+	}
+
+	/**
+	 * Column width/visibility declarations (`<cols>`), in document order (F4.5). Entries carrying
+	 * only a column-default STYLE are not geometry and are omitted — `style(ref)` already resolves
+	 * them. Empty when the sheet declares none.
+	 */
+	get columns(): readonly ColumnProps[] {
+		if (this.#columns === undefined) this.#columns = parseColumnProps(this.#xml)
+		return this.#columns
+	}
+
+	/**
+	 * Per-row height/visibility, keyed by 1-based row index (F4.5). Only rows that declare a
+	 * height or hidden flag appear. Empty map when none do.
+	 */
+	get rowProperties(): ReadonlyMap<number, RowProps> {
+		if (this.#rowProps === undefined) this.#rowProps = parseRowProperties(this.#xml)
+		return this.#rowProps
+	}
+
+	/**
+	 * The sheet's frozen pane, or `undefined` when nothing is frozen (F4.5). Split (non-frozen)
+	 * panes are not modelled and read as `undefined`.
+	 */
+	get freeze(): FreezePane | undefined {
+		if (!this.#freezeRead) {
+			this.#freeze = parseFreezePane(this.#xml)
+			this.#freezeRead = true
+		}
+		return this.#freeze
 	}
 
 	#cellStyleMap(): Map<string, number> {

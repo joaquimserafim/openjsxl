@@ -15,6 +15,10 @@ export interface CellRef {
 export const MAX_ROW = 1_048_576
 /** Highest column Excel supports (16,384 = XFD). */
 export const MAX_COL = 16_384
+/** Excel's column-width ceiling (in characters of the default font). */
+export const MAX_COL_WIDTH = 255
+/** Excel's row-height ceiling (in points). */
+export const MAX_ROW_HEIGHT = 409.5
 
 const CODE_UPPER_A = 65
 const CODE_UPPER_Z = 90

@@ -3,7 +3,7 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
-import type { CellStyle } from "../types"
+import type { CellStyle, ColumnProps, FreezePane, RowProps } from "../types"
 
 /**
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:
@@ -35,8 +35,24 @@ export type CellInput = CellValue | StyledCell
 export interface SheetInput {
 	/** Tab name. 1–31 chars, unique (case-insensitively), free of `\ / ? * [ ] :`. */
 	readonly name: string
-	/** Rows top-to-bottom; each a left-to-right array of cells. `rows[0][0]` is A1. */
-	readonly rows: readonly (readonly CellInput[])[]
+	/**
+	 * Rows top-to-bottom; each a left-to-right array of cells. `rows[0][0]` is A1. A hole or
+	 * `undefined` row is an empty row (the bridge produces sparse arrays; hand-written input may
+	 * too) — matching how `null`/`undefined`/holes inside a row mean empty cells.
+	 */
+	readonly rows: readonly (readonly CellInput[] | undefined)[]
+	/**
+	 * Column width/visibility declarations (F4.5) — the same shape `Worksheet.columns` returns.
+	 * Ranges are 1-based and inclusive; entries need a `width` and/or `hidden: true`.
+	 */
+	readonly columns?: readonly ColumnProps[]
+	/**
+	 * Per-row height/visibility keyed by 1-based row index (F4.5) — the same records
+	 * `Worksheet.rowProperties` holds. A row may have properties without having any cells.
+	 */
+	readonly rowProperties?: Readonly<Record<number, RowProps>>
+	/** Freeze the top `rows` rows and/or leftmost `cols` columns (F4.5). */
+	readonly freeze?: FreezePane
 }
 
 export interface WorkbookInput {

@@ -1,8 +1,9 @@
 import { XlsxError } from "../errors"
-import { formatRef, MAX_COL, MAX_ROW } from "../ooxml/a1"
+import { formatRef, MAX_COL, MAX_COL_WIDTH, MAX_ROW, MAX_ROW_HEIGHT } from "../ooxml/a1"
 import { dateToSerial } from "../ooxml/dates"
+import type { ColumnProps, FreezePane, RowProps } from "../types"
 import type { StyleRegistry } from "./styles"
-import type { CellInput, CellValue, StyledCell } from "./types"
+import type { CellInput, CellValue, SheetInput, StyledCell } from "./types"
 import { escapeText, isXmlSafe, preserveAttr } from "./xml"
 
 // Serialize one sheet's rows into worksheet XML (`xl/worksheets/sheetN.xml`). The element order the
@@ -131,22 +132,180 @@ function renderCell(
 	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`)
 }
 
+// ── Sheet geometry (F4.5): validation + emission ───────────────────────────────────────────────
+// Same philosophy as styles: strict validation naming the sheet, `false`/empty normalize away,
+// and the accepted bounds are exactly what the reader's geometry accessors can produce — so the
+// bridge's geometry always writes.
+
+function sheetInvalid(sheetName: string, message: string): never {
+	throw new XlsxError("invalid-input", `sheet "${sheetName}": ${message}`)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null) return false
+	const proto = Object.getPrototypeOf(value)
+	return proto === null || proto === Object.prototype
+}
+
+function checkGeoKeys(
+	sheetName: string,
+	what: string,
+	obj: Record<string, unknown>,
+	allowed: readonly string[],
+): void {
+	for (const key of Object.keys(obj)) {
+		if (!allowed.includes(key))
+			sheetInvalid(sheetName, `${what} has an unknown property "${key}"`)
+	}
+}
+
+// <cols> — one <col> per entry that survives normalization ({hidden: false} alone melts away).
+function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined): string {
+	if (columns === undefined) return ""
+	if (!Array.isArray(columns)) sheetInvalid(sheetName, "columns must be an array")
+	const entries: string[] = []
+	for (let i = 0; i < columns.length; i++) {
+		const raw = columns[i] as unknown
+		const what = `columns[${i}]`
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
+		checkGeoKeys(sheetName, what, raw, ["min", "max", "width", "hidden"])
+		const min = raw.min
+		const max = raw.max
+		if (
+			typeof min !== "number" ||
+			!Number.isInteger(min) ||
+			typeof max !== "number" ||
+			!Number.isInteger(max) ||
+			min < 1 ||
+			max < min ||
+			max > MAX_COL
+		) {
+			sheetInvalid(
+				sheetName,
+				`${what} needs integer 1-based min ≤ max within Excel's ${MAX_COL} columns`,
+			)
+		}
+		let attrs = ` min="${min}" max="${max}"`
+		const width = raw.width
+		if (width !== undefined) {
+			if (
+				typeof width !== "number" ||
+				!Number.isFinite(width) ||
+				width <= 0 ||
+				width > MAX_COL_WIDTH
+			) {
+				sheetInvalid(sheetName, `${what}.width must be a number in (0, ${MAX_COL_WIDTH}]`)
+			}
+			// customWidth marks the width as user-set — Excel ignores a bare width without it.
+			attrs += ` width="${String(width)}" customWidth="1"`
+		}
+		const hidden = raw.hidden
+		if (hidden !== undefined && typeof hidden !== "boolean") {
+			sheetInvalid(sheetName, `${what}.hidden must be a boolean`)
+		}
+		if (hidden === true) attrs += ' hidden="1"'
+		if (width !== undefined || hidden === true) entries.push(`<col${attrs}/>`)
+	}
+	return entries.length > 0 ? `<cols>${entries.join("")}</cols>` : ""
+}
+
+// Per-row `ht`/`hidden` attributes, keyed by 1-based row number. Rows whose properties all
+// normalize away are dropped; the survivors may belong to rows with no cells at all.
+function rowAttrsMap(
+	sheetName: string,
+	rowProperties: Readonly<Record<number, RowProps>> | undefined,
+): Map<number, string> {
+	const out = new Map<number, string>()
+	if (rowProperties === undefined) return out
+	if (!isPlainRecord(rowProperties)) sheetInvalid(sheetName, "rowProperties must be an object")
+	for (const key of Object.keys(rowProperties)) {
+		const rowNum = Number(key)
+		if (!Number.isInteger(rowNum) || rowNum < 1 || rowNum > MAX_ROW) {
+			sheetInvalid(
+				sheetName,
+				`rowProperties key "${key}" is not a row number within Excel's grid`,
+			)
+		}
+		const raw = (rowProperties as Record<string, unknown>)[key]
+		const what = `rowProperties[${key}]`
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
+		checkGeoKeys(sheetName, what, raw, ["height", "hidden"])
+		let attrs = ""
+		const height = raw.height
+		if (height !== undefined) {
+			if (
+				typeof height !== "number" ||
+				!Number.isFinite(height) ||
+				height <= 0 ||
+				height > MAX_ROW_HEIGHT
+			) {
+				sheetInvalid(sheetName, `${what}.height must be a number in (0, ${MAX_ROW_HEIGHT}]`)
+			}
+			// customHeight marks the height as user-set, mirroring customWidth on columns.
+			attrs += ` ht="${String(height)}" customHeight="1"`
+		}
+		const hidden = raw.hidden
+		if (hidden !== undefined && typeof hidden !== "boolean") {
+			sheetInvalid(sheetName, `${what}.hidden must be a boolean`)
+		}
+		if (hidden === true) attrs += ' hidden="1"'
+		if (attrs !== "") out.set(rowNum, attrs)
+	}
+	return out
+}
+
+// <sheetViews> with a frozen <pane>. For state="frozen", xSplit/ySplit are whole column/row
+// counts; topLeftCell is the first scrollable cell and activePane the quadrant the cursor lives
+// in — Excel expects all three to be consistent.
+function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): string {
+	if (freeze === undefined) return ""
+	if (!isPlainRecord(freeze)) sheetInvalid(sheetName, "freeze must be an object")
+	checkGeoKeys(sheetName, "freeze", freeze, ["rows", "cols"])
+	const validate = (value: unknown, what: string, limit: number): number => {
+		if (value === undefined) return 0
+		if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value >= limit) {
+			sheetInvalid(sheetName, `freeze.${what} must be an integer in [0, ${limit})`)
+		}
+		return value
+	}
+	const rows = validate(freeze.rows, "rows", MAX_ROW)
+	const cols = validate(freeze.cols, "cols", MAX_COL)
+	if (rows === 0 && cols === 0) return "" // freezing nothing is no freeze
+	const splits = (cols > 0 ? ` xSplit="${cols}"` : "") + (rows > 0 ? ` ySplit="${rows}"` : "")
+	const topLeft = formatRef({ col: cols + 1, row: rows + 1 })
+	const activePane = rows > 0 && cols > 0 ? "bottomRight" : rows > 0 ? "bottomLeft" : "topRight"
+	return (
+		'<sheetViews><sheetView workbookViewId="0">' +
+		`<pane${splits} topLeftCell="${topLeft}" activePane="${activePane}" state="frozen"/>` +
+		"</sheetView></sheetViews>"
+	)
+}
+
 export interface WorksheetResult {
 	readonly xml: string
 }
 
 /** Build the worksheet XML for one sheet, interning cell styles into the shared registry. */
 export function worksheetXml(
-	rows: readonly (readonly CellInput[])[],
+	sheet: SheetInput,
 	date1904: boolean,
 	styles: StyleRegistry,
 ): WorksheetResult {
+	const rows = sheet.rows
+	// Geometry validates up front (and contributes rows below): a bad column/row/freeze spec must
+	// surface before any cell work.
+	const cols = colsXml(sheet.name, sheet.columns)
+	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties)
+	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze)
+
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
 	let minRow = 0
 	let maxRow = 0
 	let minCol = 0
 	let maxCol = 0
-	const rowXmls: string[] = []
+	// (rowNum, xml) pairs: cell rows arrive in ascending order; property-only rows are merged in
+	// afterwards, then the whole set is sorted so <sheetData> stays ascending.
+	const rowXmls: [number, string][] = []
 
 	// A workbook can't outgrow Excel's grid: refs past XFD1048576 make Excel refuse the file, and
 	// (mechanically) `rows.length` drives this loop — an absurd length would spin for hours.
@@ -186,8 +345,19 @@ export function worksheetXml(
 			if (colNum > maxCol) maxCol = colNum
 			cellXmls.push(rendered)
 		}
-		if (cellXmls.length > 0) rowXmls.push(`<row r="${rowNum}">${cellXmls.join("")}</row>`)
+		if (cellXmls.length > 0) {
+			const attrs = rowAttrs.get(rowNum) ?? ""
+			rowAttrs.delete(rowNum) // consumed — whatever remains becomes a property-only row
+			rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}>${cellXmls.join("")}</row>`])
+		}
 	}
+
+	// Rows that carry height/hidden but no cells still exist in the file, as cell-less <row>
+	// elements. They do not extend the dimension (Excel's dimension covers content, not geometry).
+	for (const [rowNum, attrs] of rowAttrs) {
+		rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}/>`])
+	}
+	rowXmls.sort((a, b) => a[0] - b[0])
 
 	// Bounding box of the populated cells, in A1 notation. An entirely empty sheet is "A1" (Excel's
 	// convention); a single cell collapses to that one ref rather than a degenerate "X:X" range.
@@ -198,8 +368,10 @@ export function worksheetXml(
 				? formatRef({ col: minCol, row: minRow })
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`
 
-	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"><dimension ref="${dimension}"/><sheetData>${rowXmls.join(
-		"",
-	)}</sheetData></worksheet>`
+	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData. The geometry blocks
+	// are empty strings when unused, so a geometry-free sheet emits the exact pre-F4.5 bytes.
+	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
+		.map(([, x]) => x)
+		.join("")}</sheetData></worksheet>`
 	return { xml }
 }

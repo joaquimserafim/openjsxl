@@ -534,16 +534,25 @@ default theme after rewrite — documented loudly. Property test: bridge output 
 style set (verified per-cell over the whole fixture corpus + openpyxl cross-check of the
 bridge-rewritten file); unstyled files rewrite byte-identically (even with dates).
 
-### F4.5 — Sheet geometry: column widths, row heights, hidden, freeze panes ☐
+### F4.5 — Sheet geometry: column widths, row heights, hidden, freeze panes ☑
 **Scope.** Read: three lazy accessors in the `mergedCells` idiom — `columns`
 (`{min,max,width?,hidden?}` from `<cols>`), `rowProperties` (`Map<row, {height?,hidden?}>` from
 `<row>` attrs, dedicated scan off the hot path), `freeze` (`<pane state="frozen">`; split panes
 read `undefined`). Write: matching `SheetInput.columns/rowProperties/freeze`; schema order
 `sheetViews` → `cols` → `sheetData`; property-only rows emit cell-less `<row>`.
 **Tasks**
-- [ ] Reader accessors + types; writer emission + validation; bridge carries geometry.
-- [ ] Tests: real-producer fixture reads exact widths/heights/hidden/freeze; write → re-read
-  equal; openpyxl confirms frozen pane + widths.
+- [x] Reader accessors + types (bounds shared with the writer, out-of-range degrades); writer
+  emission + validation (schema order `dimension→sheetViews→cols→sheetData`; property-only rows
+  emit cell-less `<row>`; no-op geometry normalizes to the exact geometry-free bytes); bridge
+  carries geometry, and the corpus property test snapshots it for every fixture.
+- [x] Tests: real-producer fixture (`openpyxl-geometry.xlsx`, provenance in data/README) reads
+  exact widths/heights/hidden/freeze; write → re-read equal; openpyxl confirms frozen pane +
+  widths on OUR output; byte-identity 5/5 held through the emission restructure.
+- [x] Review fixes (4 CONFIRMED = 2 bugs + hardening, regression-pinned): `parseFreezePane` is
+  now scoped to `<sheetViews>` (a saved Custom View's `<pane>` after `sheetData` fabricated a
+  freeze the active view didn't have); `parseRowProperties` parses `r` with the row assembler's
+  EXACT rule (`parseInt` + positional fallback — `Number()` divergence migrated heights to
+  phantom rows on tolerated-malformed files); `parseColumnProps` stops at `<sheetData>`.
 **Acceptance.** Geometry round-trips; Excel/LibreOffice show frozen header and sized columns.
 
 ### F4.6 — Structural metadata write: merges, hyperlinks, visibility ☐

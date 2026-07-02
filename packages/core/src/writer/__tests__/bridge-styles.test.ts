@@ -28,7 +28,13 @@ async function styleSnapshot(wb: Workbook) {
 				}
 			}
 		}
-		out[info.name] = cells
+		out[info.name] = {
+			cells,
+			// Geometry (F4.5) is part of the fidelity contract too.
+			columns: sheet.columns,
+			rowProperties: Object.fromEntries(sheet.rowProperties),
+			freeze: sheet.freeze,
+		}
 	}
 	return out
 }
