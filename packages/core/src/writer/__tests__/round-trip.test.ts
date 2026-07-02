@@ -58,7 +58,7 @@ describe('round-trip — bridge over the supported value set', () => {
 		const wb1 = await openXlsx(
 			await writeXlsx({
 				sheets: [
-					{ name: 'One', rows: [['text', 12.5, true], [date], [, 'sparse B3']] },
+					{ name: 'One', rows: [['text', 12.5, true], [date], [undefined, 'sparse B3']] },
 					{ name: 'Two', rows: [[false, 'x']] },
 				],
 			}),
@@ -76,9 +76,7 @@ describe('round-trip — bridge over the supported value set', () => {
 
 	it('does not materialize a dense grid for a far-apart cell', async () => {
 		// A single cell at row 1000 must round-trip without exploding — the bridge keeps rows sparse.
-		const wb1 = await openXlsx(
-			await writeXlsx({ sheets: [{ name: 'S', rows: [['top']] }] }),
-		)
+		const wb1 = await openXlsx(await writeXlsx({ sheets: [{ name: 'S', rows: [['top']] }] }))
 		const input = await workbookToInput(wb1)
 		expect(input.sheets[0]?.rows.length).toBe(1)
 	})
