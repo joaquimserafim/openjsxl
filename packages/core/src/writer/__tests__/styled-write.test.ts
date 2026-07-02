@@ -224,7 +224,7 @@ describe('writeXlsx — style validation (invalid-input naming the cell)', () =>
 		).toMatch(/textRotation/)
 	})
 
-	it('rejects colors on a "none" fill and numberFormat (until F4.3)', async () => {
+	it('rejects colors on a "none" fill', async () => {
 		expect(
 			await failure([
 				[
@@ -235,9 +235,6 @@ describe('writeXlsx — style validation (invalid-input naming the cell)', () =>
 				],
 			]),
 		).toMatch(/cannot carry colors/)
-		expect(await failure([[{ value: 1, style: { numberFormat: '0.00%' } }]])).toMatch(
-			/numberFormat is not supported yet/,
-		)
 	})
 
 	it('names the failing cell in the error', async () => {

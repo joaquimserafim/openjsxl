@@ -1,5 +1,11 @@
 import { XlsxError } from '../errors'
-import { BORDER_LINE_STYLES, H_ALIGNMENTS, PATTERN_TYPES, V_ALIGNMENTS } from '../ooxml/styles'
+import {
+	BORDER_LINE_STYLES,
+	BUILTIN_FORMATS,
+	H_ALIGNMENTS,
+	PATTERN_TYPES,
+	V_ALIGNMENTS,
+} from '../ooxml/styles'
 import type {
 	Alignment,
 	BorderEdge,
@@ -42,6 +48,19 @@ const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
 // The built-in date numFmt a bare Date cell gets (mm-dd-yy); the reader maps it back to `date`.
 const DATE_NUMFMT_ID = 14
+
+// Reverse of the reader's BUILTIN_FORMATS: an EXACT code match reuses the built-in id and needs
+// no <numFmts> entry ('0.00%' → 10). Anything else interns as a custom format from 164 up —
+// below 164 is reserved for built-ins. First-wins on the (currently absent) chance of duplicate
+// codes in the table, so the mapping is deterministic.
+const BUILTIN_CODE_TO_ID: ReadonlyMap<string, number> = (() => {
+	const map = new Map<string, number>()
+	for (const [id, code] of Object.entries(BUILTIN_FORMATS)) {
+		if (!map.has(code)) map.set(code, Number(id))
+	}
+	return map
+})()
+const CUSTOM_NUMFMT_BASE = 164
 
 // 6-digit RGB or 8-digit ARGB hex, written verbatim. Both appear in real files (the reader keeps
 // whatever the producer wrote), so the writer must accept both or the bridge would reject a
@@ -437,7 +456,22 @@ export function createStyleRegistry(): StyleRegistry {
 	]
 	const xfIndex = new Map<string, number>([['0/0/0/0/', 0]])
 
+	// Custom number formats (F4.3): code → id from 164 up, deduped, in first-encounter order.
+	// Codes exactly matching a built-in reuse its id instead and never appear here.
+	const customFormats = new Map<string, number>()
+
 	let themeUsed = false
+
+	const numFmtIdFor = (code: string): number => {
+		const builtin = BUILTIN_CODE_TO_ID.get(code)
+		if (builtin !== undefined) return builtin
+		let id = customFormats.get(code)
+		if (id === undefined) {
+			id = CUSTOM_NUMFMT_BASE + customFormats.size
+			customFormats.set(code, id)
+		}
+		return id
+	}
 
 	const internFont = (font: FontStyle | undefined): number => {
 		if (font === undefined) return 0
@@ -485,6 +519,7 @@ export function createStyleRegistry(): StyleRegistry {
 		let fillId = 0
 		let borderId = 0
 		let alignment: Alignment | undefined
+		let numFmtCode: string | undefined
 		if (style !== undefined) {
 			if (!isPlainObject(style)) invalid(ref, 'style must be an object')
 			checkKeys(ref, 'style', style as Record<string, unknown>, [
@@ -494,11 +529,22 @@ export function createStyleRegistry(): StyleRegistry {
 				'alignment',
 				'numberFormat',
 			])
-			if ((style as Record<string, unknown>).numberFormat !== undefined) {
-				// Recognized (it is part of CellStyle) but not yet writable — lands with F4.3.
-				invalid(ref, 'style.numberFormat is not supported yet')
-			}
 			// Single-read each component (see the validator note above) before validating it.
+			const rawCode = style.numberFormat
+			if (rawCode !== undefined) {
+				// A format CODE string — what Excel's Custom dialog shows and numberFormat(ref)
+				// returns. Ids are file-internal and never part of the API.
+				if (typeof rawCode !== 'string' || rawCode.length === 0) {
+					invalid(ref, 'style.numberFormat must be a non-empty format code string')
+				}
+				if (!isXmlSafe(rawCode)) {
+					invalid(
+						ref,
+						'style.numberFormat contains a character not allowed in XML (a control character or lone surrogate)',
+					)
+				}
+				numFmtCode = rawCode
+			}
 			const font = style.font
 			fontId = internFont(font === undefined ? undefined : validateFont(ref, font))
 			const fill = style.fill
@@ -508,7 +554,11 @@ export function createStyleRegistry(): StyleRegistry {
 			const align = style.alignment
 			alignment = align === undefined ? undefined : validateAlignment(ref, align)
 		}
-		const numFmtId = isDate ? DATE_NUMFMT_ID : 0
+		// A user code wins even on a Date — the implicit date format (id 14) applies only when the
+		// caller didn't choose one. 'General' reverse-maps to id 0, i.e. no format.
+		let numFmtId = 0
+		if (numFmtCode !== undefined) numFmtId = numFmtIdFor(numFmtCode)
+		else if (isDate) numFmtId = DATE_NUMFMT_ID
 
 		const key = `${numFmtId}/${fontId}/${fillId}/${borderId}/${keyOf(alignment)}`
 		let index = xfIndex.get(key)
@@ -535,8 +585,20 @@ export function createStyleRegistry(): StyleRegistry {
 	}
 
 	function stylesXml(): string {
+		// Schema order puts <numFmts> FIRST, before <fonts>. Only custom codes are declared —
+		// built-in ids are implicit. formatCode is attribute-escaped: real codes carry quotes
+		// (e.g. "kg" 0.0).
+		const numFmts =
+			customFormats.size === 0
+				? ''
+				: `<numFmts count="${customFormats.size}">${[...customFormats]
+						.map(
+							([code, id]) =>
+								`<numFmt numFmtId="${id}" formatCode="${escapeAttr(code)}"/>`,
+						)
+						.join('')}</numFmts>`
 		return (
-			`${XML_DECL}\n<styleSheet xmlns="${NS_MAIN}">` +
+			`${XML_DECL}\n<styleSheet xmlns="${NS_MAIN}">${numFmts}` +
 			`<fonts count="${fonts.length}">${fonts.join('')}</fonts>` +
 			`<fills count="${fills.length}">${fills.join('')}</fills>` +
 			`<borders count="${borders.length}">${borders.join('')}</borders>` +

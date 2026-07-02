@@ -486,16 +486,21 @@ output byte-for-byte** (golden pins), date and no-date cases.
 **Acceptance.** Styled cells re-read exactly; v0.3 bytes unchanged for unstyled input; openpyxl
 opens styled output with matching formatting.
 
-### F4.3 — Number-format write (built-in reverse map + custom ids ≥ 164) ☐
+### F4.3 — Number-format write (built-in reverse map + custom ids ≥ 164) ☑
 **Scope.** Activate `CellStyle.numberFormat` in the writer as a format **code string**. Codes
 exactly matching `BUILTIN_FORMATS` reverse-map to their id (no `<numFmts>` entry); others intern
 from 164 up in deterministic first-encounter order. A `Date` with a user code keeps it (implicit
 id 14 only when absent). Re-read typing flows through `isDateFormatCode` — a number written with
 a date code re-reads as `date` (Excel-faithful; documented).
 **Tasks**
-- [ ] `BUILTIN_CODE_TO_ID` reverse map; registry numFmt interning; `<numFmts>` emission.
-- [ ] Tests: built-in maps flat; custom round-trips verbatim via `numberFormat(ref)`; date
+- [x] `BUILTIN_CODE_TO_ID` reverse map; registry numFmt interning; `<numFmts>` emission.
+- [x] Tests: built-in maps flat; custom round-trips verbatim via `numberFormat(ref)`; date
   interplay both directions; locale-id codes documented as non-representable.
+- [x] Review fixes (2, regression-pinned): `isDateFormatCode` now strips quoted literals /
+  escapes / skip-fill tokens BEFORE the elapsed-time sniff (a quoted `"[h]"` no longer date-flips
+  a written number — pre-existing F2.1 heuristic bug F4.3 made reachable); `escapeAttr` emits
+  tab/LF/CR as character references so attribute-value normalization can't silently rewrite
+  format codes (or sheet/font names) for conforming readers.
 **Acceptance.** `numberFormat(ref)` returns the written code verbatim after round-trip.
 
 ### F4.4 — Bridge carries styles (round-trip fidelity) ☐

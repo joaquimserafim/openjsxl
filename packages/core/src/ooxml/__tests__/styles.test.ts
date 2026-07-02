@@ -36,6 +36,23 @@ describe('isDateFormatCode', () => {
 			expect(isDateFormatCode(code), code).toBe(false)
 		}
 	})
+
+	// Regressions (adversarial review, F4.3): literals must be stripped BEFORE the elapsed-time
+	// sniff, and the _x/*x skip/fill tokens are literals too.
+	it('does not mistake quoted "[h]" literals or skip tokens for date formats', () => {
+		for (const code of [
+			'"[h] rate" 0.00', // [h] inside a quoted literal — a plain number format
+			'"[mm]" #,##0', // ditto for [mm]
+			'0.00_m', // skip token: _m renders a space, m is not a token
+			'0.00*h', // fill token: *h repeats "h" as padding, not hours
+		]) {
+			expect(isDateFormatCode(code), code).toBe(false)
+		}
+		// The inverse guards: genuinely elapsed/escaped codes must still sniff as dates.
+		for (const code of ['[h]', '[mm]:[ss]', '\\[h\\]', '"rate" h:mm']) {
+			expect(isDateFormatCode(code), code).toBe(true)
+		}
+	})
 })
 
 describe('parseStyles', () => {

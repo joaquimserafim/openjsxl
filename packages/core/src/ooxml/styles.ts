@@ -55,7 +55,9 @@ export interface StyleTable {
 // Built-in number formats (ECMA-376 §18.8.30) with a fixed, non-locale code. The locale and
 // reserved ids (23–36, 41–44, 50–58) have no portable code and resolve to undefined; date
 // detection still recognises those via isBuiltinDateId, we just don't fabricate their string.
-const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
+// Exported: the writer reverse-maps exact code matches to these ids (F4.3), so the two tables
+// can never drift.
+export const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
 	0: 'General',
 	1: '0',
 	2: '0.00',
@@ -100,20 +102,26 @@ function isBuiltinDateId(id: number): boolean {
 }
 
 // A format code is a date/time format when, after removing the parts that can never be date
-// tokens — quoted literals ("…"), escaped characters (\x), and bracketed sections ([Red],
-// [$-409], [>100]) — one of the date/time letters d m y h s remains.
+// tokens — quoted literals ("…"), escaped characters (\x), skip/fill tokens (_x, *x), and
+// bracketed sections ([Red], [$-409], [>100]) — one of the date/time letters d m y h s remains.
 //
 // Elapsed-time tokens — [h], [hh], [mm], [ss] — are an exception: they ARE time formats but
-// live inside brackets the NON_TOKEN pass would strip, so a code like "[h]" (or "[mm]:[ss]")
-// would otherwise reduce to nothing. Detect them up front. (Ordinary elapsed formats like
-// "[h]:mm:ss" already pass via the mm/ss outside the brackets.)
+// live inside brackets the bracket pass would strip, so a code like "[h]" (or "[mm]:[ss]")
+// would otherwise reduce to nothing. Detect them AFTER stripping literals but BEFORE stripping
+// brackets: testing the raw code instead would let a quoted literal containing "[h]" (e.g.
+// `"[h] rate" 0.00`, a plain number format) masquerade as elapsed time — a written cell would
+// then re-read as a date while Excel shows a number (adversarial review, F4.3).
 const ELAPSED_TIME = /\[(?:h+|m+|s+)\]/i
-const NON_TOKEN = /\[[^\]]*\]|"[^"]*"|\\./g
+// Quoted literals, backslash escapes, and the ECMA-376 skip (_x) / fill (*x) tokens: their
+// characters render literally (or pad), so an m/d/h inside them is not a date token ("0.00_m").
+const LITERALS = /"[^"]*"|\\.|[_*]./g
+const BRACKETS = /\[[^\]]*\]/g
 const DATE_TOKEN = /[dmyhs]/i
 
 export function isDateFormatCode(formatCode: string): boolean {
-	if (ELAPSED_TIME.test(formatCode)) return true
-	return DATE_TOKEN.test(formatCode.replace(NON_TOKEN, ''))
+	const withoutLiterals = formatCode.replace(LITERALS, '')
+	if (ELAPSED_TIME.test(withoutLiterals)) return true
+	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ''))
 }
 
 // ── Attribute parsing helpers ──────────────────────────────────────────────────────────────────
