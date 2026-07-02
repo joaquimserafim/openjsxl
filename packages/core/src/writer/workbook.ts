@@ -1,20 +1,26 @@
 import { XlsxError } from '../errors'
 import { worksheetXml } from './sheet'
+import { createStyleRegistry } from './styles'
+import { DEFAULT_THEME_XML } from './theme'
 import type { WorkbookInput, WriteOptions } from './types'
 import { escapeAttr, isXmlSafe } from './xml'
 import { writeZip, type ZipInput } from './zip'
 
-// writeXlsx — the public workbook writer (F3.2). Given a workbook described as plain data, emit the
-// minimal valid OPC part set and pack it with writeZip. The output re-reads through openXlsx with the
-// same values, types, and sheet order, and opens in Excel/LibreOffice without a "repair" prompt.
+// writeXlsx — the public workbook writer (F3.2, styled cells F4.2). Given a workbook described as
+// plain data, emit the minimal valid OPC part set and pack it with writeZip. The output re-reads
+// through openXlsx with the same values, types, sheet order, and styles, and opens in
+// Excel/LibreOffice without a "repair" prompt.
 //
 // Minimal part set (only what a valid spreadsheet requires):
 //   [Content_Types].xml            — content-type map for every part
 //   _rels/.rels                    — package → xl/workbook.xml
 //   xl/workbook.xml                — sheet list (names, ids, r:id links)
-//   xl/_rels/workbook.xml.rels     — workbook → each worksheet (+ styles when present)
+//   xl/_rels/workbook.xml.rels     — workbook → each worksheet (+ styles/theme when present)
 //   xl/worksheets/sheetN.xml       — one per sheet
-//   xl/styles.xml                  — ONLY when some cell is a date (holds the date cellXf)
+//   xl/styles.xml                  — ONLY when some cell needs a non-default format (a date, or
+//                                    any F4.2 style); built by the shared StyleRegistry
+//   xl/theme/theme1.xml            — ONLY when a written style uses a theme color; Excel resolves
+//                                    {theme, tint} indexes against this part
 //
 // Strings are written inline (t="inlineStr"), so there is no sharedStrings.xml to buffer — the
 // "value extractor" trade-off: a touch more bytes on disk for a single streaming pass and no table.
@@ -33,12 +39,6 @@ const CT_RELS = 'application/vnd.openxmlformats-package.relationships+xml'
 // breaks these opens with a "repair" prompt, so we refuse to write it.
 const MAX_SHEET_NAME = 31
 const FORBIDDEN_SHEET_NAME = /[\\/?*[\]:]/
-
-// styles.xml with exactly two cellXfs: index 0 = General, index 1 = the built-in date format
-// (numFmtId 14). Date cells carry s="1"; the reader maps numFmtId 14 back to a date. Emitted only
-// when a date is present, keeping a date-free workbook down to the bare parts.
-const STYLES_XML = `${XML_DECL}
-<styleSheet xmlns="${NS_MAIN}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`
 
 function validate(workbook: WorkbookInput): void {
 	const sheets = workbook?.sheets
@@ -100,10 +100,13 @@ export async function writeXlsx(
 	const date1904 = options?.date1904 === true
 	const sheets = workbook.sheets
 
-	// Render every worksheet up front — this is also where invalid cell values surface — and learn
-	// whether any sheet needs the date style (which decides if styles.xml is emitted at all).
-	const worksheets = sheets.map((sheet) => worksheetXml(sheet.rows, date1904))
-	const anyDate = worksheets.some((w) => w.usesDate)
+	// Render every worksheet up front — this is also where invalid cell values and styles surface —
+	// interning every style into one shared registry. What the registry saw decides whether
+	// styles.xml (any non-default format) and theme1.xml (any theme color) are emitted at all.
+	const styles = createStyleRegistry()
+	const worksheets = sheets.map((sheet) => worksheetXml(sheet.rows, date1904, styles))
+	const needStyles = styles.needed()
+	const needTheme = styles.usesTheme()
 
 	const parts: ZipInput[] = []
 	const add = (name: string, xml: string): void => {
@@ -117,8 +120,13 @@ export async function writeXlsx(
 			(_, i) =>
 				`<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="${CT_BASE}.worksheet+xml"/>`,
 		),
-		...(anyDate
+		...(needStyles
 			? [`<Override PartName="/xl/styles.xml" ContentType="${CT_BASE}.styles+xml"/>`]
+			: []),
+		...(needTheme
+			? [
+					'<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>',
+				]
 			: []),
 	].join('')
 	add(
@@ -145,16 +153,21 @@ export async function writeXlsx(
 		`${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}<sheets>${sheetsXml}</sheets></workbook>`,
 	)
 
-	// xl/_rels/workbook.xml.rels — worksheet targets (matching the r:ids above) plus styles.xml when
-	// present. The styles rel takes the id after the last sheet.
+	// xl/_rels/workbook.xml.rels — worksheet targets (matching the r:ids above) plus styles.xml and
+	// theme1.xml when present. The styles rel takes the id after the last sheet; theme follows it.
 	const relItems = [
 		...sheets.map(
 			(_, i) =>
 				`<Relationship Id="rId${i + 1}" Type="${NS_REL}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`,
 		),
-		...(anyDate
+		...(needStyles
 			? [
 					`<Relationship Id="rId${sheets.length + 1}" Type="${NS_REL}/styles" Target="styles.xml"/>`,
+				]
+			: []),
+		...(needTheme
+			? [
+					`<Relationship Id="rId${sheets.length + (needStyles ? 2 : 1)}" Type="${NS_REL}/theme" Target="theme/theme1.xml"/>`,
 				]
 			: []),
 	].join('')
@@ -163,7 +176,8 @@ export async function writeXlsx(
 		`${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${relItems}</Relationships>`,
 	)
 
-	if (anyDate) add('xl/styles.xml', STYLES_XML)
+	if (needStyles) add('xl/styles.xml', styles.stylesXml())
+	if (needTheme) add('xl/theme/theme1.xml', DEFAULT_THEME_XML)
 
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml)

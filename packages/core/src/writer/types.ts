@@ -3,6 +3,8 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
+import type { CellStyle } from '../types'
+
 /**
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:
  * `string` → inline string, `number` → numeric, `boolean` → `b`, `Date` → date-styled serial.
@@ -10,11 +12,31 @@
  */
 export type CellValue = string | number | boolean | Date | null | undefined
 
+/**
+ * A cell with a {@link CellStyle} attached (F4.2). `value` is required but nullable — a styled
+ * BLANK cell (`{ value: null, style }`) is real and emits `<c r s/>`, which is how a border or
+ * fill lands on a cell with nothing in it. The style type is exactly what `Worksheet.style(ref)`
+ * returns, so read → modify → write carries styles as a pass-through.
+ */
+export interface StyledCell {
+	readonly value: CellValue
+	readonly style?: CellStyle
+}
+
+/**
+ * One cell in a row: a bare value, or a value with a style. Discrimination is total — `null` /
+ * `undefined` mean empty, `Date` instances are dates, and any OTHER object must be a
+ * {@link StyledCell} (an object without a `value` property throws `invalid-input`, catching stray
+ * objects loudly). Bare-value rows are untouched: pre-F4.2 input keeps its exact meaning AND its
+ * exact output bytes.
+ */
+export type CellInput = CellValue | StyledCell
+
 export interface SheetInput {
 	/** Tab name. 1–31 chars, unique (case-insensitively), free of `\ / ? * [ ] :`. */
 	readonly name: string
-	/** Rows top-to-bottom; each a left-to-right array of cell values. `rows[0][0]` is A1. */
-	readonly rows: readonly (readonly CellValue[])[]
+	/** Rows top-to-bottom; each a left-to-right array of cells. `rows[0][0]` is A1. */
+	readonly rows: readonly (readonly CellInput[])[]
 }
 
 export interface WorkbookInput {

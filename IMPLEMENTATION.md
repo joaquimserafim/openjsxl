@@ -460,7 +460,7 @@ underline/rotation values degrade to `undefined`, documented.
 **Acceptance.** Styled fixtures read back verbatim; `style()` and `numberFormat()` agree on
 inherited (row/col-default) styles; unstyled cells → `undefined`.
 
-### F4.2 — Styled-cell write input + style interner ☐
+### F4.2 — Styled-cell write input + style interner ☑
 **Scope.** Widen rows to `CellInput = CellValue | StyledCell` (`{ value: CellValue; style?:
 CellStyle }`, `value` required but nullable — a styled blank emits `<c r s/>`, which
 `worksheetXml` must stop pruning). Internal style registry interns styles structurally into
@@ -473,11 +473,16 @@ reserved (none/gray125), empty font+border at index 0, `cellStyleXfs` + Normal c
 present, solid fills colored via `fgColor`. **Hard gate: bare-value input reproduces the v0.3
 output byte-for-byte** (golden pins), date and no-date cases.
 **Tasks**
-- [ ] `CellInput`/`StyledCell` types; validation; `worksheetXml` styled + styled-blank cells.
-- [ ] Style registry (canonical structural key → xf index; deterministic emit order) + stylesheet
-  emission; default `theme1.xml` when needed.
-- [ ] Tests: styled write → `style(ref)` deep-equals input; byte-identical golden for bare input;
-  validation rejections; interning (identical styles share one xf).
+- [x] `CellInput`/`StyledCell` types; validation; `worksheetXml` styled + styled-blank cells.
+- [x] Style registry (canonical structural key → xf index; deterministic emit order) + stylesheet
+  emission; default `theme1.xml` (standard Office theme, from openpyxl output) when needed.
+- [x] Tests: styled write → `style(ref)` deep-equals input; byte-identical golden for bare input
+  (PLUS out-of-band full-archive byte-compare vs the pre-F4.2 dist: 5/5 identical); validation
+  rejections; interning (identical styles share one xf); openpyxl reads all components back.
+- [x] Review fixes (4 bugs, regression-pinned): `font.name` now isXmlSafe-gated; theme/indexed
+  capped at u32 (no exponential notation in integer attrs); style components must be strictly
+  plain objects (a Map's prototype `.size` getter had validated as a font size); validators
+  single-read every property (a getter could pass checks then inject markup on the emission read).
 **Acceptance.** Styled cells re-read exactly; v0.3 bytes unchanged for unstyled input; openpyxl
 opens styled output with matching formatting.
 

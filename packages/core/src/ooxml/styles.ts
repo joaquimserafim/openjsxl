@@ -147,8 +147,9 @@ function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color 
 }
 
 // Enum whitelists: attribute values are producer-controlled strings, so gate them through the
-// spec's literal sets — garbage degrades to "absent", never leaks into the typed model.
-const PATTERN_TYPES = new Set<PatternType>([
+// spec's literal sets — garbage degrades to "absent", never leaks into the typed model. Exported:
+// the writer validates its style input against the SAME sets, so reader and writer cannot drift.
+export const PATTERN_TYPES = new Set<PatternType>([
 	'none',
 	'solid',
 	'mediumGray',
@@ -169,7 +170,7 @@ const PATTERN_TYPES = new Set<PatternType>([
 	'gray125',
 	'gray0625',
 ])
-const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
+export const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
 	'thin',
 	'medium',
 	'thick',
@@ -184,7 +185,7 @@ const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
 	'mediumDashDotDot',
 	'slantDashDot',
 ])
-const H_ALIGNMENTS = new Set<HorizontalAlignment>([
+export const H_ALIGNMENTS = new Set<HorizontalAlignment>([
 	'left',
 	'center',
 	'right',
@@ -193,7 +194,7 @@ const H_ALIGNMENTS = new Set<HorizontalAlignment>([
 	'centerContinuous',
 	'distributed',
 ])
-const V_ALIGNMENTS = new Set<VerticalAlignment>([
+export const V_ALIGNMENTS = new Set<VerticalAlignment>([
 	'top',
 	'center',
 	'bottom',

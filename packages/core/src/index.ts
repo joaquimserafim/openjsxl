@@ -29,11 +29,13 @@ export type {
 	UnderlineStyle,
 	VerticalAlignment,
 } from './types'
-// Writer API (F3.2) — serialize a workbook described as plain data to .xlsx bytes.
-// The bridge (F3.3) turns an open Workbook back into writer input, closing the round trip.
+// Writer API (F3.2) — serialize a workbook described as plain data to .xlsx bytes; styled cells
+// from F4.2. The bridge (F3.3) turns an open Workbook back into writer input, closing the round trip.
 export {
+	type CellInput,
 	type CellValue,
 	type SheetInput,
+	type StyledCell,
 	type WorkbookInput,
 	type WriteOptions,
 	workbookToInput,
