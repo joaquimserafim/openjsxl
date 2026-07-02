@@ -420,11 +420,124 @@ openpyxl. **Release (separate step): tag v0.3** — bump `0.3.0`, README/PUBLISH
 
 ---
 
-## M4+ — Later milestones (outline; expanded when reached)
+## M4 — Styles (v0.4)
 
-- **M4 — Styles (v0.4):** read + write fonts, fills, borders, alignment, named/number
-  formats, column widths / row heights / freeze panes. *The SheetJS-Pro killer.*
-- **M5 — Streaming writer + native lane (v0.5):** constant-memory writer; images; an
+Goal: read **and** write fonts, fills, borders, alignment, and number formats — plus sheet
+geometry and the structural metadata the writer still drops. One shared `CellStyle` type is the
+read model, the write model, and what the bridge carries, so styled round-trip stays a
+pass-through. *The SheetJS-Pro killer.*
+
+**Milestone-wide decisions** (design panel, unanimous): write input is a per-cell union
+`CellInput = CellValue | { value, style? }` (backward compatible — every such object throws
+`invalid-input` today); read API is a lazy `sheet.style(ref)` sibling of `numberFormat(ref)`
+reusing the #22 effective-style precedence (cells stay flat — no styleId on `Cell`); colors are
+the **raw** union `{rgb} | {theme, tint?} | {indexed} | {auto}` with **no theme1.xml parser**
+(openpyxl's model; the only one that round-trips faithfully — resolving to rgb is lossy); number
+formats travel as **code strings**, never ids. Deferred (named, not silent): comments write
+(needs a legacy VML drawing part for Excel to display them → 0.5), theme parsing / resolved-rgb
+helper, gradient fills, rich-text runs, cell protection, named-style (`cellStyleXfs`)
+inheritance, conditional formatting, autofilter, outline levels, split (non-frozen) panes.
+
+### F4.1 — Full style read model + `Worksheet.style(ref)` ☐
+**Scope.** Extend `parseStyles`' single tokenize pass to also collect `<fonts>`, `<fills>`,
+`<borders>`, and each cellXfs `<xf>`'s component ids + `<alignment>`. `StyleTable` gains
+`cellStyle(styleIndex)` — materialized lazily, cached per xf index (reference-stable; this cache
+is the interning unit the bridge reuses). New `Worksheet.style(ref): CellStyle | undefined`
+resolved through the same lazy cell-style map as `numberFormat(ref)`, so the two can never
+disagree. Hot value path (`isDateStyle`/`formatCode`) untouched.
+**Design notes.** Component resolution ignores `apply*` flags and `cellStyleXfs`/`xfId`
+inheritance (openpyxl-compatible). A fully-default xf resolves to `undefined` (the bridge then
+keeps the cell a bare value). Colors kept verbatim as the raw union; gradient fills and exotic
+underline/rotation values degrade to `undefined`, documented.
+**Tasks**
+- [ ] `CellStyle`/`FontStyle`/`FillStyle`/`BorderStyle`/`Alignment`/`Color` types (shared).
+- [ ] `parseStyles`: fonts/fills/borders/xf components + `cellStyle(i)` with caching.
+- [ ] `Worksheet.style(ref)` accessor + export from core index.
+- [ ] Styled fixtures (builder-generated + a real-producer/openpyxl-authored file); tests for
+  fonts/fills/borders/alignment/colors incl. rgb/theme+tint/indexed; reference-stability.
+**Acceptance.** Styled fixtures read back verbatim; `style()` and `numberFormat()` agree on
+inherited (row/col-default) styles; unstyled cells → `undefined`.
+
+### F4.2 — Styled-cell write input + style interner ☐
+**Scope.** Widen rows to `CellInput = CellValue | StyledCell` (`{ value: CellValue; style?:
+CellStyle }`, `value` required but nullable — a styled blank emits `<c r s/>`, which
+`worksheetXml` must stop pruning). Internal style registry interns styles structurally into
+minimal deduped `cellXfs` and emits the full `styleSheet` (fonts/fills/borders/numFmts/cellXfs);
+a static default `theme1.xml` part is emitted only when a theme color is written.
+**Design notes.** Discrimination is total: null/undefined → empty; string/number/boolean/Date →
+bare; any other object must be a `StyledCell` (missing `value`, unknown keys, bad enums, or
+malformed colors → `invalid-input` naming the ref). Excel structural invariants: fills 0/1
+reserved (none/gray125), empty font+border at index 0, `cellStyleXfs` + Normal cellStyle
+present, solid fills colored via `fgColor`. **Hard gate: bare-value input reproduces the v0.3
+output byte-for-byte** (golden pins), date and no-date cases.
+**Tasks**
+- [ ] `CellInput`/`StyledCell` types; validation; `worksheetXml` styled + styled-blank cells.
+- [ ] Style registry (canonical structural key → xf index; deterministic emit order) + stylesheet
+  emission; default `theme1.xml` when needed.
+- [ ] Tests: styled write → `style(ref)` deep-equals input; byte-identical golden for bare input;
+  validation rejections; interning (identical styles share one xf).
+**Acceptance.** Styled cells re-read exactly; v0.3 bytes unchanged for unstyled input; openpyxl
+opens styled output with matching formatting.
+
+### F4.3 — Number-format write (built-in reverse map + custom ids ≥ 164) ☐
+**Scope.** Activate `CellStyle.numberFormat` in the writer as a format **code string**. Codes
+exactly matching `BUILTIN_FORMATS` reverse-map to their id (no `<numFmts>` entry); others intern
+from 164 up in deterministic first-encounter order. A `Date` with a user code keeps it (implicit
+id 14 only when absent). Re-read typing flows through `isDateFormatCode` — a number written with
+a date code re-reads as `date` (Excel-faithful; documented).
+**Tasks**
+- [ ] `BUILTIN_CODE_TO_ID` reverse map; registry numFmt interning; `<numFmts>` emission.
+- [ ] Tests: built-in maps flat; custom round-trips verbatim via `numberFormat(ref)`; date
+  interplay both directions; locale-id codes documented as non-representable.
+**Acceptance.** `numberFormat(ref)` returns the written code verbatim after round-trip.
+
+### F4.4 — Bridge carries styles (round-trip fidelity) ☐
+**Scope.** `workbookToInput` attaches `sheet.style(cell.ref)` per populated cell — `{value,
+style}` only when a style exists (unstyled v0.3-era workbooks produce identical input → the
+byte-identical path), including styled *empty* cells (`<c s/>`) it currently drops. Signature
+unchanged. README fidelity table rows move to "lossless".
+**Design notes.** Documented flattening: row/column-default styles resolve into per-cell styles;
+files authored under a **custom theme** keep `{theme,tint}` indices but re-render against our
+default theme after rewrite — documented loudly. Property test: bridge output must always pass
+`writeXlsx` validation.
+**Tasks**
+- [ ] Bridge style attachment (incl. styled empties); golden pins; Excel/openpyxl-authored
+  styled fixtures round-trip; README fidelity table update.
+**Acceptance.** read → bridge → write → read gives deep-equal `style(ref)` for the supported
+style set; unstyled files byte-identical.
+
+### F4.5 — Sheet geometry: column widths, row heights, hidden, freeze panes ☐
+**Scope.** Read: three lazy accessors in the `mergedCells` idiom — `columns`
+(`{min,max,width?,hidden?}` from `<cols>`), `rowProperties` (`Map<row, {height?,hidden?}>` from
+`<row>` attrs, dedicated scan off the hot path), `freeze` (`<pane state="frozen">`; split panes
+read `undefined`). Write: matching `SheetInput.columns/rowProperties/freeze`; schema order
+`sheetViews` → `cols` → `sheetData`; property-only rows emit cell-less `<row>`.
+**Tasks**
+- [ ] Reader accessors + types; writer emission + validation; bridge carries geometry.
+- [ ] Tests: real-producer fixture reads exact widths/heights/hidden/freeze; write → re-read
+  equal; openpyxl confirms frozen pane + widths.
+**Acceptance.** Geometry round-trips; Excel/LibreOffice show frozen header and sized columns.
+
+### F4.6 — Structural metadata write: merges, hyperlinks, visibility ☐
+**Scope.** `SheetInput` gains `merges` (A1 ranges → `<mergeCells>`; malformed/single-cell/
+overlapping rejected — Excel repair-prompts on overlap), `hyperlinks` (reader-mirroring records →
+`<hyperlinks>` + the writer's **first per-sheet rels part**, `TargetMode="External"` for
+targets), and `state: 'visible'|'hidden'|'veryHidden'` (≥1 sheet must stay visible). Reader
+`SheetInfo` gains `state` additively (`visible` boolean retained). Bridge carries all three.
+**Tasks**
+- [ ] Merges + validation; hyperlinks + per-sheet rels wiring; visibility + guard;
+  `SheetInfo.state`; bridge; tests (re-read via `mergedCells`/`hyperlinks`/`state`; openpyxl +
+  Excel agree, links resolve, no repair prompt).
+**Acceptance.** The bridge's v0.3 drop-list shrinks to: comments, formulas, error cells.
+**Release (separate tail commit): tag v0.4** — bump `0.4.0`, README fidelity table + styled
+example, PUBLISHING note.
+
+---
+
+## M5+ — Later milestones (outline; expanded when reached)
+
+- **M5 — Streaming writer + native lane (v0.5):** constant-memory writer; comments write (VML
+  legacy drawing); theme1.xml parse + resolved-rgb color helper; images; an
   **optional** `@openjsxl/native` napi-rs binding to the Rust `calamine` reader (and a WASM
   build) behind the F-layer interface, selected via `optionalDependencies` with pure-TS
   fallback.
