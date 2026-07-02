@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.3.0` (already set) — skip this step. For a later
+For the current release the version is `0.4.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -98,6 +98,11 @@ git push -f origin v<version>
   multiple sheets) and `workbookToInput` (read → modify → write). Round-trip is lossless for
   values, types, and sheet names/order; verified against real fixtures and openpyxl. Reader
   unchanged apart from a robustness fix (an out-of-range date serial now reads as a number).
+- **`0.4.0`** — styles & layout: cell styles read (`style(ref)`) and write (`{ value, style }`),
+  number-format codes, sheet geometry (column widths, row heights, frozen panes), and structural
+  metadata (merged ranges, hyperlinks, sheet visibility). Round-trip now also carries styles,
+  geometry, merges, hyperlinks, and visibility — the drop-list is comments, formulas, and error
+  cells. Additive reader API: `Worksheet.style/columns/rowProperties/freeze/state`.
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
