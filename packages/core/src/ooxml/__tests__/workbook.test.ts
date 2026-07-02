@@ -10,12 +10,12 @@ describe("parseWorkbook", () => {
 	</sheets>
 </workbook>`
 		expect(parseWorkbook(xml).sheets).toEqual([
-			{ name: "First", rid: "rId1", visible: true },
-			{ name: "Second", rid: "rId2", visible: true },
+			{ name: "First", rid: "rId1", visible: true, state: "visible" },
+			{ name: "Second", rid: "rId2", visible: true, state: "visible" },
 		])
 	})
 
-	it("marks hidden and very-hidden sheets not visible", () => {
+	it("marks hidden and very-hidden sheets not visible, with their state (F4.6)", () => {
 		const xml =
 			"<workbook><sheets>" +
 			'<sheet name="A" r:id="rId1" state="visible"/>' +
@@ -23,6 +23,18 @@ describe("parseWorkbook", () => {
 			'<sheet name="C" r:id="rId3" state="veryHidden"/>' +
 			"</sheets></workbook>"
 		expect(parseWorkbook(xml).sheets.map((s) => s.visible)).toEqual([true, false, false])
+		expect(parseWorkbook(xml).sheets.map((s) => s.state)).toEqual([
+			"visible",
+			"hidden",
+			"veryHidden",
+		])
+	})
+
+	it("reads an unrecognized state as visible (the spec default)", () => {
+		const xml =
+			'<workbook><sheets><sheet name="A" r:id="rId1" state="banana"/></sheets></workbook>'
+		expect(parseWorkbook(xml).sheets[0]?.state).toBe("visible")
+		expect(parseWorkbook(xml).sheets[0]?.visible).toBe(true)
 	})
 
 	it("finds the relationship id under any namespace prefix", () => {

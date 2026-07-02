@@ -26,7 +26,7 @@ describe("Worksheet.numberFormat — real fixtures", () => {
 	it("is undefined when the workbook has no style table", () => {
 		// A Worksheet built with a style-less context can't resolve a format.
 		const ws = new Worksheet(
-			{ name: "S", path: "x", visible: true },
+			{ name: "S", path: "x", visible: true, state: "visible" },
 			'<c r="A1" s="1"><v>1</v></c>',
 			{
 				sharedStrings: [],

@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors"
+import type { SheetState } from "../types"
 import { worksheetXml } from "./sheet"
 import { createStyleRegistry } from "./styles"
 import { DEFAULT_THEME_XML } from "./theme"
@@ -40,12 +41,20 @@ const CT_RELS = "application/vnd.openxmlformats-package.relationships+xml"
 const MAX_SHEET_NAME = 31
 const FORBIDDEN_SHEET_NAME = /[\\/?*[\]:]/
 
-function validate(workbook: WorkbookInput): void {
+// Validate the workbook and resolve each sheet's visibility state in ONE read of the
+// caller-supplied `state` property. Returning the resolved states (rather than re-reading
+// `sheet.state` during emission) closes a TOCTOU gap: a getter/Proxy that answers "visible" here
+// and "hidden" later could otherwise bypass the all-hidden guard or inject markup into the
+// attribute. Downstream code emits from this array, never from `sheet.state`, so the value is
+// always one of the three validated literals.
+function validate(workbook: WorkbookInput): SheetState[] {
 	const sheets = workbook?.sheets
 	if (!Array.isArray(sheets) || sheets.length === 0) {
 		throw new XlsxError("invalid-input", "a workbook needs at least one sheet")
 	}
 	const seen = new Set<string>()
+	const states: SheetState[] = []
+	let anyVisible = false
 	for (const sheet of sheets) {
 		const name = sheet?.name
 		if (typeof name !== "string" || name.length === 0) {
@@ -83,7 +92,23 @@ function validate(workbook: WorkbookInput): void {
 		if (!Array.isArray(sheet.rows)) {
 			throw new XlsxError("invalid-input", `sheet "${name}": rows must be an array`)
 		}
+		// Tab visibility (F4.6). Read the caller's property ONCE (getters/Proxies can vary between
+		// reads); absent means visible; only the three spec values are accepted.
+		const state = sheet.state ?? "visible"
+		if (state !== "visible" && state !== "hidden" && state !== "veryHidden") {
+			throw new XlsxError(
+				"invalid-input",
+				`sheet "${name}": state must be "visible", "hidden", or "veryHidden"`,
+			)
+		}
+		states.push(state)
+		if (state === "visible") anyVisible = true
 	}
+	// Excel refuses a workbook whose every sheet is hidden — there would be nothing to show.
+	if (!anyVisible) {
+		throw new XlsxError("invalid-input", "at least one sheet must be visible")
+	}
+	return states
 }
 
 /**
@@ -96,7 +121,7 @@ export async function writeXlsx(
 	workbook: WorkbookInput,
 	options?: WriteOptions,
 ): Promise<Uint8Array> {
-	validate(workbook)
+	const states = validate(workbook)
 	const date1904 = options?.date1904 === true
 	const sheets = workbook.sheets
 
@@ -142,15 +167,26 @@ export async function writeXlsx(
 
 	// xl/workbook.xml — the sheet list. rId(i+1) links each <sheet> to its worksheet rel below.
 	const workbookPr = date1904 ? '<workbookPr date1904="1"/>' : ""
+	// The active tab defaults to index 0; when the FIRST sheet is hidden that default would point
+	// at a tab the user can't see, so aim it at the first visible sheet instead (validate()
+	// guarantees one exists) — exactly what openpyxl does. All-visible workbooks emit no
+	// <bookViews> and keep their exact pre-F4.6 bytes.
+	const firstVisible = states.indexOf("visible")
+	const bookViews =
+		firstVisible > 0 ? `<bookViews><workbookView activeTab="${firstVisible}"/></bookViews>` : ""
 	const sheetsXml = sheets
-		.map(
-			(sheet, i) =>
-				`<sheet name="${escapeAttr(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`,
-		)
+		.map((sheet, i) => {
+			// Emit from the validated `states` array, never from `sheet.state` (single-read: a
+			// caller's getter can't vary the value between validation and here). "visible" is the
+			// spec default and stays implicit, so an all-visible workbook keeps its exact pre-F4.6
+			// bytes; the value is always one of the three literals, so no escaping is needed.
+			const state = states[i] === "visible" ? "" : ` state="${states[i]}"`
+			return `<sheet name="${escapeAttr(sheet.name)}" sheetId="${i + 1}"${state} r:id="rId${i + 1}"/>`
+		})
 		.join("")
 	add(
 		"xl/workbook.xml",
-		`${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}<sheets>${sheetsXml}</sheets></workbook>`,
+		`${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}${bookViews}<sheets>${sheetsXml}</sheets></workbook>`,
 	)
 
 	// xl/_rels/workbook.xml.rels — worksheet targets (matching the r:ids above) plus styles.xml and
@@ -181,6 +217,21 @@ export async function writeXlsx(
 
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml)
+		// The writer's first per-sheet rels part (F4.6): external hyperlink targets, one
+		// TargetMode="External" relationship per link, ids matching the r:ids in the sheet XML.
+		// Covered by the `Default Extension="rels"` content type — no Override needed.
+		if (w.hyperlinkTargets.length > 0) {
+			const rels = w.hyperlinkTargets
+				.map(
+					(target, j) =>
+						`<Relationship Id="rId${j + 1}" Type="${NS_REL}/hyperlink" Target="${escapeAttr(target)}" TargetMode="External"/>`,
+				)
+				.join("")
+			add(
+				`xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
+				`${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${rels}</Relationships>`,
+			)
+		}
 	})
 
 	return writeZip(parts)

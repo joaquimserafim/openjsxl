@@ -12,7 +12,7 @@ describe("openXlsx — basic.xlsx", () => {
 
 	it("lists the workbook sheets resolved through the relationship graph", () => {
 		expect(wb.sheets).toEqual([
-			{ name: "Sheet1", path: "xl/worksheets/sheet1.xml", visible: true },
+			{ name: "Sheet1", path: "xl/worksheets/sheet1.xml", visible: true, state: "visible" },
 		])
 	})
 

@@ -10,7 +10,7 @@ describe("openjsxl vertical slice — basic.xlsx", () => {
 	it("opens a real .xlsx and lists its sheets through the public API", async () => {
 		const wb = await openXlsx(await loadFixture("basic.xlsx"))
 		expect(wb.sheets).toEqual([
-			{ name: "Sheet1", path: "xl/worksheets/sheet1.xml", visible: true },
+			{ name: "Sheet1", path: "xl/worksheets/sheet1.xml", visible: true, state: "visible" },
 		])
 	})
 

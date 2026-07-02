@@ -3,7 +3,7 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
-import type { CellStyle, ColumnProps, FreezePane, RowProps } from "../types"
+import type { CellStyle, ColumnProps, FreezePane, Hyperlink, RowProps, SheetState } from "../types"
 
 /**
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:
@@ -53,6 +53,23 @@ export interface SheetInput {
 	readonly rowProperties?: Readonly<Record<number, RowProps>>
 	/** Freeze the top `rows` rows and/or leftmost `cols` columns (F4.5). */
 	readonly freeze?: FreezePane
+	/**
+	 * Merged-cell ranges in canonical A1 form, top-left:bottom-right (e.g. `"A1:B2"`) — the same
+	 * strings `Worksheet.mergedCells` returns (F4.6). Malformed, single-cell, out-of-grid, and
+	 * overlapping ranges are rejected: Excel repair-prompts on them.
+	 */
+	readonly merges?: readonly string[]
+	/**
+	 * Hyperlinks on this sheet (F4.6) — the same records `Worksheet.hyperlinks` returns. Each needs
+	 * a `ref` (cell or range) plus an external `target` and/or an in-workbook `location`; `tooltip`
+	 * and `display` are optional. External targets get the sheet's relationships part.
+	 */
+	readonly hyperlinks?: readonly Hyperlink[]
+	/**
+	 * Tab visibility (F4.6). Defaults to `"visible"`; at least one sheet in the workbook must
+	 * remain visible, or Excel refuses the file.
+	 */
+	readonly state?: SheetState
 }
 
 export interface WorkbookInput {

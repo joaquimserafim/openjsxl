@@ -1,10 +1,18 @@
 import { XlsxError } from "../errors"
-import { formatRef, MAX_COL, MAX_COL_WIDTH, MAX_ROW, MAX_ROW_HEIGHT } from "../ooxml/a1"
+import {
+	type CellRef,
+	formatRef,
+	MAX_COL,
+	MAX_COL_WIDTH,
+	MAX_ROW,
+	MAX_ROW_HEIGHT,
+	parseRef,
+} from "../ooxml/a1"
 import { dateToSerial } from "../ooxml/dates"
-import type { ColumnProps, FreezePane, RowProps } from "../types"
+import type { ColumnProps, FreezePane, Hyperlink, RowProps } from "../types"
 import type { StyleRegistry } from "./styles"
 import type { CellInput, CellValue, SheetInput, StyledCell } from "./types"
-import { escapeText, isXmlSafe, preserveAttr } from "./xml"
+import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml"
 
 // Serialize one sheet's rows into worksheet XML (`xl/worksheets/sheetN.xml`). The element order the
 // schema requires here is <dimension> then <sheetData>; within <sheetData>, rows ascend by index and
@@ -17,6 +25,7 @@ import { escapeText, isXmlSafe, preserveAttr } from "./xml"
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 // A finite JS number as it appears in <v>. String() gives the shortest decimal that parses back to
 // the same double via the reader's Number() — so the value round-trips exactly. Non-finite values
@@ -147,7 +156,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return proto === null || proto === Object.prototype
 }
 
-function checkGeoKeys(
+function checkKeys(
 	sheetName: string,
 	what: string,
 	obj: Record<string, unknown>,
@@ -168,7 +177,7 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 		const raw = columns[i] as unknown
 		const what = `columns[${i}]`
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkGeoKeys(sheetName, what, raw, ["min", "max", "width", "hidden"])
+		checkKeys(sheetName, what, raw, ["min", "max", "width", "hidden"])
 		const min = raw.min
 		const max = raw.max
 		if (
@@ -229,7 +238,7 @@ function rowAttrsMap(
 		const raw = (rowProperties as Record<string, unknown>)[key]
 		const what = `rowProperties[${key}]`
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkGeoKeys(sheetName, what, raw, ["height", "hidden"])
+		checkKeys(sheetName, what, raw, ["height", "hidden"])
 		let attrs = ""
 		const height = raw.height
 		if (height !== undefined) {
@@ -260,7 +269,7 @@ function rowAttrsMap(
 function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): string {
 	if (freeze === undefined) return ""
 	if (!isPlainRecord(freeze)) sheetInvalid(sheetName, "freeze must be an object")
-	checkGeoKeys(sheetName, "freeze", freeze, ["rows", "cols"])
+	checkKeys(sheetName, "freeze", freeze, ["rows", "cols"])
 	const validate = (value: unknown, what: string, limit: number): number => {
 		if (value === undefined) return 0
 		if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value >= limit) {
@@ -281,8 +290,166 @@ function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): strin
 	)
 }
 
+// ── Structural metadata (F4.6): merges + hyperlinks — validation + emission ────────────────────
+// Both blocks live AFTER </sheetData> (schema order: … sheetData, mergeCells, …, hyperlinks, …).
+// Like geometry, unused blocks are empty strings, so a metadata-free sheet keeps its exact bytes.
+
+// Strictly canonical A1: uppercase letters, no leading zeros — the form every real producer
+// writes and the only form we emit (parseRef itself would tolerate lowercase). Three letters cap
+// the column at ZZZ (18,278), so columnToIndex can't overflow; the grid bound is checked after.
+const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/
+
+function parseCanonicalRef(ref: string): CellRef | undefined {
+	if (!CANONICAL_CELL.test(ref)) return undefined
+	const parsed = parseRef(ref)
+	return parsed.col <= MAX_COL && parsed.row <= MAX_ROW ? parsed : undefined
+}
+
+const shortened = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s)
+
+interface MergeRect {
+	readonly ref: string
+	readonly c1: number
+	readonly r1: number
+	readonly c2: number
+	readonly r2: number
+}
+
+// <mergeCells> — Excel repair-prompts on malformed, single-cell, and overlapping merges, so all
+// three are rejected. Overlap detection is a sweep over ranges sorted by first row: an active
+// range is pruned once its last row passes, so every surviving active shares rows with the
+// current one and a column intersection means overlap. The corollary keeps this near-linear even
+// on adversarial bridge input: actives that DON'T overlap are column-disjoint, so the active list
+// can never exceed MAX_COL entries — no O(n²) blow-up from a crafted file with a million merges.
+function mergeCellsXml(sheetName: string, merges: readonly string[] | undefined): string {
+	if (merges === undefined) return ""
+	if (!Array.isArray(merges)) sheetInvalid(sheetName, "merges must be an array")
+	const rects: MergeRect[] = []
+	for (let i = 0; i < merges.length; i++) {
+		const ref = merges[i] as unknown
+		const what = `merges[${i}]`
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what} must be a string`)
+		const colon = ref.indexOf(":")
+		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon))
+		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1))
+		if (from === undefined || to === undefined) {
+			sheetInvalid(
+				sheetName,
+				`${what} "${shortened(ref)}" is not a canonical A1 range like "A1:B2" within Excel's grid`,
+			)
+		}
+		if (to.col < from.col || to.row < from.row) {
+			sheetInvalid(sheetName, `${what} "${shortened(ref)}" must run top-left to bottom-right`)
+		}
+		if (to.col === from.col && to.row === from.row) {
+			sheetInvalid(sheetName, `${what} "${shortened(ref)}" merges a single cell`)
+		}
+		rects.push({ ref, c1: from.col, r1: from.row, c2: to.col, r2: to.row })
+	}
+	if (rects.length === 0) return ""
+	const sorted = [...rects].sort((a, b) => a.r1 - b.r1)
+	const active: MergeRect[] = []
+	for (const rect of sorted) {
+		let kept = 0
+		for (const a of active) {
+			if (a.r2 < rect.r1) continue // fully above the current range — can never overlap again
+			active[kept++] = a
+			if (a.c1 <= rect.c2 && rect.c1 <= a.c2) {
+				sheetInvalid(
+					sheetName,
+					`merges "${a.ref}" and "${rect.ref}" overlap — Excel repairs overlapping merges`,
+				)
+			}
+		}
+		active.length = kept
+		active.push(rect)
+	}
+	// Emission preserves input order (document order round-trips through the reader verbatim).
+	return `<mergeCells count="${rects.length}">${rects
+		.map((r) => `<mergeCell ref="${r.ref}"/>`)
+		.join("")}</mergeCells>`
+}
+
+// <hyperlinks> — each link covers a cell or range and needs somewhere to go: an external target
+// (URL / mailto: / file:, written VERBATIM into the sheet's rels part with TargetMode="External")
+// and/or an in-workbook location. Empty-string destinations normalize away (the reader never
+// yields an empty location); tooltip/display are carried verbatim, empty or not, mirroring the
+// reader exactly. Returns the external targets in r:id order — non-empty means the sheet needs
+// a relationships part.
+function hyperlinksXml(
+	sheetName: string,
+	hyperlinks: readonly Hyperlink[] | undefined,
+): { readonly xml: string; readonly targets: readonly string[] } {
+	if (hyperlinks === undefined) return { xml: "", targets: [] }
+	if (!Array.isArray(hyperlinks)) sheetInvalid(sheetName, "hyperlinks must be an array")
+	const targets: string[] = []
+	const entries: string[] = []
+	for (let i = 0; i < hyperlinks.length; i++) {
+		const raw = hyperlinks[i] as unknown
+		const what = `hyperlinks[${i}]`
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
+		checkKeys(sheetName, what, raw, ["ref", "target", "location", "tooltip", "display"])
+		const ref = raw.ref
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`)
+		const colon = ref.indexOf(":")
+		const from = parseCanonicalRef(colon === -1 ? ref : ref.slice(0, colon))
+		const to = colon === -1 ? from : parseCanonicalRef(ref.slice(colon + 1))
+		if (from === undefined || to === undefined) {
+			sheetInvalid(
+				sheetName,
+				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell or range within Excel's grid`,
+			)
+		}
+		if (to.col < from.col || to.row < from.row) {
+			sheetInvalid(
+				sheetName,
+				`${what}.ref "${shortened(ref)}" must run top-left to bottom-right`,
+			)
+		}
+		// One optional string property, read exactly once (TOCTOU) and gated for XML safety.
+		const str = (key: string, value: unknown): string | undefined => {
+			if (value === undefined) return undefined
+			if (typeof value !== "string")
+				sheetInvalid(sheetName, `${what}.${key} must be a string`)
+			if (!isXmlSafe(value)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.${key} contains a character not allowed in XML (a control character or lone surrogate)`,
+				)
+			}
+			return value
+		}
+		const rawTarget = str("target", raw.target)
+		const rawLocation = str("location", raw.location)
+		// An empty destination is no destination — the reader drops location="" the same way.
+		const target = rawTarget === "" ? undefined : rawTarget
+		const location = rawLocation === "" ? undefined : rawLocation
+		if (target === undefined && location === undefined) {
+			sheetInvalid(
+				sheetName,
+				`${what} needs a target (external) and/or a location (in-workbook)`,
+			)
+		}
+		const tooltip = str("tooltip", raw.tooltip)
+		const display = str("display", raw.display)
+		let attrs = ` ref="${ref}"`
+		if (target !== undefined) {
+			targets.push(target)
+			attrs += ` r:id="rId${targets.length}"`
+		}
+		if (location !== undefined) attrs += ` location="${escapeAttr(location)}"`
+		if (tooltip !== undefined) attrs += ` tooltip="${escapeAttr(tooltip)}"`
+		if (display !== undefined) attrs += ` display="${escapeAttr(display)}"`
+		entries.push(`<hyperlink${attrs}/>`)
+	}
+	if (entries.length === 0) return { xml: "", targets: [] }
+	return { xml: `<hyperlinks>${entries.join("")}</hyperlinks>`, targets }
+}
+
 export interface WorksheetResult {
 	readonly xml: string
+	/** External hyperlink targets in r:id order — non-empty means the sheet needs a rels part. */
+	readonly hyperlinkTargets: readonly string[]
 }
 
 /** Build the worksheet XML for one sheet, interning cell styles into the shared registry. */
@@ -292,11 +459,13 @@ export function worksheetXml(
 	styles: StyleRegistry,
 ): WorksheetResult {
 	const rows = sheet.rows
-	// Geometry validates up front (and contributes rows below): a bad column/row/freeze spec must
-	// surface before any cell work.
+	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
+	// column/row/freeze/merge/hyperlink spec must surface before any cell work.
 	const cols = colsXml(sheet.name, sheet.columns)
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties)
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze)
+	const mergeCells = mergeCellsXml(sheet.name, sheet.merges)
+	const links = hyperlinksXml(sheet.name, sheet.hyperlinks)
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
 	let minRow = 0
@@ -368,10 +537,15 @@ export function worksheetXml(
 				? formatRef({ col: minCol, row: minRow })
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`
 
-	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData. The geometry blocks
-	// are empty strings when unused, so a geometry-free sheet emits the exact pre-F4.5 bytes.
-	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
+	// Hyperlink r:ids live in the relationships namespace — declared only when one is used, so a
+	// sheet without external links keeps the exact pre-F4.6 root element.
+	const nsR = links.targets.length > 0 ? ` xmlns:r="${NS_REL}"` : ""
+
+	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
+	// hyperlinks. Geometry/metadata blocks are empty strings when unused, so a sheet using none
+	// of them emits the exact pre-F4.5/F4.6 bytes.
+	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
-		.join("")}</sheetData></worksheet>`
-	return { xml }
+		.join("")}</sheetData>${mergeCells}${links.xml}</worksheet>`
+	return { xml, hyperlinkTargets: links.targets }
 }

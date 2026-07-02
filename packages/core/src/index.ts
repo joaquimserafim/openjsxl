@@ -29,6 +29,7 @@ export type {
 	PatternType,
 	RowProps,
 	SheetInfo,
+	SheetState,
 	UnderlineStyle,
 	VerticalAlignment,
 } from "./types"

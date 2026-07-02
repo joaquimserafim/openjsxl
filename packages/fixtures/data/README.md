@@ -59,6 +59,12 @@ git-ignored [`../local/`](../local) directory and are never committed.
   1 column), and a second `Plain` sheet with no geometry at all.
   `reader/__tests__/geometry.test.ts` asserts it verbatim.
 
+- **`openpyxl-metadata.xlsx`** — authored by **openpyxl 3.1.5** to exercise the structural
+  metadata model (F4.6): two merged ranges (`A1:B2`, `D1:D3`), an external hyperlink with a
+  tooltip plus an in-workbook (location-only) one, sheet visibility in all three states
+  (`Meta`/`Plain` visible, `Hidden` hidden, `Very` veryHidden), and a bare `Plain` sheet.
+  `reader/__tests__/metadata.test.ts` asserts it verbatim.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

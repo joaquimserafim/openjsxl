@@ -497,7 +497,10 @@ export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): 
 		const display = token.attrs.display
 		links.push({
 			ref,
-			...(target !== undefined ? { target } : {}),
+			// An empty external target is no destination — gate it exactly like an empty location,
+			// so a degenerate `Target=""` rel doesn't surface as a target the writer then melts
+			// away (which would make read→write→read lossy instead of lossless-or-typed).
+			...(target !== undefined && target !== "" ? { target } : {}),
 			...(location !== undefined && location !== "" ? { location } : {}),
 			...(tooltip !== undefined ? { tooltip } : {}),
 			...(display !== undefined ? { display } : {}),

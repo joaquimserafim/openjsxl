@@ -1,7 +1,7 @@
 import { XlsxError } from "../errors"
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1"
 import type { Workbook, Worksheet } from "../reader/workbook"
-import type { Cell, ColumnProps, FreezePane, RowProps } from "../types"
+import type { Cell, ColumnProps, FreezePane, Hyperlink, RowProps, SheetState } from "../types"
 import type { CellInput, SheetInput, WorkbookInput } from "./types"
 
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
@@ -14,11 +14,15 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 // documented, not silently mangled:
 //   - formulas               → only the cached value survives (its type/number)
 //   - error cells            → written as their literal text (e.g. "#DIV/0!"), so they become strings
-//   - merges, hyperlinks, comments, sheet visibility → dropped (F4.6 closes most of this)
-//   (column widths, row heights, hidden flags, and frozen panes DO carry across — F4.5)
+//   - comments               → dropped (they need a VML legacy-drawing part; planned for 0.5)
+//   (column widths, row heights, hidden flags, frozen panes — F4.5 — and merges, hyperlinks,
+//   sheet visibility — F4.6 — DO carry across)
 //   - locale-only number formats (ids 23–36, 50–58) → no portable code exists; the format flattens
 //     (a date keeps its value and date-ness via the implicit format)
-// Two documented style FLATTENINGS (values stay exact; the file's internal structure normalizes):
+// Three documented FLATTENINGS (values stay exact; the file's internal spelling normalizes):
+//   - a tolerated NON-CANONICAL cell ref spelling (e.g. lowercase "a1") re-emits canonically
+//     ("A1") — same grid slot, same value/type/style; A1 notation is case-insensitive and the
+//     writer's input is positional, so canonical is the only possible emission.
 //   - row/column DEFAULT styles resolve into per-cell styles (the effective style each cell already
 //     shows through style(ref)) — the rewritten file styles cells directly instead of via defaults.
 //   - files authored under a CUSTOM THEME keep their raw {theme, tint} indexes, but the rewritten
@@ -98,14 +102,17 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 				rowArr[col - 1] = cellToInput(worksheet, cell)
 			}
 		}
-		// Geometry (F4.5): carried only when present, so a geometry-free workbook produces the
-		// exact same WorkbookInput — and the exact same bytes — as before.
+		// Geometry (F4.5) and structural metadata (F4.6): carried only when present, so a workbook
+		// using neither produces the exact same WorkbookInput — and the exact same bytes — as before.
 		const sheet: {
 			name: string
 			rows: CellInput[][]
 			columns?: readonly ColumnProps[]
 			rowProperties?: Readonly<Record<number, RowProps>>
 			freeze?: FreezePane
+			merges?: readonly string[]
+			hyperlinks?: readonly Hyperlink[]
+			state?: SheetState
 		} = { name: info.name, rows }
 		const columns = worksheet.columns
 		if (columns.length > 0) sheet.columns = columns
@@ -113,6 +120,11 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		if (rowProperties.size > 0) sheet.rowProperties = Object.fromEntries(rowProperties)
 		const freeze = worksheet.freeze
 		if (freeze !== undefined) sheet.freeze = freeze
+		const merges = worksheet.mergedCells
+		if (merges.length > 0) sheet.merges = merges
+		const hyperlinks = worksheet.hyperlinks
+		if (hyperlinks.length > 0) sheet.hyperlinks = hyperlinks
+		if (info.state !== "visible") sheet.state = info.state
 		sheets.push(sheet)
 	}
 	return { sheets }

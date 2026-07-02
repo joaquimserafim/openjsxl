@@ -18,6 +18,7 @@ import type {
 	Hyperlink,
 	RowProps,
 	SheetInfo,
+	SheetState,
 } from "../types"
 import { openZip, type ZipArchive } from "../zip"
 import {
@@ -113,6 +114,11 @@ export class Worksheet {
 	/** false for hidden or very-hidden sheets. */
 	get visible(): boolean {
 		return this.#info.visible
+	}
+
+	/** The tab's visibility state (F4.6): `"visible"`, `"hidden"`, or `"veryHidden"`. */
+	get state(): SheetState {
+		return this.#info.state
 	}
 
 	/**
@@ -327,7 +333,10 @@ async function loadWorkbook(
 		if (rel === undefined || rel.targetMode === "External") continue
 		const path = resolveTarget(workbookDir, rel.target)
 		if (!zip.has(path)) continue
-		sheets.push({ info: { name: entry.name, path, visible: entry.visible }, path })
+		sheets.push({
+			info: { name: entry.name, path, visible: entry.visible, state: entry.state },
+			path,
+		})
 	}
 
 	return { zip, context, sheets }

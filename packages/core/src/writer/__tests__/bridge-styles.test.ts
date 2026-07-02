@@ -34,6 +34,10 @@ async function styleSnapshot(wb: Workbook) {
 			columns: sheet.columns,
 			rowProperties: Object.fromEntries(sheet.rowProperties),
 			freeze: sheet.freeze,
+			// Structural metadata (F4.6): merges, hyperlinks, and tab visibility carry across.
+			mergedCells: sheet.mergedCells,
+			hyperlinks: sheet.hyperlinks,
+			state: info.state,
 		}
 	}
 	return out

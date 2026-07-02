@@ -86,4 +86,14 @@ describe("parseHyperlinks — units", () => {
 		const xml = '<hyperlinks><hyperlink/><hyperlink ref=""/><hyperlink ref="A1"/></hyperlinks>'
 		expect(parseHyperlinks(xml)).toEqual([{ ref: "A1" }])
 	})
+
+	it("treats an empty external target like an empty location: no destination (F4.6 review)", () => {
+		// A crafted rels part can carry Target="". Surfacing it as target:"" would break the
+		// round-trip contract: the writer normalizes empty destinations away, so re-reading the
+		// rewritten file would silently lose the key instead of matching or failing typed.
+		const xml = '<hyperlink ref="A1" r:id="rId1" location="S!B2"/>'
+		expect(parseHyperlinks(xml, relsOf(["rId1", ""]))).toEqual([
+			{ ref: "A1", location: "S!B2" },
+		])
+	})
 })

@@ -555,16 +555,29 @@ read `undefined`). Write: matching `SheetInput.columns/rowProperties/freeze`; sc
   phantom rows on tolerated-malformed files); `parseColumnProps` stops at `<sheetData>`.
 **Acceptance.** Geometry round-trips; Excel/LibreOffice show frozen header and sized columns.
 
-### F4.6 — Structural metadata write: merges, hyperlinks, visibility ☐
+### F4.6 — Structural metadata write: merges, hyperlinks, visibility ☑
 **Scope.** `SheetInput` gains `merges` (A1 ranges → `<mergeCells>`; malformed/single-cell/
 overlapping rejected — Excel repair-prompts on overlap), `hyperlinks` (reader-mirroring records →
 `<hyperlinks>` + the writer's **first per-sheet rels part**, `TargetMode="External"` for
 targets), and `state: 'visible'|'hidden'|'veryHidden'` (≥1 sheet must stay visible). Reader
 `SheetInfo` gains `state` additively (`visible` boolean retained). Bridge carries all three.
 **Tasks**
-- [ ] Merges + validation; hyperlinks + per-sheet rels wiring; visibility + guard;
-  `SheetInfo.state`; bridge; tests (re-read via `mergedCells`/`hyperlinks`/`state`; openpyxl +
-  Excel agree, links resolve, no repair prompt).
+- [x] Merges + validation; hyperlinks + per-sheet rels wiring; visibility + guard;
+  `SheetInfo.state` + `Worksheet.state`; bridge; tests (re-read via
+  `mergedCells`/`hyperlinks`/`state`; openpyxl reads OUR merges/links/states warnings-as-errors
+  and its own `openpyxl-metadata.xlsx` fixture reads back verbatim; byte-identity 5/5).
+- [x] Merge-overlap detection is a row sweep, not O(n²): actives pruned past their last row all
+  share the current first row, so non-overlapping actives are column-disjoint (≤16 384 alive) —
+  a crafted million-merge file rejects in ms, not hours (the F4.4 grid-cap lesson applied).
+- [x] `activeTab`: when the FIRST sheet is hidden, emit `<bookViews><workbookView activeTab=N/>`
+  aimed at the first visible sheet (Excel's default 0 would open onto a hidden tab; openpyxl
+  does the same) — all-visible workbooks emit no `bookViews` and keep exact pre-F4.6 bytes.
+- [x] Review fixes (2 bugs, regression-pinned; verifier fleet rate-limited so each claim was
+  re-verified empirically by hand): `sheet.state` was read up to 4× and interpolated unescaped —
+  a value-flipping getter injected attributes into `workbook.xml` and dodged the all-hidden
+  guard; `validate()` now reads state ONCE and returns the resolved array emission uses. The
+  reader surfaced `target:""` from a crafted `Target=""` rel while the writer melted it away
+  (silent round-trip change); `parseHyperlinks` now gates empty target like empty location.
 **Acceptance.** The bridge's v0.3 drop-list shrinks to: comments, formulas, error cells.
 **Release (separate tail commit): tag v0.4** — bump `0.4.0`, README fidelity table + styled
 example, PUBLISHING note.

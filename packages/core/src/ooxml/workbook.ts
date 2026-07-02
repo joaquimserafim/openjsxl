@@ -1,3 +1,4 @@
+import type { SheetState } from "../types"
 import { localName, relationshipId } from "../utils"
 import { tokenize } from "../xml"
 
@@ -13,6 +14,8 @@ export interface WorkbookSheet {
 	readonly rid: string
 	/** false for hidden or very-hidden sheets (the `state` attribute). */
 	readonly visible: boolean
+	/** The tab's visibility state. Absent/unrecognized values read as "visible" (spec default). */
+	readonly state: SheetState
 }
 
 export interface WorkbookMeta {
@@ -34,8 +37,11 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 			const name = token.attrs.name
 			const rid = relationshipId(token.attrs)
 			if (name === undefined || rid === undefined) continue
-			const state = token.attrs.state
-			sheets.push({ name, rid, visible: state !== "hidden" && state !== "veryHidden" })
+			const raw = token.attrs.state
+			// Only the two hiding values are honoured; anything else (absent, "visible", garbage)
+			// is the default. This keeps `visible` and `state` mechanically consistent.
+			const state: SheetState = raw === "hidden" || raw === "veryHidden" ? raw : "visible"
+			sheets.push({ name, rid, visible: state === "visible", state })
 		}
 	}
 	return { sheets, date1904 }

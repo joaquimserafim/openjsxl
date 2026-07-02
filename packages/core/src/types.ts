@@ -16,13 +16,22 @@ export type Cell =
 	| (CellBase & { readonly type: "date"; readonly value: Date })
 	| (CellBase & { readonly type: "error"; readonly value: string })
 
+/**
+ * A sheet tab's visibility (the `state` attribute on `<sheet>`). `hidden` sheets can be re-shown
+ * from Excel's UI; `veryHidden` ones only through VBA or by editing the file. An absent or
+ * unrecognized state reads as `visible` (the spec's default).
+ */
+export type SheetState = "visible" | "hidden" | "veryHidden"
+
 export interface SheetInfo {
 	/** Sheet name as shown on Excel's tab. */
 	readonly name: string
 	/** Workbook-relative part path, resolved via the relationship graph. */
 	readonly path: string
-	/** false for hidden or very-hidden sheets. */
+	/** false for hidden or very-hidden sheets. Kept alongside {@link state} (which it derives from). */
 	readonly visible: boolean
+	/** The tab's visibility state (F4.6). `visible` is `state === "visible"`. */
+	readonly state: SheetState
 }
 
 export interface Comment {
