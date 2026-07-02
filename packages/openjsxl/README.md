@@ -30,21 +30,35 @@ for await (const row of wb.sheet(wb.sheets[0].name).rows()) {
 ```
 
 For very large sheets use `streamSheetRows` (constant memory); a worksheet also exposes
-`numberFormat`, `dimension`, `mergedCells`, `hyperlinks`, `comments`, and `visible`, and the
-reader throws a typed `XlsxError` (with a discriminating `code`) on malformed input.
+`style(ref)`, `numberFormat`, `dimension`, `mergedCells`, `hyperlinks`, `comments`, `columns`,
+`rowProperties`, `freeze`, and `state`/`visible`, and the reader throws a typed `XlsxError`
+(with a discriminating `code`) on malformed input.
 
-**Writing (0.3):** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
-inferred from the JS values:
+**Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
+inferred from the JS values. Cells can carry styles (`{ value, style }` — the same shape
+`style(ref)` returns), and sheets take column widths, row heights, frozen panes, merged ranges,
+hyperlinks, and a visibility state:
 
 ```ts
 import { writeXlsx } from 'openjsxl'
 
 const bytes = await writeXlsx({
-	sheets: [{ name: 'Report', rows: [['Item', 'Added'], ['Apples', new Date('2024-01-15')]] }],
+	sheets: [
+		{
+			name: 'Report',
+			rows: [
+				[{ value: 'Item', style: { font: { bold: true } } }, 'Added'],
+				['Apples', new Date('2024-01-15')],
+			],
+			freeze: { rows: 1 },
+			hyperlinks: [{ ref: 'A2', target: 'https://example.com/apples' }],
+		},
+	],
 })
 ```
 
-`workbookToInput` turns an open `Workbook` back into writer input for read → modify → write.
+`workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —
+values, types, styles, geometry, merges, hyperlinks, and sheet visibility all round-trip.
 
 See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
 design notes, and roadmap.

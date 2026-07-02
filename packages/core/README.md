@@ -27,8 +27,10 @@ const wb = await openXlsx(await readFile('data.xlsx'))
 const sheet = wb.sheet('Sheet1')
 
 sheet.cell('A1') // { ref, type, value } — narrow on `type` for a typed value
+sheet.style('B2') // { font?, fill?, border?, alignment?, numberFormat? } | undefined
 sheet.numberFormat('C1') // "mm-dd-yy" | undefined
 sheet.mergedCells // ["A1:B1", …]
+sheet.freeze // { rows?, cols? } | undefined — plus columns, rowProperties, state, …
 
 // Constant-memory streaming for large sheets — one row at a time.
 for await (const row of streamSheetRows(await readFile('huge.xlsx'))) {
@@ -56,16 +58,21 @@ input.sheets[0].rows.push(['Pears', new Date('2024-02-01')])
 const updated = await writeXlsx(input)
 ```
 
-Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet name, non-finite
-number, invalid `Date`, XML-illegal characters) throws `XlsxError` with `code: 'invalid-input'`.
-The round trip is lossless for values, types, and sheet names/order.
+Cells can carry styles (`{ value, style }` — the same shape `style(ref)` returns), and sheets
+take `columns` (widths), `rowProperties` (heights), `freeze`, `merges`, `hyperlinks`, and a
+visibility `state`. Output is deterministic; unrepresentable input (no sheets, bad/duplicate
+sheet name, non-finite number, invalid `Date`, XML-illegal characters, malformed or overlapping
+merges) throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossless for values,
+types, sheet names/order, styles, geometry, merges, hyperlinks, and visibility.
 
 ## Exports
 
 - **Reader:** `openXlsx`, `streamSheetRows`, `Workbook`, `Worksheet`, `ReadOptions`
-- **Writer:** `writeXlsx`, `workbookToInput`, `WorkbookInput`, `SheetInput`, `CellValue`, `WriteOptions`
+- **Writer:** `writeXlsx`, `workbookToInput`, `WorkbookInput`, `SheetInput`, `CellInput`,
+  `StyledCell`, `CellValue`, `WriteOptions`
 - **Errors:** `XlsxError`, `XlsxErrorCode`
-- **Types:** `Row`, `Cell`, `CellType`, `Comment`, `Hyperlink`, `SheetInfo`, `CellRef`
+- **Types:** `Row`, `Cell`, `CellType`, `CellStyle` (+ font/fill/border/alignment/color parts),
+  `ColumnProps`, `RowProps`, `FreezePane`, `Comment`, `Hyperlink`, `SheetInfo`, `SheetState`, `CellRef`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`
 
 Full guide, design notes, and roadmap: <https://github.com/joaquimserafim/openjsxl>

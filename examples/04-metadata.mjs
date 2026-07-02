@@ -19,5 +19,5 @@ console.log("hyperlinks     :", sheet.hyperlinks)
 console.log("comments       :", sheet.comments)
 console.log("sheet visibility:")
 for (const info of wb.sheets) {
-	console.log(`  ${info.name}: ${info.visible ? "visible" : "hidden"}`)
+	console.log(`  ${info.name}: ${info.state}`) // "visible" | "hidden" | "veryHidden"
 }

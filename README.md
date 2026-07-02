@@ -9,11 +9,14 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **reader + writer — pre-1.0.** Read typed cells, number formats, merged ranges,
+> Status: **reader + writer — pre-1.0.** Read typed cells, styles, number formats, merged ranges,
 > hyperlinks, and comments; stream large sheets in roughly constant memory; get typed errors on
-> malformed input. **New in 0.3:** write `.xlsx` from plain data with `writeXlsx`, and read →
-> modify → write with `workbookToInput`. Published on npm. Built in the open, plan-first — see the
-> [roadmap](./ROADMAP.md) and [implementation plan](./IMPLEMENTATION.md).
+> malformed input. Write `.xlsx` from plain data with `writeXlsx`, and read → modify → write with
+> `workbookToInput`. **New in 0.4:** cell styles (fonts, fills, borders, alignment, number
+> formats) read *and* write, sheet geometry (column widths, row heights, frozen panes), and
+> structural metadata (merged ranges, hyperlinks, sheet visibility) — all of it round-trips.
+> Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
+> [implementation plan](./IMPLEMENTATION.md).
 
 ## Quick start
 
@@ -63,13 +66,14 @@ for await (const row of streamSheetRows(bytes /*, 'Sheet1' */)) {
 }
 ```
 
-### Metadata, number formats & typed errors
+### Styles, metadata & typed errors
 
-Beyond values, a worksheet exposes the metadata Excel writers attach — number formats, merged
-ranges, hyperlinks, comments, and the declared used range. Number formats resolve through the
-cell's own style, then the column (`<col>`) and row defaults, so a date column reads as dates
-even when its cells carry no style of their own. Malformed input throws a typed `XlsxError` with
-a discriminating `code`, never a bare `TypeError` from a corrupt file.
+Beyond values, a worksheet exposes each cell's resolved style and the metadata Excel writers
+attach — number formats, merged ranges, hyperlinks, comments, sheet geometry, and the declared
+used range. Number formats resolve through the cell's own style, then the column (`<col>`) and
+row defaults, so a date column reads as dates even when its cells carry no style of their own.
+Malformed input throws a typed `XlsxError` with a discriminating `code`, never a bare
+`TypeError` from a corrupt file.
 
 ```ts
 import { openXlsx, XlsxError } from 'openjsxl'
@@ -90,12 +94,16 @@ try {
 
 const sheet = wb.sheet(wb.sheets[0].name)
 
+sheet.style('B2')        // { font?, fill?, border?, alignment?, numberFormat? } | undefined
 sheet.numberFormat('C1') // "mm-dd-yy" — the format code, independent of the value
 sheet.dimension          // "A1:E2" | undefined (the declared used range)
 sheet.mergedCells        // ["A1:B1", "A2:A4", …]
 sheet.hyperlinks         // [{ ref: "A1", target: "https://…", tooltip?, location?, display? }, …]
 sheet.comments           // [{ ref: "A1", author: "Ada", text: "note" }, …]
-sheet.visible            // false for hidden / very-hidden sheets
+sheet.columns            // [{ min: 2, max: 3, width: 25.5, hidden? }, …] — column geometry
+sheet.rowProperties      // Map<row, { height?, hidden? }>
+sheet.freeze             // { rows?, cols? } | undefined — the frozen pane
+sheet.state              // "visible" | "hidden" | "veryHidden" (sheet.visible is the boolean)
 ```
 
 ## Writing
@@ -129,6 +137,33 @@ shared-strings table), and input the format can't represent — no sheets, a bad
 name, a non-finite number, an invalid `Date`, or a string with XML-illegal characters — throws a
 typed `XlsxError` with `code: 'invalid-input'` rather than producing a file Excel must repair.
 
+### Styles & layout (0.4)
+
+A cell can also be `{ value, style }` — the style shape is exactly what `sheet.style(ref)`
+returns, so styles pass straight through a round trip. Sheets take column widths, row heights,
+frozen panes, merged ranges, hyperlinks, and a visibility state:
+
+```ts
+const bold = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: 'FFDDEBF7' } } }
+
+const bytes = await writeXlsx({
+	sheets: [
+		{
+			name: 'Report',
+			rows: [
+				[{ value: 'Item', style: bold }, { value: 'Total', style: bold }],
+				['Apples', { value: 1234.5, style: { numberFormat: '#,##0.00' } }],
+			],
+			columns: [{ min: 1, max: 1, width: 18 }],   // widen column A
+			freeze: { rows: 1 },                        // keep the header visible
+			merges: ['A3:B3'],
+			hyperlinks: [{ ref: 'A2', target: 'https://example.com/apples', tooltip: 'docs' }],
+		},
+		{ name: 'Internal', rows: [['scratch']], state: 'hidden' },
+	],
+})
+```
+
 ### Read → modify → write
 
 `workbookToInput` turns an open `Workbook` back into writer input, so you can round-trip a file:
@@ -143,21 +178,26 @@ input.sheets[0].rows.push(['appended', 'row']) // tweak the plain data
 await writeFile('out.xlsx', await writeXlsx(input))
 ```
 
-The round trip is **lossless for values, types, sheet names/order, and cell styles**:
+The round trip is **lossless for values, types, sheet names/order, styles, geometry, and
+structural metadata**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
-| string, number, boolean, `Date` values | merged ranges, hyperlinks, comments |
+| string, number, boolean, `Date` values | comments (planned for 0.5) |
 | number formats — built-in & custom codes | formulas (only the cached value survives) |
 | fonts, fills, borders, alignment | error cells (written as their text) |
-| colors: rgb, indexed, theme + tint (raw) | sheet visibility |
+| colors: rgb, indexed, theme + tint (raw) | |
 | empty cells (sparse), incl. styled blanks | |
+| column widths, row heights, hidden, freeze | |
+| merged ranges & hyperlinks | |
+| sheet visibility (hidden / veryHidden) | |
 | sheet names & tab order | |
 
-Two documented flattenings: row/column *default* styles resolve into per-cell styles (each cell
-keeps its effective format), and files authored under a **custom theme** keep their `{theme, tint}`
-color indexes but re-render against the standard Office theme after a rewrite — `rgb`/`indexed`
-colors are unaffected.
+Three documented flattenings (values stay exact; internal spelling normalizes): row/column
+*default* styles resolve into per-cell styles (each cell keeps its effective format); files
+authored under a **custom theme** keep their `{theme, tint}` color indexes but re-render against
+the standard Office theme after a rewrite (`rgb`/`indexed` colors are unaffected); and a
+tolerated non-canonical cell ref spelling (e.g. lowercase `a1`) re-emits canonically (`A1`).
 
 ## Why
 

@@ -11,7 +11,8 @@
 		"metadata": "node 04-metadata.mjs",
 		"errors": "node 05-error-handling.mjs",
 		"write": "node 06-write.mjs",
-		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs"
+		"styles": "node 07-styles-and-layout.mjs",
+		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs && node 07-styles-and-layout.mjs"
 	},
 	"dependencies": {
 		"openjsxl": "workspace:*"
