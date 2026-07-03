@@ -10,6 +10,8 @@ coverage/
 
 # Local working status notes (not tracked)
 progress.md
+
+# Local operating contract for agents/humans (kept local, not published to the remote)
 CLAUDE.md
 
 # Local competitive-analysis snapshot (not tracked, never published)
