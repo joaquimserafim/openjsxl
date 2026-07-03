@@ -9,6 +9,9 @@ Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader **and writer*
 runtimes — Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports
 the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
+"Fast" is measured, not asserted — on a 1M-cell sheet, ~2–3× the read throughput of ExcelJS/SheetJS
+at a fraction of the memory ([benchmarks](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md)).
+
 ```sh
 npm install openjsxl
 ```

@@ -213,6 +213,22 @@ that empty square — taking the speed lessons of Python's
 [`python-calamine`](https://pypi.org/project/python-calamine/) and growing toward the
 capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
+## Performance
+
+"Fast" is measured, not asserted. Against the JS incumbents on an Apple M2 Pro (Node 24), a
+**1-million-cell** sheet (median wall-time · peak RSS, each library in an isolated process):
+
+| 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
+| --- | --- | --- | --- |
+| **read** | **0.71 s · 205 MB** | 1.6 s · 717 MB | 2.2 s · 547 MB |
+| **write** | **0.73 s · 389 MB** | 3.2 s · 1.5 GB | 2.5 s · 566 MB |
+
+Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~100 MB)** no matter
+the row count. The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write),
+the methodology, and out-of-band **openpyxl** / **python-calamine** reference numbers are in
+[`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce it end-to-end with `pnpm bench`.
+_(Measured 2026-07-03; every "fast" in these docs traces back to this table.)_
+
 ## Approach
 
 - **Read first, then write.** A fast, correct reader earned trust first; the writer (0.3) is its

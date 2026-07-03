@@ -812,7 +812,7 @@ pulls); (4, MEDIUM) `streamXlsx`/`writeXlsx` multi-read `sheet.name`, so a flip-
 forbidden name past validation into workbook.xml → `validateSheetMeta` now returns the validated
 names and `workbookXml` emits from them (single-read), fixing both writers, byte-identity preserved.
 
-### F5.5 — Benchmark harness + published numbers ☐
+### F5.5 — Benchmark harness + published numbers ☑
 **Context.** "Fast" is currently an architectural claim (0.4 competitive analysis). The
 1.0 gate needs published benchmarks; the harness comes now so every later feature can be
 measured against a baseline.
@@ -825,11 +825,35 @@ SheetJS), and out-of-band reference numbers for python `openpyxl`/`python-calami
 a companion script. Output: a reproducible `docs/benchmarks.md` table (`pnpm bench`).
 **Scope (out).** CI-run benchmarks (noise); micro-benchmarks of internals.
 **Tasks**
-- [ ] harness + workload generator (reuses `@openjsxl/fixtures` builder); runner with
-      warmup/median; markdown reporter.
-- [ ] first published `docs/benchmarks.md` + README link with date + hardware note.
+- [x] harness + workload generator (deterministic datasets; materialized for buffered writers,
+      lazy generator for the streamed writer); per-cell isolated worker with warmup/median +
+      peak-RSS sampling; markdown reporter.
+- [x] first published `docs/benchmarks.md` + README link with date + hardware note.
 **Acceptance.** `pnpm bench` reproduces the table end-to-end on a clean checkout; README
 claims match the published numbers (no unmeasured "fast" claims anywhere in docs).
+**Landed (uncommitted, awaiting owner approval).** New private `packages/bench` (`@openjsxl/bench`,
+never published — ExcelJS/SheetJS are devDeps THERE so the shipped packages stay zero-dep). `pnpm
+bench` builds the real `openjsxl` bundle, authors read fixtures once with ExcelJS (a neutral
+shared-strings producer, cached under gitignored `.cache/`), then runs every `(library, op,
+workload, size)` cell in its **own `node --expose-gc` child process, strictly serially** — the one
+design choice that keeps the numbers honest (no cross-library heap/CPU contention). Warmup +
+median wall-time + peak RSS; every writer gets the identical dataset, every reader parses the
+identical file and materializes each cell into a checksum sink; SheetJS writes with
+`compression:true`; SheetJS styled-write is reported `—` (Pro-only) not a fake fast number;
+openjsxl's streamed writer is fed a lazy row source (the real streaming case). Companion
+`py/bench_py.py` (openpyxl + python-calamine, subprocess-isolated, same fixtures) merges via
+`--render-only`. **Published `docs/benchmarks.md`** (M2 Pro, Node 24): at 1M cells openjsxl reads
+~2–3× faster than ExcelJS/SheetJS at ~⅓ the memory, writes ~4× faster than ExcelJS, and the
+streamed writer holds roughly flat ~130–180 MB vs 0.5–0.7 GB buffered / 1.4–1.8 GB ExcelJS.
+Gate: biome 0 / tsc 0 / **454 tests** (no production code touched — a new private package + docs +
+a README link, so byte-identity/corpus/openpyxl-writer gates are N/A). Streamed writer holds roughly
+flat ~95–125 MB at 1M cells vs ~0.4–0.55 GB buffered / ~1.5–1.8 GB ExcelJS. **Adversarial fairness
+review:** 4-lens workflow, 3 finders rate-limited (spend cap → UNVERIFIED, re-audited by hand:
+equal-work PROVEN via identical cross-reader checksums, zero-dep intact, neutral fixture producer);
+1 CONFIRMED (measurement) fixed — peak RSS now measured on the cold run only (warmed-iteration
+residue over-reported it ~8–13%), dead `baselineRss` removed, doc wording corrected. **M5 COMPLETE
+(F5.2 ✓ F5.3 ✓ F5.4 ✓ F5.1 ✓ F5.5 ✓).** Next: 0.5 release prep (README fidelity table + examples
+updated BEFORE any version bump, per CLAUDE.md #4).
 
 ---
 
