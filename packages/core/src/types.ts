@@ -1,11 +1,11 @@
 // Public cell model. A discriminated union, so narrowing on `type` also narrows
 // `value`: `if (cell.type === 'date') { cell.value /* : Date */ }`.
 
-export type CellType = "empty" | "string" | "number" | "boolean" | "date" | "error"
+export type CellType = "empty" | "string" | "number" | "boolean" | "date" | "error";
 
 interface CellBase {
 	/** A1 reference, e.g. "B2". */
-	readonly ref: string
+	readonly ref: string;
 }
 
 export type Cell =
@@ -14,49 +14,49 @@ export type Cell =
 	| (CellBase & { readonly type: "number"; readonly value: number })
 	| (CellBase & { readonly type: "boolean"; readonly value: boolean })
 	| (CellBase & { readonly type: "date"; readonly value: Date })
-	| (CellBase & { readonly type: "error"; readonly value: string })
+	| (CellBase & { readonly type: "error"; readonly value: string });
 
 /**
  * A sheet tab's visibility (the `state` attribute on `<sheet>`). `hidden` sheets can be re-shown
  * from Excel's UI; `veryHidden` ones only through VBA or by editing the file. An absent or
  * unrecognized state reads as `visible` (the spec's default).
  */
-export type SheetState = "visible" | "hidden" | "veryHidden"
+export type SheetState = "visible" | "hidden" | "veryHidden";
 
 export interface SheetInfo {
 	/** Sheet name as shown on Excel's tab. */
-	readonly name: string
+	readonly name: string;
 	/** Workbook-relative part path, resolved via the relationship graph. */
-	readonly path: string
+	readonly path: string;
 	/** false for hidden or very-hidden sheets. Kept alongside {@link state} (which it derives from). */
-	readonly visible: boolean
+	readonly visible: boolean;
 	/** The tab's visibility state (F4.6). `visible` is `state === "visible"`. */
-	readonly state: SheetState
+	readonly state: SheetState;
 }
 
 export interface Comment {
 	/** The cell the comment is anchored to, e.g. "B2". */
-	readonly ref: string
+	readonly ref: string;
 	/** Comment author, resolved from the authors table. Absent when it can't be resolved. */
-	readonly author?: string
+	readonly author?: string;
 	/** The comment's plain text — rich-text runs concatenated, formatting dropped. */
-	readonly text: string
+	readonly text: string;
 }
 
 export interface Hyperlink {
 	/** The cell or range the link covers, e.g. "A1" or "B1:C2". */
-	readonly ref: string
+	readonly ref: string;
 	/**
 	 * External destination (a URL, `mailto:`, or `file:` target) resolved through the
 	 * worksheet's relationships. Absent for a purely in-workbook link.
 	 */
-	readonly target?: string
+	readonly target?: string;
 	/** In-workbook destination, e.g. "'Sheet2'!B5". Absent for a purely external link. */
-	readonly location?: string
+	readonly location?: string;
 	/** Hover text the producer attached to the link, if any. */
-	readonly tooltip?: string
+	readonly tooltip?: string;
 	/** Display-text override for the link, if any. */
-	readonly display?: string
+	readonly display?: string;
 }
 
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
@@ -64,18 +64,18 @@ export interface Hyperlink {
 
 /** Width/visibility for a 1-based column range (`min`–`max` inclusive), from `<cols>`. */
 export interface ColumnProps {
-	readonly min: number
-	readonly max: number
+	readonly min: number;
+	readonly max: number;
 	/** Column width in characters of the default font (Excel's unit), 0 < width ≤ 255. */
-	readonly width?: number
-	readonly hidden?: boolean
+	readonly width?: number;
+	readonly hidden?: boolean;
 }
 
 /** Height/visibility of one row, from `<row ht hidden>`. */
 export interface RowProps {
 	/** Row height in points, 0 < height ≤ 409.5 (Excel's ceiling). */
-	readonly height?: number
-	readonly hidden?: boolean
+	readonly height?: number;
+	readonly hidden?: boolean;
 }
 
 /**
@@ -83,8 +83,8 @@ export interface RowProps {
  * scrolls. Split (non-frozen) panes are not modelled and read as no freeze.
  */
 export interface FreezePane {
-	readonly rows?: number
-	readonly cols?: number
+	readonly rows?: number;
+	readonly cols?: number;
 }
 
 // ── Styles (M4) ────────────────────────────────────────────────────────────────────────────────
@@ -103,23 +103,23 @@ export type Color =
 	| { readonly rgb: string }
 	| { readonly theme: number; readonly tint?: number }
 	| { readonly indexed: number }
-	| { readonly auto: true }
+	| { readonly auto: true };
 
 /**
  * Underline style. The exotic accounting variants (`singleAccounting`/`doubleAccounting`)
  * degrade to no underline on read and are rejected on write (deferred, documented).
  */
-export type UnderlineStyle = "single" | "double"
+export type UnderlineStyle = "single" | "double";
 
 export interface FontStyle {
-	readonly name?: string
+	readonly name?: string;
 	/** Font size in points. */
-	readonly size?: number
-	readonly bold?: boolean
-	readonly italic?: boolean
-	readonly underline?: UnderlineStyle
-	readonly strike?: boolean
-	readonly color?: Color
+	readonly size?: number;
+	readonly bold?: boolean;
+	readonly italic?: boolean;
+	readonly underline?: UnderlineStyle;
+	readonly strike?: boolean;
+	readonly color?: Color;
 }
 
 /** Fill pattern kinds (ECMA-376 §18.18.55). `gray125` is the workbook-reserved fill 1. */
@@ -142,7 +142,7 @@ export type PatternType =
 	| "lightGrid"
 	| "lightTrellis"
 	| "gray125"
-	| "gray0625"
+	| "gray0625";
 
 /**
  * A pattern fill. For the everyday solid fill, the visible color is `fgColor` (OOXML's rule —
@@ -150,9 +150,9 @@ export type PatternType =
  * gradient-filled cell reads as having no fill.
  */
 export interface FillStyle {
-	readonly patternType: PatternType
-	readonly fgColor?: Color
-	readonly bgColor?: Color
+	readonly patternType: PatternType;
+	readonly fgColor?: Color;
+	readonly bgColor?: Color;
 }
 
 /** Border line styles (ECMA-376 §18.18.3). An edge with no style is simply absent. */
@@ -169,19 +169,19 @@ export type BorderLineStyle =
 	| "mediumDashDot"
 	| "dashDotDot"
 	| "mediumDashDotDot"
-	| "slantDashDot"
+	| "slantDashDot";
 
 export interface BorderEdge {
-	readonly style: BorderLineStyle
-	readonly color?: Color
+	readonly style: BorderLineStyle;
+	readonly color?: Color;
 }
 
 /** Per-edge borders. Diagonal borders are not modelled (deferred). */
 export interface BorderStyle {
-	readonly top?: BorderEdge
-	readonly right?: BorderEdge
-	readonly bottom?: BorderEdge
-	readonly left?: BorderEdge
+	readonly top?: BorderEdge;
+	readonly right?: BorderEdge;
+	readonly bottom?: BorderEdge;
+	readonly left?: BorderEdge;
 }
 
 export type HorizontalAlignment =
@@ -191,22 +191,22 @@ export type HorizontalAlignment =
 	| "justify"
 	| "fill"
 	| "centerContinuous"
-	| "distributed"
+	| "distributed";
 
-export type VerticalAlignment = "top" | "center" | "bottom" | "justify" | "distributed"
+export type VerticalAlignment = "top" | "center" | "bottom" | "justify" | "distributed";
 
 export interface Alignment {
-	readonly horizontal?: HorizontalAlignment
-	readonly vertical?: VerticalAlignment
-	readonly wrapText?: boolean
-	readonly shrinkToFit?: boolean
+	readonly horizontal?: HorizontalAlignment;
+	readonly vertical?: VerticalAlignment;
+	readonly wrapText?: boolean;
+	readonly shrinkToFit?: boolean;
 	/** Indent level (whole units of about 3 spaces), 0–250. */
-	readonly indent?: number
+	readonly indent?: number;
 	/**
 	 * Text rotation in degrees, 0–180 (91–180 mean 1–90° downward, per the spec). The legacy
 	 * marker 255 ("vertical stacked") is not modelled and degrades to no rotation.
 	 */
-	readonly textRotation?: number
+	readonly textRotation?: number;
 }
 
 /**
@@ -216,9 +216,9 @@ export interface Alignment {
  * file-internal detail and never appear in the API.
  */
 export interface CellStyle {
-	readonly numberFormat?: string
-	readonly font?: FontStyle
-	readonly fill?: FillStyle
-	readonly border?: BorderStyle
-	readonly alignment?: Alignment
+	readonly numberFormat?: string;
+	readonly font?: FontStyle;
+	readonly fill?: FillStyle;
+	readonly border?: BorderStyle;
+	readonly alignment?: Alignment;
 }

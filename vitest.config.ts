@@ -1,7 +1,7 @@
-import { fileURLToPath } from "node:url"
-import { defineConfig } from "vitest/config"
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
 
-const resolvePath = (p: string) => fileURLToPath(new URL(p, import.meta.url))
+const resolvePath = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
 	resolve: {
@@ -16,4 +16,4 @@ export default defineConfig({
 		// No feature tests land until F0.3/F0.4; keep the skeleton's run green.
 		passWithNoTests: true,
 	},
-})
+});

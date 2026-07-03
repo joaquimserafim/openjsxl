@@ -20,21 +20,21 @@ npm install @openjsxl/core
 ## Usage
 
 ```ts
-import { openXlsx, streamSheetRows, XlsxError } from '@openjsxl/core'
-import { readFile } from 'node:fs/promises'
+import { openXlsx, streamSheetRows, XlsxError } from '@openjsxl/core';
+import { readFile } from 'node:fs/promises';
 
-const wb = await openXlsx(await readFile('data.xlsx'))
-const sheet = wb.sheet('Sheet1')
+const wb = await openXlsx(await readFile('data.xlsx'));
+const sheet = wb.sheet('Sheet1');
 
-sheet.cell('A1') // { ref, type, value } — narrow on `type` for a typed value
-sheet.style('B2') // { font?, fill?, border?, alignment?, numberFormat? } | undefined
-sheet.numberFormat('C1') // "mm-dd-yy" | undefined
-sheet.mergedCells // ["A1:B1", …]
-sheet.freeze // { rows?, cols? } | undefined — plus columns, rowProperties, state, …
+sheet.cell('A1'); // { ref, type, value } — narrow on `type` for a typed value
+sheet.style('B2'); // { font?, fill?, border?, alignment?, numberFormat? } | undefined
+sheet.numberFormat('C1'); // "mm-dd-yy" | undefined
+sheet.mergedCells; // ["A1:B1", …]
+sheet.freeze; // { rows?, cols? } | undefined — plus columns, rowProperties, state, …
 
 // Constant-memory streaming for large sheets — one row at a time.
 for await (const row of streamSheetRows(await readFile('huge.xlsx'))) {
-	console.log(row.index, row.cells.length)
+	console.log(row.index, row.cells.length);
 }
 ```
 
@@ -45,17 +45,25 @@ bare `TypeError` from a corrupt file.
 ## Writing
 
 ```ts
-import { writeXlsx, workbookToInput } from '@openjsxl/core'
+import { writeXlsx, workbookToInput } from '@openjsxl/core';
 
 // Author from plain data — cell types inferred from the JS values.
 const bytes = await writeXlsx({
-	sheets: [{ name: 'Report', rows: [['Item', 'Added'], ['Apples', new Date('2024-01-15')]] }],
-})
+	sheets: [
+		{
+			name: 'Report',
+			rows: [
+				['Item', 'Added'],
+				['Apples', new Date('2024-01-15')],
+			],
+		},
+	],
+});
 
 // Or read → modify → write.
-const input = await workbookToInput(await openXlsx(bytes))
-input.sheets[0].rows.push(['Pears', new Date('2024-02-01')])
-const updated = await writeXlsx(input)
+const input = await workbookToInput(await openXlsx(bytes));
+input.sheets[0].rows.push(['Pears', new Date('2024-02-01')]);
+const updated = await writeXlsx(input);
 ```
 
 Cells can carry styles (`{ value, style }` — the same shape `style(ref)` returns), and sheets

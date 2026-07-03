@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { parseStyles } from "../styles"
+import { describe, expect, it } from "vitest";
+import { parseStyles } from "../styles";
 
 // F4.1 — the full style read model: fonts, fills, borders, alignment, colors, and the cached
 // cellStyle(i) materializer. Inline styleSheet XML keeps each case surgical; end-to-end coverage
 // against a real producer lives in reader/__tests__/cell-style.test.ts.
 
 const SHEET = (inner: string): string =>
-	`<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${inner}</styleSheet>`
+	`<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${inner}</styleSheet>`;
 
 // A minimal three-table prelude: font 0 / fill 0 (none) / border 0 (empty) are the workbook
 // defaults every real file carries; xf 0 is the default cell format.
@@ -15,7 +15,7 @@ const DEFAULTS = {
 	fills: '<fill><patternFill patternType="none"/></fill>',
 	borders: "<border><left/><right/><top/><bottom/><diagonal/></border>",
 	xf0: '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>',
-}
+};
 
 describe("parseStyles — cellStyle materialization", () => {
 	it("resolves the default xf (and out-of-range indexes) to undefined", () => {
@@ -26,11 +26,11 @@ describe("parseStyles — cellStyle materialization", () => {
 					`<borders count="1">${DEFAULTS.borders}</borders>` +
 					`<cellXfs count="1">${DEFAULTS.xf0}</cellXfs>`,
 			),
-		)
-		expect(table.cellStyle(0)).toBeUndefined()
-		expect(table.cellStyle(undefined)).toBeUndefined() // omitted s = style 0
-		expect(table.cellStyle(99)).toBeUndefined()
-	})
+		);
+		expect(table.cellStyle(0)).toBeUndefined();
+		expect(table.cellStyle(undefined)).toBeUndefined(); // omitted s = style 0
+		expect(table.cellStyle(99)).toBeUndefined();
+	});
 
 	it("reads fonts: name, size, bold, italic, underline, strike, rgb color", () => {
 		const table = parseStyles(
@@ -40,7 +40,7 @@ describe("parseStyles — cellStyle materialization", () => {
 					"</fonts>" +
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf numFmtId="0" fontId="1" fillId="0" borderId="0"/></cellXfs>`,
 			),
-		)
+		);
 		expect(table.cellStyle(1)).toEqual({
 			font: {
 				name: "Arial",
@@ -51,8 +51,8 @@ describe("parseStyles — cellStyle materialization", () => {
 				strike: true,
 				color: { rgb: "FFFF0000" },
 			},
-		})
-	})
+		});
+	});
 
 	it("keeps theme+tint, indexed, and auto colors raw", () => {
 		const table = parseStyles(
@@ -65,11 +65,11 @@ describe("parseStyles — cellStyle materialization", () => {
 					`<cellXfs count="4">${DEFAULTS.xf0}` +
 					'<xf fontId="1"/><xf fontId="2"/><xf fontId="3"/></cellXfs>',
 			),
-		)
-		expect(table.cellStyle(1)?.font?.color).toEqual({ theme: 4, tint: 0.4 })
-		expect(table.cellStyle(2)?.font?.color).toEqual({ indexed: 10 })
-		expect(table.cellStyle(3)?.font?.color).toEqual({ auto: true })
-	})
+		);
+		expect(table.cellStyle(1)?.font?.color).toEqual({ theme: 4, tint: 0.4 });
+		expect(table.cellStyle(2)?.font?.color).toEqual({ indexed: 10 });
+		expect(table.cellStyle(3)?.font?.color).toEqual({ auto: true });
+	});
 
 	it("reads pattern fills and treats the solid fgColor as the visible color", () => {
 		const table = parseStyles(
@@ -80,17 +80,17 @@ describe("parseStyles — cellStyle materialization", () => {
 					"</fills>" +
 					`<cellXfs count="3">${DEFAULTS.xf0}<xf fillId="1"/><xf fillId="2"/></cellXfs>`,
 			),
-		)
+		);
 		expect(table.cellStyle(1)?.fill).toEqual({
 			patternType: "solid",
 			fgColor: { rgb: "FFFFFF00" },
 			bgColor: { indexed: 64 },
-		})
+		});
 		expect(table.cellStyle(2)?.fill).toEqual({
 			patternType: "lightGray",
 			fgColor: { theme: 2 },
-		})
-	})
+		});
+	});
 
 	it("a gradient fill degrades to no fill (documented deferral)", () => {
 		const table = parseStyles(
@@ -100,9 +100,9 @@ describe("parseStyles — cellStyle materialization", () => {
 					"</fills>" +
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf fillId="1"/></cellXfs>`,
 			),
-		)
-		expect(table.cellStyle(1)).toBeUndefined()
-	})
+		);
+		expect(table.cellStyle(1)).toBeUndefined();
+	});
 
 	it("reads per-edge borders, with and without colors, ignoring styleless edges", () => {
 		const table = parseStyles(
@@ -113,13 +113,13 @@ describe("parseStyles — cellStyle materialization", () => {
 					"</borders>" +
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf borderId="1"/></cellXfs>`,
 			),
-		)
+		);
 		expect(table.cellStyle(1)?.border).toEqual({
 			left: { style: "dashed", color: { rgb: "FF0070C0" } },
 			top: { style: "thin" },
 			bottom: { style: "double" },
-		})
-	})
+		});
+	});
 
 	it("reads inline alignment and drops the legacy textRotation=255 marker", () => {
 		const table = parseStyles(
@@ -129,7 +129,7 @@ describe("parseStyles — cellStyle materialization", () => {
 					'<xf numFmtId="0"><alignment textRotation="255"/></xf>' +
 					"</cellXfs>",
 			),
-		)
+		);
 		expect(table.cellStyle(1)?.alignment).toEqual({
 			horizontal: "center",
 			vertical: "top",
@@ -137,10 +137,10 @@ describe("parseStyles — cellStyle materialization", () => {
 			shrinkToFit: true,
 			indent: 2,
 			textRotation: 45,
-		})
+		});
 		// 255 is "vertical stacked", not degrees — with nothing else set, the xf has no style.
-		expect(table.cellStyle(2)).toBeUndefined()
-	})
+		expect(table.cellStyle(2)).toBeUndefined();
+	});
 
 	it("includes the number format code for non-General ids", () => {
 		const table = parseStyles(
@@ -148,10 +148,10 @@ describe("parseStyles — cellStyle materialization", () => {
 				'<numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>' +
 					`<cellXfs count="3">${DEFAULTS.xf0}<xf numFmtId="10"/><xf numFmtId="164"/></cellXfs>`,
 			),
-		)
-		expect(table.cellStyle(1)).toEqual({ numberFormat: "0.00%" })
-		expect(table.cellStyle(2)).toEqual({ numberFormat: "yyyy-mm-dd" })
-	})
+		);
+		expect(table.cellStyle(1)).toEqual({ numberFormat: "0.00%" });
+		expect(table.cellStyle(2)).toEqual({ numberFormat: "yyyy-mm-dd" });
+	});
 
 	it("is reference-stable: the same index returns the same object", () => {
 		const table = parseStyles(
@@ -159,9 +159,9 @@ describe("parseStyles — cellStyle materialization", () => {
 				`<fonts count="2">${DEFAULTS.fonts}<font><b/></font></fonts>` +
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf fontId="1"/></cellXfs>`,
 			),
-		)
-		expect(table.cellStyle(1)).toBe(table.cellStyle(1))
-	})
+		);
+		expect(table.cellStyle(1)).toBe(table.cellStyle(1));
+	});
 
 	it("degrades garbage gracefully: unknown enums, bad numerics, accounting underline", () => {
 		const table = parseStyles(
@@ -177,15 +177,15 @@ describe("parseStyles — cellStyle materialization", () => {
 					'<xf><alignment horizontal="middle"/></xf>' +
 					"</cellXfs>",
 			),
-		)
+		);
 		// Accounting underline + unparseable size leave an empty font → no style at all.
-		expect(table.cellStyle(1)).toBeUndefined()
+		expect(table.cellStyle(1)).toBeUndefined();
 		// Bad theme number → no color; unknown pattern → 'none' → no fill; unknown border style
 		// → no edge → no border. Everything collapses to undefined.
-		expect(table.cellStyle(2)).toBeUndefined()
+		expect(table.cellStyle(2)).toBeUndefined();
 		// Unknown horizontal value → no alignment.
-		expect(table.cellStyle(3)).toBeUndefined()
-	})
+		expect(table.cellStyle(3)).toBeUndefined();
+	});
 
 	// Regressions — misnested sections must not poison later parsing (adversarial review, F4.1).
 	// The tokenizer is non-validating, so an unclosed record's builder used to leak past its
@@ -197,13 +197,13 @@ describe("parseStyles — cellStyle materialization", () => {
 				'<fonts count="1"><font><sz val="11"/></fonts>' + // <font> never closed
 					'<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs>',
 			),
-		)
+		);
 		// Pre-fix: the dangling font builder intercepted <cellXfs>/<xf>, so xfs stayed empty and
 		// even date detection (the pre-F4.1 behavior) regressed. Both must survive.
-		expect(table.isDateStyle(1)).toBe(true)
-		expect(table.formatCode(1)).toBe("mm-dd-yy")
-		expect(table.cellStyle(1)).toEqual({ numberFormat: "mm-dd-yy" })
-	})
+		expect(table.isDateStyle(1)).toBe(true);
+		expect(table.formatCode(1)).toBe("mm-dd-yy");
+		expect(table.cellStyle(1)).toEqual({ numberFormat: "mm-dd-yy" });
+	});
 
 	it("an unclosed <fill> is flushed at </fills>; a later dxf fill is not captured", () => {
 		const table = parseStyles(
@@ -214,13 +214,13 @@ describe("parseStyles — cellStyle materialization", () => {
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf fillId="1"/></cellXfs>` +
 					'<dxfs count="1"><dxf><fill><patternFill patternType="darkTrellis"><fgColor rgb="FFBADBAD"/></patternFill></fill></dxf></dxfs>',
 			),
-		)
+		);
 		// The sheet's own solid green lands at index 1; the conditional-format fill must not.
 		expect(table.cellStyle(1)?.fill).toEqual({
 			patternType: "solid",
 			fgColor: { rgb: "FF00FF00" },
-		})
-	})
+		});
+	});
 
 	it("an unclosed <border> edge is flushed at </borders>; dxf colors are not grafted on", () => {
 		const table = parseStyles(
@@ -231,11 +231,11 @@ describe("parseStyles — cellStyle materialization", () => {
 					`<cellXfs count="2">${DEFAULTS.xf0}<xf borderId="1"/></cellXfs>` +
 					'<dxfs count="1"><dxf><font><color rgb="FFDD0000"/></font><border></border></dxf></dxfs>',
 			),
-		)
+		);
 		// The dangling edge commits as authored (thin, no color) — the dxf font color must not
 		// become its color, and the dxf border must not append a phantom record.
-		expect(table.cellStyle(1)?.border).toEqual({ left: { style: "thin" } })
-	})
+		expect(table.cellStyle(1)?.border).toEqual({ left: { style: "thin" } });
+	});
 
 	it("well-formed dxf blocks never contaminate the component tables", () => {
 		const table = parseStyles(
@@ -246,11 +246,11 @@ describe("parseStyles — cellStyle materialization", () => {
 					`<cellXfs count="1">${DEFAULTS.xf0}</cellXfs>` +
 					'<dxfs count="1"><dxf><font><b/></font><fill><patternFill patternType="solid"><fgColor rgb="FFBADBAD"/></patternFill></fill></dxf></dxfs>',
 			),
-		)
+		);
 		// dxf children live outside the fonts/fills sections and must not extend the tables.
-		expect(table.cellStyle(0)).toBeUndefined()
-		expect(table.cellStyle(1)).toBeUndefined()
-	})
+		expect(table.cellStyle(0)).toBeUndefined();
+		expect(table.cellStyle(1)).toBeUndefined();
+	});
 
 	it("ignores cellStyleXfs — a cell s indexes cellXfs only", () => {
 		const table = parseStyles(
@@ -259,11 +259,11 @@ describe("parseStyles — cellStyle materialization", () => {
 					'<cellStyleXfs count="2"><xf fontId="1"/><xf fontId="1"/></cellStyleXfs>' +
 					`<cellXfs count="1">${DEFAULTS.xf0}</cellXfs>`,
 			),
-		)
-		expect(table.cellStyle(0)).toBeUndefined()
-		expect(table.cellStyle(1)).toBeUndefined() // cellStyleXfs entries must not leak in
-	})
-})
+		);
+		expect(table.cellStyle(0)).toBeUndefined();
+		expect(table.cellStyle(1)).toBeUndefined(); // cellStyleXfs entries must not leak in
+	});
+});
 
 describe("parseStyles — General normalization (F4.4 regression)", () => {
 	it('treats an explicitly interned custom "General" as no number format', () => {
@@ -279,13 +279,13 @@ describe("parseStyles — General normalization (F4.4 regression)", () => {
 					'<xf numFmtId="164"><alignment vertical="bottom"/></xf>' +
 					"</cellXfs>",
 			),
-		)
-		expect(table.cellStyle(1)).toBeUndefined()
-		expect(table.cellStyle(2)).toEqual({ alignment: { vertical: "bottom" } })
+		);
+		expect(table.cellStyle(1)).toBeUndefined();
+		expect(table.cellStyle(2)).toEqual({ alignment: { vertical: "bottom" } });
 		// numberFormat(ref)'s own accessor is unaffected: it still resolves the code.
-		expect(table.formatCode(1)).toBe("General")
-	})
-})
+		expect(table.formatCode(1)).toBe("General");
+	});
+});
 
 describe("parseStyles — degrades unwritable producer values (F4.4 review regressions)", () => {
 	// The reader's style model must only emit what the writer accepts, or the bridge could crash
@@ -306,13 +306,13 @@ describe("parseStyles — degrades unwritable producer values (F4.4 review regre
 					'<xf numFmtId="164"/>' +
 					"</cellXfs>",
 			),
-		)
-		expect(table.cellStyle(1)).toEqual({ font: { bold: true } }) // rgb "F00" dropped
-		expect(table.cellStyle(2)).toBeUndefined() // theme 1e21 dropped -> empty font
-		expect(table.cellStyle(3)).toEqual({ font: { italic: true } }) // "" name dropped
-		expect(table.cellStyle(4)).toEqual({ alignment: { wrapText: true } }) // indent 999 dropped
-		expect(table.cellStyle(5)).toBeUndefined() // "" format code -> no format
-	})
+		);
+		expect(table.cellStyle(1)).toEqual({ font: { bold: true } }); // rgb "F00" dropped
+		expect(table.cellStyle(2)).toBeUndefined(); // theme 1e21 dropped -> empty font
+		expect(table.cellStyle(3)).toEqual({ font: { italic: true } }); // "" name dropped
+		expect(table.cellStyle(4)).toEqual({ alignment: { wrapText: true } }); // indent 999 dropped
+		expect(table.cellStyle(5)).toBeUndefined(); // "" format code -> no format
+	});
 
 	it("drops an XML-unsafe format code (control char via a decoded numeric reference)", () => {
 		// &#1; decodes to U+0001 in the attribute — legal to our tolerant entity decoder, illegal
@@ -324,7 +324,7 @@ describe("parseStyles — degrades unwritable producer values (F4.4 review regre
 					'<xf numFmtId="164"><alignment wrapText="1"/></xf>' +
 					"</cellXfs>",
 			),
-		)
-		expect(table.cellStyle(1)).toEqual({ alignment: { wrapText: true } })
-	})
-})
+		);
+		expect(table.cellStyle(1)).toEqual({ alignment: { wrapText: true } });
+	});
+});

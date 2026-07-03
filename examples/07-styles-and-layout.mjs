@@ -7,16 +7,16 @@
 // styles pass through read → modify → write untouched. Sheets take column widths, row heights,
 // frozen panes, merged ranges, hyperlinks, and a visibility state; all of it round-trips.
 
-import { writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { openXlsx, writeXlsx } from "openjsxl"
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openXlsx, writeXlsx } from "openjsxl";
 
 const header = {
 	font: { bold: true, color: { rgb: "FFFFFFFF" } },
 	fill: { patternType: "solid", fgColor: { rgb: "FF4472C4" } },
 	alignment: { horizontal: "center" },
-}
+};
 
 const bytes = await writeXlsx({
 	sheets: [
@@ -41,19 +41,19 @@ const bytes = await writeXlsx({
 		},
 		{ name: "Internal", rows: [["scratch space"]], state: "hidden" },
 	],
-})
+});
 
-const out = join(tmpdir(), "openjsxl-styled.xlsx")
-await writeFile(out, bytes)
-console.log(`wrote ${bytes.length} bytes -> ${out}`)
+const out = join(tmpdir(), "openjsxl-styled.xlsx");
+await writeFile(out, bytes);
+console.log(`wrote ${bytes.length} bytes -> ${out}`);
 
 // Read it back — every accessor returns exactly what was written.
-const wb = await openXlsx(bytes)
-const sheet = wb.sheet("Report")
-console.log("A1 style     :", JSON.stringify(sheet.style("A1")))
-console.log("B2 format    :", sheet.numberFormat("B2"), "->", sheet.cell("B2").value)
-console.log("columns      :", JSON.stringify(sheet.columns))
-console.log("freeze       :", JSON.stringify(sheet.freeze))
-console.log("merges       :", JSON.stringify(sheet.mergedCells))
-console.log("hyperlinks   :", JSON.stringify(sheet.hyperlinks))
-console.log("sheet states :", wb.sheets.map((s) => `${s.name}=${s.state}`).join(", "))
+const wb = await openXlsx(bytes);
+const sheet = wb.sheet("Report");
+console.log("A1 style     :", JSON.stringify(sheet.style("A1")));
+console.log("B2 format    :", sheet.numberFormat("B2"), "->", sheet.cell("B2").value);
+console.log("columns      :", JSON.stringify(sheet.columns));
+console.log("freeze       :", JSON.stringify(sheet.freeze));
+console.log("merges       :", JSON.stringify(sheet.mergedCells));
+console.log("hyperlinks   :", JSON.stringify(sheet.hyperlinks));
+console.log("sheet states :", wb.sheets.map((s) => `${s.name}=${s.state}`).join(", "));

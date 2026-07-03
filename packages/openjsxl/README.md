@@ -14,18 +14,21 @@ npm install openjsxl
 ```
 
 ```ts
-import { openXlsx } from 'openjsxl'
-import { readFile } from 'node:fs/promises'
+import { openXlsx } from 'openjsxl';
+import { readFile } from 'node:fs/promises';
 
-const wb = await openXlsx(await readFile('data.xlsx'))
+const wb = await openXlsx(await readFile('data.xlsx'));
 
 // Typed cells: narrowing on `cell.type` gives a correctly typed `cell.value`.
-const a1 = wb.sheet('Sheet1').cell('A1')
-console.log(a1.type, a1.value) // e.g. "string" "hello"
+const a1 = wb.sheet('Sheet1').cell('A1');
+console.log(a1.type, a1.value); // e.g. "string" "hello"
 
 // Stream a whole sheet, row at a time.
 for await (const row of wb.sheet(wb.sheets[0].name).rows()) {
-	console.log(row.index, row.cells.map((c) => c.value))
+	console.log(
+		row.index,
+		row.cells.map((c) => c.value),
+	);
 }
 ```
 
@@ -40,7 +43,7 @@ inferred from the JS values. Cells can carry styles (`{ value, style }` — the 
 hyperlinks, and a visibility state:
 
 ```ts
-import { writeXlsx } from 'openjsxl'
+import { writeXlsx } from 'openjsxl';
 
 const bytes = await writeXlsx({
 	sheets: [
@@ -54,7 +57,7 @@ const bytes = await writeXlsx({
 			hyperlinks: [{ ref: 'A2', target: 'https://example.com/apples' }],
 		},
 	],
-})
+});
 ```
 
 `workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —

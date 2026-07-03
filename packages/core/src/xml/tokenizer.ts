@@ -1,5 +1,5 @@
-import { isWhitespace } from "../utils"
-import { decodeXmlEntities } from "./entities"
+import { isWhitespace } from "../utils";
+import { decodeXmlEntities } from "./entities";
 
 // Streaming, non-validating tokenizer for the OOXML subset of XML. It yields a flat
 // event stream rather than building a DOM — the reason pure-JS parsers can keep up with
@@ -23,139 +23,140 @@ import { decodeXmlEntities } from "./entities"
 
 export type XmlToken =
 	| {
-			readonly kind: "open"
-			readonly name: string
-			readonly attrs: Readonly<Record<string, string>>
-			readonly selfClosing: boolean
+			readonly kind: "open";
+			readonly name: string;
+			readonly attrs: Readonly<Record<string, string>>;
+			readonly selfClosing: boolean;
 	  }
 	| { readonly kind: "text"; readonly value: string }
-	| { readonly kind: "close"; readonly name: string }
+	| { readonly kind: "close"; readonly name: string };
 
 export function* tokenize(xml: string): Generator<XmlToken> {
-	const len = xml.length
+	const len = xml.length;
 	// Skip a leading UTF-8 BOM if present (common from LibreOffice and older Excel).
-	let i = xml.charCodeAt(0) === 0xfeff ? 1 : 0
+	let i = xml.charCodeAt(0) === 0xfeff ? 1 : 0;
 
 	while (i < len) {
-		const lt = xml.indexOf("<", i)
+		const lt = xml.indexOf("<", i);
 
 		if (lt === -1) {
-			const text = xml.slice(i)
-			if (text.length > 0) yield { kind: "text", value: decodeXmlEntities(text) }
-			break
+			const text = xml.slice(i);
+			if (text.length > 0) yield { kind: "text", value: decodeXmlEntities(text) };
+			break;
 		}
 
 		if (lt > i) {
-			yield { kind: "text", value: decodeXmlEntities(xml.slice(i, lt)) }
+			yield { kind: "text", value: decodeXmlEntities(xml.slice(i, lt)) };
 		}
 
-		const next = xml[lt + 1]
+		const next = xml[lt + 1];
 
 		// <?xml ... ?> prolog / processing instruction
 		if (next === "?") {
-			const end = xml.indexOf("?>", lt + 2)
-			i = end === -1 ? len : end + 2
-			continue
+			const end = xml.indexOf("?>", lt + 2);
+			i = end === -1 ? len : end + 2;
+			continue;
 		}
 
 		// <!-- comment -->, <![CDATA[ ... ]]>, or other declaration
 		if (next === "!") {
 			if (xml.startsWith("<!--", lt)) {
-				const end = xml.indexOf("-->", lt + 4)
-				i = end === -1 ? len : end + 3
-				continue
+				const end = xml.indexOf("-->", lt + 4);
+				i = end === -1 ? len : end + 3;
+				continue;
 			}
 			if (xml.startsWith("<![CDATA[", lt)) {
-				const end = xml.indexOf("]]>", lt + 9)
-				const content = xml.slice(lt + 9, end === -1 ? len : end)
-				if (content.length > 0) yield { kind: "text", value: content } // CDATA is literal
-				i = end === -1 ? len : end + 3
-				continue
+				const end = xml.indexOf("]]>", lt + 9);
+				const content = xml.slice(lt + 9, end === -1 ? len : end);
+				if (content.length > 0) yield { kind: "text", value: content }; // CDATA is literal
+				i = end === -1 ? len : end + 3;
+				continue;
 			}
-			const end = xml.indexOf(">", lt + 2)
-			i = end === -1 ? len : end + 1
-			continue
+			const end = xml.indexOf(">", lt + 2);
+			i = end === -1 ? len : end + 1;
+			continue;
 		}
 
 		// </name> close tag
 		if (next === "/") {
-			const end = xml.indexOf(">", lt + 2)
-			const name = xml.slice(lt + 2, end === -1 ? len : end).trim()
-			yield { kind: "close", name }
-			i = end === -1 ? len : end + 1
-			continue
+			const end = xml.indexOf(">", lt + 2);
+			const name = xml.slice(lt + 2, end === -1 ? len : end).trim();
+			yield { kind: "close", name };
+			i = end === -1 ? len : end + 1;
+			continue;
 		}
 
 		// A '<' not followed by a name-start character is a literal '<' in (malformed or
 		// unescaped) text — emit it verbatim rather than inventing a phantom element and
 		// swallowing the following close tag.
 		if (next === undefined || next === ">" || next === "=" || isWhitespace(next)) {
-			yield { kind: "text", value: "<" }
-			i = lt + 1
-			continue
+			yield { kind: "text", value: "<" };
+			i = lt + 1;
+			continue;
 		}
 
 		// <name ...> open or self-closing tag
-		let j = lt + 1
-		const nameStart = j
+		let j = lt + 1;
+		const nameStart = j;
 		while (j < len) {
-			const ch = xml[j]
-			if (isWhitespace(ch) || ch === ">" || ch === "/") break
-			j++
+			const ch = xml[j];
+			if (isWhitespace(ch) || ch === ">" || ch === "/") break;
+			j++;
 		}
-		const name = xml.slice(nameStart, j)
-		const attrs: Record<string, string> = {}
-		let selfClosing = false
+		const name = xml.slice(nameStart, j);
+		const attrs: Record<string, string> = {};
+		let selfClosing = false;
 
 		while (j < len) {
-			while (j < len && isWhitespace(xml[j])) j++
-			if (j >= len) break
+			while (j < len && isWhitespace(xml[j])) j++;
+			if (j >= len) break;
 
-			const ch = xml[j]
+			const ch = xml[j];
 			if (ch === ">") {
-				j++
-				break
+				j++;
+				break;
 			}
 			if (ch === "/") {
 				// Self-close marker: record it and advance by one, letting the loop consume the
 				// real '>'. Do NOT jump to the next '>' — that can swallow following markup.
-				selfClosing = true
-				j++
-				continue
+				selfClosing = true;
+				j++;
+				continue;
 			}
 
-			const attrNameStart = j
+			const attrNameStart = j;
 			while (j < len) {
-				const c = xml[j]
-				if (c === "=" || c === ">" || c === "/" || isWhitespace(c)) break
-				j++
+				const c = xml[j];
+				if (c === "=" || c === ">" || c === "/" || isWhitespace(c)) break;
+				j++;
 			}
-			const attrName = xml.slice(attrNameStart, j)
+			const attrName = xml.slice(attrNameStart, j);
 
-			while (j < len && isWhitespace(xml[j])) j++
+			while (j < len && isWhitespace(xml[j])) j++;
 			if (xml[j] === "=") {
-				j++
-				while (j < len && isWhitespace(xml[j])) j++
-				const quote = xml[j]
+				j++;
+				while (j < len && isWhitespace(xml[j])) j++;
+				const quote = xml[j];
 				if (quote === '"' || quote === "'") {
-					j++
-					const close = xml.indexOf(quote, j)
-					const end = close === -1 ? len : close
-					if (attrName.length > 0) attrs[attrName] = decodeXmlEntities(xml.slice(j, end))
-					j = close === -1 ? len : close + 1
+					j++;
+					const close = xml.indexOf(quote, j);
+					const end = close === -1 ? len : close;
+					if (attrName.length > 0) attrs[attrName] = decodeXmlEntities(xml.slice(j, end));
+					j = close === -1 ? len : close + 1;
 				} else {
 					// Unquoted value (malformed XML, but be lenient): read to whitespace/end-of-tag.
-					const valStart = j
-					while (j < len && !isWhitespace(xml[j]) && xml[j] !== ">" && xml[j] !== "/") j++
+					const valStart = j;
+					while (j < len && !isWhitespace(xml[j]) && xml[j] !== ">" && xml[j] !== "/")
+						j++;
 					if (attrName.length > 0)
-						attrs[attrName] = decodeXmlEntities(xml.slice(valStart, j))
+						attrs[attrName] = decodeXmlEntities(xml.slice(valStart, j));
 				}
 			} else if (attrName.length > 0) {
-				attrs[attrName] = ""
+				attrs[attrName] = "";
 			}
 		}
 
-		yield { kind: "open", name, attrs, selfClosing }
-		i = j
+		yield { kind: "open", name, attrs, selfClosing };
+		i = j;
 	}
 }

@@ -11,10 +11,10 @@ import {
 	parseRef,
 	type Relationship,
 	translateFormula,
-} from "../ooxml"
-import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
-import { localName, relationshipId } from "../utils"
-import { createXmlStream, tokenize, type XmlToken } from "../xml"
+} from "../ooxml";
+import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types";
+import { localName, relationshipId } from "../utils";
+import { createXmlStream, tokenize, type XmlToken } from "../xml";
 
 // Turn a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
 // tokenizer event stream rather than building a DOM, so peak memory tracks one row, not the
@@ -33,16 +33,16 @@ import { createXmlStream, tokenize, type XmlToken } from "../xml"
 
 export interface Row {
 	/** 1-based row index — from `<row r>`, or positional when the attribute is absent. */
-	readonly index: number
+	readonly index: number;
 	/** Cells present in the row, in document order. Gaps are simply absent (sparse). */
-	readonly cells: readonly Cell[]
+	readonly cells: readonly Cell[];
 }
 
 function safeColumn(ref: string): number | undefined {
 	try {
-		return parseRef(ref).col
+		return parseRef(ref).col;
 	} catch {
-		return undefined
+		return undefined;
 	}
 }
 
@@ -60,30 +60,30 @@ function safeColumn(ref: string): number | undefined {
 // A column-default style: `<col … style>` applies to every cell in columns [min, max] that does
 // not set its own `s`. (`style` is the column's default cell format — an index into cellXfs.)
 interface ColumnStyle {
-	readonly min: number
-	readonly max: number
-	readonly style: number
+	readonly min: number;
+	readonly max: number;
+	readonly style: number;
 }
 
 function columnStyleFromToken(attrs: Readonly<Record<string, string>>): ColumnStyle | undefined {
 	// A <col> with no `style` sets width/visibility only — it contributes no default format.
-	if (attrs.style === undefined) return undefined
-	const style = Number(attrs.style)
-	const min = Number(attrs.min)
-	const max = Number(attrs.max)
+	if (attrs.style === undefined) return undefined;
+	const style = Number(attrs.style);
+	const min = Number(attrs.min);
+	const max = Number(attrs.max);
 	if (!Number.isInteger(style) || !Number.isInteger(min) || !Number.isInteger(max))
-		return undefined
-	return { min, max, style }
+		return undefined;
+	return { min, max, style };
 }
 
 // A row's default style is honored ONLY when `customFormat="1"`. The spec is explicit: `<row>`'s
 // `s` is "only applied if the customFormat attribute is '1'". Writers routinely emit a bookkeeping
 // `s` on ordinary rows, so without this gate we would restyle cells the file never meant to format.
 function rowDefaultStyleFromToken(attrs: Readonly<Record<string, string>>): number | undefined {
-	if (attrs.customFormat !== "1" && attrs.customFormat !== "true") return undefined
-	if (attrs.s === undefined) return undefined
-	const s = Number(attrs.s)
-	return Number.isInteger(s) ? s : undefined
+	if (attrs.customFormat !== "1" && attrs.customFormat !== "true") return undefined;
+	if (attrs.s === undefined) return undefined;
+	const s = Number(attrs.s);
+	return Number.isInteger(s) ? s : undefined;
 }
 
 // Resolve the precedence above for one cell. A present-but-unparseable cell `s` still counts as
@@ -96,55 +96,55 @@ function effectiveStyle(
 	columns: readonly ColumnStyle[],
 ): number | undefined {
 	if (ownS !== undefined) {
-		const s = Number(ownS)
-		return Number.isInteger(s) ? s : undefined
+		const s = Number(ownS);
+		return Number.isInteger(s) ? s : undefined;
 	}
-	if (rowDefault !== undefined) return rowDefault
+	if (rowDefault !== undefined) return rowDefault;
 	if (col !== undefined) {
 		// First covering range wins. Ranges don't overlap in a valid file; first-match keeps
 		// resolution deterministic even if a malformed file declares a column twice.
-		const range = columns.find((c) => col >= c.min && col <= c.max)
-		if (range !== undefined) return range.style
+		const range = columns.find((c) => col >= c.min && col <= c.max);
+		if (range !== undefined) return range.style;
 	}
-	return undefined
+	return undefined;
 }
 
 interface RowAssembler {
 	/** Advance the state machine by one token; returns any rows that completed. */
-	push(token: XmlToken): Row[]
+	push(token: XmlToken): Row[];
 	/** Emit a row left open at end of input (truncated file). */
-	flush(): Row[]
+	flush(): Row[];
 }
 
 function createRowAssembler(ctx: DecodeContext): RowAssembler {
-	let inSheetData = false
-	let inRow = false
-	let lastRow = 0
-	let rowIndex = 0
-	let cells: Cell[] = []
-	let lastCol = 0
+	let inSheetData = false;
+	let inRow = false;
+	let lastRow = 0;
+	let rowIndex = 0;
+	let cells: Cell[] = [];
+	let lastCol = 0;
 
 	// Column defaults from `<cols>` (which precedes `<sheetData>`, so it is fully seen before any
 	// cell) and the current row's default (customFormat) — both feed effectiveStyle for cells
 	// that omit their own `s`. See the ColumnStyle/effectiveStyle notes above.
-	const columns: ColumnStyle[] = []
-	let rowDefault: number | undefined
+	const columns: ColumnStyle[] = [];
+	let rowDefault: number | undefined;
 
-	let inCell = false
-	let cellRef = ""
-	let cellType: string | undefined
-	let cellStyle: number | undefined // the `s` attribute (index into cellXfs)
-	let cellIsInline = false // type === 'inlineStr': value lives in <is>, not <v>
-	let cellValue = ""
-	let hasValue = false // the value channel's element was present (even if empty)
-	let inValue = false // inside <v>
-	let inInline = false // inside <is>
-	let textDepth = 0 // open <t> within <is>
-	let phoneticDepth = 0 // open <rPh>/<phoneticPr> within <is> (excluded from the value)
+	let inCell = false;
+	let cellRef = "";
+	let cellType: string | undefined;
+	let cellStyle: number | undefined; // the `s` attribute (index into cellXfs)
+	let cellIsInline = false; // type === 'inlineStr': value lives in <is>, not <v>
+	let cellValue = "";
+	let hasValue = false; // the value channel's element was present (even if empty)
+	let inValue = false; // inside <v>
+	let inInline = false; // inside <is>
+	let textDepth = 0; // open <t> within <is>
+	let phoneticDepth = 0; // open <rPh>/<phoneticPr> within <is> (excluded from the value)
 
 	// Finalize the open cell into the current row. A no-op when no cell is open.
 	const flushCell = () => {
-		if (!inCell) return
+		if (!inCell) return;
 		cells.push(
 			decodeCell(
 				{
@@ -155,88 +155,88 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				},
 				ctx,
 			),
-		)
-		inCell = false
-	}
+		);
+		inCell = false;
+	};
 
 	function push(token: XmlToken): Row[] {
-		const out: Row[] = []
+		const out: Row[] = [];
 
 		if (token.kind === "open") {
-			const name = localName(token.name)
+			const name = localName(token.name);
 
 			if (name === "sheetData") {
-				if (!token.selfClosing) inSheetData = true
-				return out
+				if (!token.selfClosing) inSheetData = true;
+				return out;
 			}
 			// `<col>` lives in `<cols>`, a sibling that precedes `<sheetData>` — capture its
 			// default style before the inSheetData guard below would skip it.
 			if (name === "col") {
-				const cs = columnStyleFromToken(token.attrs)
-				if (cs !== undefined) columns.push(cs)
-				return out
+				const cs = columnStyleFromToken(token.attrs);
+				if (cs !== undefined) columns.push(cs);
+				return out;
 			}
-			if (!inSheetData) return out
+			if (!inSheetData) return out;
 
 			if (name === "row") {
-				flushCell()
-				if (inRow) out.push({ index: rowIndex, cells })
-				const r = token.attrs.r
-				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
-				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
-				lastRow = rowIndex
+				flushCell();
+				if (inRow) out.push({ index: rowIndex, cells });
+				const r = token.attrs.r;
+				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
+				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
+				lastRow = rowIndex;
 				// A non-customFormat row overwrites this back to undefined — no stale carryover.
-				rowDefault = rowDefaultStyleFromToken(token.attrs)
-				cells = []
-				lastCol = 0
+				rowDefault = rowDefaultStyleFromToken(token.attrs);
+				cells = [];
+				lastCol = 0;
 				if (token.selfClosing) {
-					out.push({ index: rowIndex, cells })
-					inRow = false
+					out.push({ index: rowIndex, cells });
+					inRow = false;
 				} else {
-					inRow = true
+					inRow = true;
 				}
-				return out
+				return out;
 			}
-			if (!inRow) return out
+			if (!inRow) return out;
 
 			if (name === "c") {
-				flushCell()
-				const r = token.attrs.r
+				flushCell();
+				const r = token.attrs.r;
 				// The cell's column index, needed to resolve a `<col>` default style. Known even
 				// when `r` is absent (positional: one past the previous cell).
-				let col: number | undefined
+				let col: number | undefined;
 				if (r !== undefined) {
-					cellRef = r
-					col = safeColumn(r)
-					if (col !== undefined) lastCol = col
+					cellRef = r;
+					col = safeColumn(r);
+					if (col !== undefined) lastCol = col;
 				} else {
-					lastCol += 1
-					col = lastCol
-					cellRef = formatRef({ col: lastCol, row: rowIndex })
+					lastCol += 1;
+					col = lastCol;
+					cellRef = formatRef({ col: lastCol, row: rowIndex });
 				}
-				cellType = token.attrs.t
+				cellType = token.attrs.t;
 				// Effective style: cell `s` → row default → column default → style 0.
-				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns)
-				cellIsInline = cellType === "inlineStr"
-				cellValue = ""
-				hasValue = false
-				inValue = false
-				inInline = false
-				textDepth = 0
-				phoneticDepth = 0
+				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns);
+				cellIsInline = cellType === "inlineStr";
+				cellValue = "";
+				hasValue = false;
+				inValue = false;
+				inInline = false;
+				textDepth = 0;
+				phoneticDepth = 0;
 				if (token.selfClosing) {
 					cells.push(
 						decodeCell(
 							{ ref: cellRef, type: cellType, value: undefined, style: cellStyle },
 							ctx,
 						),
-					)
+					);
 				} else {
-					inCell = true
+					inCell = true;
 				}
-				return out
+				return out;
 			}
-			if (!inCell) return out
+			if (!inCell) return out;
 
 			// A cell's value lives in exactly one channel, picked by its type: inline strings
 			// in <is>/<t>, everything else in <v>. Gate on the type so a stray element from
@@ -245,72 +245,72 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 			// rather than collapsing to a blank cell.
 			if (cellIsInline) {
 				if (name === "is") {
-					hasValue = true
-					if (!token.selfClosing) inInline = true
+					hasValue = true;
+					if (!token.selfClosing) inInline = true;
 				} else if (name === "t") {
-					if (inInline && !token.selfClosing) textDepth++
+					if (inInline && !token.selfClosing) textDepth++;
 				} else if (name === "rPh" || name === "phoneticPr") {
-					if (inInline && !token.selfClosing) phoneticDepth++
+					if (inInline && !token.selfClosing) phoneticDepth++;
 				}
 			} else if (name === "v") {
-				hasValue = true
-				if (!token.selfClosing) inValue = true
+				hasValue = true;
+				if (!token.selfClosing) inValue = true;
 			}
-			return out
+			return out;
 		}
 
 		if (token.kind === "text") {
 			const collect = cellIsInline
 				? inInline && textDepth > 0 && phoneticDepth === 0
-				: inValue
+				: inValue;
 			if (inCell && collect) {
-				cellValue += token.value
-				hasValue = true
+				cellValue += token.value;
+				hasValue = true;
 			}
-			return out
+			return out;
 		}
 
 		// close
-		const name = localName(token.name)
+		const name = localName(token.name);
 		if (name === "sheetData") {
-			flushCell()
+			flushCell();
 			if (inRow) {
-				out.push({ index: rowIndex, cells })
-				inRow = false
+				out.push({ index: rowIndex, cells });
+				inRow = false;
 			}
-			inSheetData = false
-			return out
+			inSheetData = false;
+			return out;
 		}
 		if (name === "row") {
 			if (inRow) {
-				flushCell()
-				out.push({ index: rowIndex, cells })
-				inRow = false
+				flushCell();
+				out.push({ index: rowIndex, cells });
+				inRow = false;
 			}
-			return out
+			return out;
 		}
-		if (!inCell) return out
-		if (name === "c") flushCell()
-		else if (name === "v") inValue = false
-		else if (name === "is") inInline = false
+		if (!inCell) return out;
+		if (name === "c") flushCell();
+		else if (name === "v") inValue = false;
+		else if (name === "is") inInline = false;
 		else if (name === "t") {
-			if (textDepth > 0) textDepth--
+			if (textDepth > 0) textDepth--;
 		} else if (name === "rPh" || name === "phoneticPr") {
-			if (phoneticDepth > 0) phoneticDepth--
+			if (phoneticDepth > 0) phoneticDepth--;
 		}
-		return out
+		return out;
 	}
 
 	function flush(): Row[] {
-		flushCell()
+		flushCell();
 		if (inRow) {
-			inRow = false
-			return [{ index: rowIndex, cells }]
+			inRow = false;
+			return [{ index: rowIndex, cells }];
 		}
-		return []
+		return [];
 	}
 
-	return { push, flush }
+	return { push, flush };
 }
 
 /**
@@ -321,66 +321,66 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
  * an authorId that resolves to nothing, still yields text — the author is just omitted.
  */
 export function parseComments(xml: string): Comment[] {
-	const authors: string[] = []
-	const comments: Comment[] = []
-	let inAuthors = false
-	let authorText: string | undefined // non-undefined while inside an <author>
-	let current: { ref: string; authorId: number } | undefined // inside a <comment>
-	let inText = false // inside the current comment's <text>
-	let tDepth = 0 // open <t> within <text>
-	let text = ""
+	const authors: string[] = [];
+	const comments: Comment[] = [];
+	let inAuthors = false;
+	let authorText: string | undefined; // non-undefined while inside an <author>
+	let current: { ref: string; authorId: number } | undefined; // inside a <comment>
+	let inText = false; // inside the current comment's <text>
+	let tDepth = 0; // open <t> within <text>
+	let text = "";
 
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open") {
-			const name = localName(token.name)
+			const name = localName(token.name);
 			if (name === "authors") {
-				if (!token.selfClosing) inAuthors = true
+				if (!token.selfClosing) inAuthors = true;
 			} else if (name === "author" && inAuthors) {
-				if (token.selfClosing) authors.push("")
-				else authorText = ""
+				if (token.selfClosing) authors.push("");
+				else authorText = "";
 			} else if (name === "comment") {
-				const ref = token.attrs.ref
+				const ref = token.attrs.ref;
 				// A missing/empty/non-integer authorId is unresolved (-1) so the author is omitted,
 				// rather than falling through Number('')===0 to author 0 — don't fabricate an
 				// attribution the file never made.
-				const rawId = token.attrs.authorId
+				const rawId = token.attrs.authorId;
 				const authorId =
 					rawId !== undefined && rawId !== "" && Number.isInteger(Number(rawId))
 						? Number(rawId)
-						: -1
-				current = ref !== undefined && ref !== "" ? { ref, authorId } : undefined
-				text = ""
-				inText = false
-				tDepth = 0
+						: -1;
+				current = ref !== undefined && ref !== "" ? { ref, authorId } : undefined;
+				text = "";
+				inText = false;
+				tDepth = 0;
 			} else if (name === "text" && current !== undefined) {
-				if (!token.selfClosing) inText = true
+				if (!token.selfClosing) inText = true;
 			} else if (name === "t" && inText) {
-				if (!token.selfClosing) tDepth++
+				if (!token.selfClosing) tDepth++;
 			}
 		} else if (token.kind === "text") {
-			if (authorText !== undefined) authorText += token.value
-			else if (inText && tDepth > 0) text += token.value
+			if (authorText !== undefined) authorText += token.value;
+			else if (inText && tDepth > 0) text += token.value;
 		} else {
-			const name = localName(token.name)
-			if (name === "authors") inAuthors = false
+			const name = localName(token.name);
+			if (name === "authors") inAuthors = false;
 			else if (name === "author" && authorText !== undefined) {
-				authors.push(authorText)
-				authorText = undefined
+				authors.push(authorText);
+				authorText = undefined;
 			} else if (name === "t") {
-				if (tDepth > 0) tDepth--
-			} else if (name === "text") inText = false
+				if (tDepth > 0) tDepth--;
+			} else if (name === "text") inText = false;
 			else if (name === "comment" && current !== undefined) {
-				const author = authors[current.authorId]
+				const author = authors[current.authorId];
 				comments.push({
 					ref: current.ref,
 					...(author !== undefined && author !== "" ? { author } : {}),
 					text,
-				})
-				current = undefined
+				});
+				current = undefined;
 			}
 		}
 	}
-	return comments
+	return comments;
 }
 
 /**
@@ -391,11 +391,11 @@ export function parseComments(xml: string): Comment[] {
 export function parseDimension(xml: string): string | undefined {
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open" && localName(token.name) === "dimension") {
-			const ref = token.attrs.ref
-			if (ref !== undefined && ref !== "") return ref
+			const ref = token.attrs.ref;
+			if (ref !== undefined && ref !== "") return ref;
 		}
 	}
-	return undefined
+	return undefined;
 }
 
 /**
@@ -410,47 +410,47 @@ export function parseDimension(xml: string): string | undefined {
  * inherits a column/row style would read as a date via cell() but as "General" via numberFormat().
  */
 export function parseCellStyles(xml: string): Map<string, number> {
-	const styles = new Map<string, number>()
-	const columns: ColumnStyle[] = []
-	let rowDefault: number | undefined
-	let lastRow = 0
-	let rowIndex = 0
-	let lastCol = 0
+	const styles = new Map<string, number>();
+	const columns: ColumnStyle[] = [];
+	let rowDefault: number | undefined;
+	let lastRow = 0;
+	let rowIndex = 0;
+	let lastCol = 0;
 	for (const token of tokenize(xml)) {
-		if (token.kind !== "open") continue
-		const name = localName(token.name)
+		if (token.kind !== "open") continue;
+		const name = localName(token.name);
 		if (name === "col") {
-			const cs = columnStyleFromToken(token.attrs)
-			if (cs !== undefined) columns.push(cs)
-			continue
+			const cs = columnStyleFromToken(token.attrs);
+			if (cs !== undefined) columns.push(cs);
+			continue;
 		}
 		if (name === "row") {
-			const r = token.attrs.r
-			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
-			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
-			lastRow = rowIndex
-			rowDefault = rowDefaultStyleFromToken(token.attrs)
-			lastCol = 0
-			continue
+			const r = token.attrs.r;
+			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
+			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
+			lastRow = rowIndex;
+			rowDefault = rowDefaultStyleFromToken(token.attrs);
+			lastCol = 0;
+			continue;
 		}
-		if (name !== "c") continue
+		if (name !== "c") continue;
 		// Resolve the cell's ref and column with the same positional rule as the assembler.
-		const r = token.attrs.r
-		let ref: string
-		let col: number | undefined
+		const r = token.attrs.r;
+		let ref: string;
+		let col: number | undefined;
 		if (r !== undefined) {
-			ref = r
-			col = safeColumn(r)
-			if (col !== undefined) lastCol = col
+			ref = r;
+			col = safeColumn(r);
+			if (col !== undefined) lastCol = col;
 		} else {
-			lastCol += 1
-			col = lastCol
-			ref = formatRef({ col: lastCol, row: rowIndex })
+			lastCol += 1;
+			col = lastCol;
+			ref = formatRef({ col: lastCol, row: rowIndex });
 		}
-		const index = effectiveStyle(token.attrs.s, rowDefault, col, columns)
-		if (index !== undefined) styles.set(ref, index)
+		const index = effectiveStyle(token.attrs.s, rowDefault, col, columns);
+		if (index !== undefined) styles.set(ref, index);
 	}
-	return styles
+	return styles;
 }
 
 /**
@@ -461,97 +461,97 @@ export function parseCellStyles(xml: string): Map<string, number> {
  * `dataTable` formulas carry no reusable text and are skipped (a documented degradation).
  */
 export function parseFormulas(xml: string): Map<string, string> {
-	const formulas = new Map<string, string>()
-	const masters = new Map<string, { anchor: CellRef; text: string }>() // si → master
-	const deps: { ref: string; cell: CellRef; si: string }[] = [] // shared dependents to resolve
-	let inSheetData = false
-	let rowIndex = 0
-	let lastRow = 0
-	let lastCol = 0
-	let curRef: string | undefined
-	let curCell: CellRef | undefined
-	let inF = false
-	let fType: string | undefined
-	let fSi: string | undefined
-	let fText = ""
+	const formulas = new Map<string, string>();
+	const masters = new Map<string, { anchor: CellRef; text: string }>(); // si → master
+	const deps: { ref: string; cell: CellRef; si: string }[] = []; // shared dependents to resolve
+	let inSheetData = false;
+	let rowIndex = 0;
+	let lastRow = 0;
+	let lastCol = 0;
+	let curRef: string | undefined;
+	let curCell: CellRef | undefined;
+	let inF = false;
+	let fType: string | undefined;
+	let fSi: string | undefined;
+	let fText = "";
 
 	// Record a completed <f> for the current cell. Empty text ⟺ a shared dependent (its text lives
 	// on the master); non-empty text is a plain, array-master, or shared-master formula.
 	const finalize = (text: string): void => {
-		if (curRef === undefined) return
+		if (curRef === undefined) return;
 		if (fType === "shared") {
-			if (fSi === undefined) return
+			if (fSi === undefined) return;
 			if (text === "") {
-				if (curCell !== undefined) deps.push({ ref: curRef, cell: curCell, si: fSi })
+				if (curCell !== undefined) deps.push({ ref: curRef, cell: curCell, si: fSi });
 			} else {
 				// Register the master for translation ONLY when its text is within Excel's length
 				// ceiling. A hostile file with an over-long master would otherwise make the second pass
 				// O(dependents × masterLength) — file-size-quadratic; capping keeps each translation
 				// O(MAX_FORMULA_LEN). Over-long masters degrade (their dependents get no formula).
 				if (curCell !== undefined && text.length <= MAX_FORMULA_LEN) {
-					masters.set(fSi, { anchor: curCell, text })
+					masters.set(fSi, { anchor: curCell, text });
 				}
-				formulas.set(curRef, text) // the master's own formula is its text
+				formulas.set(curRef, text); // the master's own formula is its text
 			}
 		} else if (fType === "dataTable") {
 			// No reusable formula text — degrade to the cached value only.
 		} else if (text !== "") {
-			formulas.set(curRef, text) // plain or array-master formula, verbatim
+			formulas.set(curRef, text); // plain or array-master formula, verbatim
 		}
-	}
+	};
 
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open") {
-			const name = localName(token.name)
+			const name = localName(token.name);
 			// Only formulas INSIDE <sheetData> are cells. A stray <c><f> in an oleObjects /
 			// AlternateContent block (or anywhere else) must not fabricate a formula on a real cell —
 			// this mirrors the row assembler's own sheetData gate.
 			if (name === "sheetData") {
-				if (!token.selfClosing) inSheetData = true
-				continue
+				if (!token.selfClosing) inSheetData = true;
+				continue;
 			}
-			if (!inSheetData) continue
+			if (!inSheetData) continue;
 			if (name === "row") {
-				const r = token.attrs.r
-				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
-				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
-				lastRow = rowIndex
-				lastCol = 0
+				const r = token.attrs.r;
+				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
+				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
+				lastRow = rowIndex;
+				lastCol = 0;
 			} else if (name === "c") {
-				const r = token.attrs.r
+				const r = token.attrs.r;
 				if (r !== undefined) {
-					curRef = r
-					const col = safeColumn(r)
-					curCell = col !== undefined ? { col, row: rowIndex } : undefined
-					if (col !== undefined) lastCol = col
+					curRef = r;
+					const col = safeColumn(r);
+					curCell = col !== undefined ? { col, row: rowIndex } : undefined;
+					if (col !== undefined) lastCol = col;
 				} else {
-					lastCol += 1
-					curCell = { col: lastCol, row: rowIndex }
-					curRef = formatRef(curCell)
+					lastCol += 1;
+					curCell = { col: lastCol, row: rowIndex };
+					curRef = formatRef(curCell);
 				}
 			} else if (name === "f") {
-				fType = token.attrs.t
-				fSi = token.attrs.si
-				fText = ""
-				if (token.selfClosing) finalize("")
-				else inF = true
+				fType = token.attrs.t;
+				fSi = token.attrs.si;
+				fText = "";
+				if (token.selfClosing) finalize("");
+				else inF = true;
 			}
 		} else if (token.kind === "text") {
-			if (inF) fText += token.value
+			if (inF) fText += token.value;
 		} else {
-			const name = localName(token.name)
-			if (name === "sheetData") inSheetData = false
+			const name = localName(token.name);
+			if (name === "sheetData") inSheetData = false;
 			else if (inF && name === "f") {
-				finalize(fText)
-				inF = false
+				finalize(fText);
+				inF = false;
 			}
 		}
 	}
 
 	// Second pass: a dependent's formula is the master's text shifted by the dependent's offset.
 	for (const d of deps) {
-		const master = masters.get(d.si)
-		if (master === undefined) continue
+		const master = masters.get(d.si);
+		if (master === undefined) continue;
 		formulas.set(
 			d.ref,
 			translateFormula(
@@ -559,16 +559,16 @@ export function parseFormulas(xml: string): Map<string, string> {
 				d.cell.row - master.anchor.row,
 				d.cell.col - master.anchor.col,
 			),
-		)
+		);
 	}
-	return formulas
+	return formulas;
 }
 
 /** Read rows from a fully in-memory worksheet string. */
 export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
-	const assembler = createRowAssembler(ctx)
-	for (const token of tokenize(xml)) yield* assembler.push(token)
-	yield* assembler.flush()
+	const assembler = createRowAssembler(ctx);
+	for (const token of tokenize(xml)) yield* assembler.push(token);
+	yield* assembler.flush();
 }
 
 /**
@@ -578,14 +578,14 @@ export function* readRows(xml: string, ctx: DecodeContext): Generator<Row> {
  * the producer wrote them; a missing or empty `ref` is skipped.
  */
 export function parseMergedCells(xml: string): string[] {
-	const ranges: string[] = []
+	const ranges: string[] = [];
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open" && localName(token.name) === "mergeCell") {
-			const ref = token.attrs.ref
-			if (ref !== undefined && ref !== "") ranges.push(ref)
+			const ref = token.attrs.ref;
+			if (ref !== undefined && ref !== "") ranges.push(ref);
 		}
 	}
-	return ranges
+	return ranges;
 }
 
 /**
@@ -597,18 +597,18 @@ export function parseMergedCells(xml: string): string[] {
  * resolvable `r:id` simply has no `target`. A missing/empty `ref` is skipped.
  */
 export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): Hyperlink[] {
-	const links: Hyperlink[] = []
+	const links: Hyperlink[] = [];
 	for (const token of tokenize(xml)) {
-		if (token.kind !== "open" || localName(token.name) !== "hyperlink") continue
-		const ref = token.attrs.ref
-		if (ref === undefined || ref === "") continue
+		if (token.kind !== "open" || localName(token.name) !== "hyperlink") continue;
+		const ref = token.attrs.ref;
+		if (ref === undefined || ref === "") continue;
 
 		// Built immutably (Hyperlink is readonly): include only the attributes that are present.
-		const rid = relationshipId(token.attrs)
-		const target = rid !== undefined ? rels?.get(rid)?.target : undefined
-		const location = token.attrs.location
-		const tooltip = token.attrs.tooltip
-		const display = token.attrs.display
+		const rid = relationshipId(token.attrs);
+		const target = rid !== undefined ? rels?.get(rid)?.target : undefined;
+		const location = token.attrs.location;
+		const tooltip = token.attrs.tooltip;
+		const display = token.attrs.display;
 		links.push({
 			ref,
 			// An empty external target is no destination — gate it exactly like an empty location,
@@ -618,9 +618,9 @@ export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): 
 			...(location !== undefined && location !== "" ? { location } : {}),
 			...(tooltip !== undefined ? { tooltip } : {}),
 			...(display !== undefined ? { display } : {}),
-		})
+		});
 	}
-	return links
+	return links;
 }
 
 /**
@@ -633,19 +633,19 @@ export async function* streamRows(
 	chunks: AsyncIterable<Uint8Array>,
 	ctx: DecodeContext,
 ): AsyncGenerator<Row> {
-	const assembler = createRowAssembler(ctx)
-	const xml = createXmlStream()
-	const decoder = new TextDecoder()
+	const assembler = createRowAssembler(ctx);
+	const xml = createXmlStream();
+	const decoder = new TextDecoder();
 
 	for await (const bytes of chunks) {
-		const text = decoder.decode(bytes, { stream: true })
-		if (text === "") continue
-		for (const token of xml.push(text)) yield* assembler.push(token)
+		const text = decoder.decode(bytes, { stream: true });
+		if (text === "") continue;
+		for (const token of xml.push(text)) yield* assembler.push(token);
 	}
-	const tail = decoder.decode() // finalize any pending multi-byte sequence
-	if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token)
-	for (const token of xml.flush()) yield* assembler.push(token)
-	yield* assembler.flush()
+	const tail = decoder.decode(); // finalize any pending multi-byte sequence
+	if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token);
+	for (const token of xml.flush()) yield* assembler.push(token);
+	yield* assembler.flush();
 }
 
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
@@ -654,7 +654,7 @@ export async function* streamRows(
 // ceilings), so whatever they return, the writer accepts — the bridge can carry geometry without
 // ever crashing on a tolerated file.
 
-const boolFlag = (val: string | undefined): boolean => val === "1" || val === "true"
+const boolFlag = (val: string | undefined): boolean => val === "1" || val === "true";
 
 /**
  * Column width/visibility declarations from `<cols>`, in document order. Entries carrying only a
@@ -663,27 +663,27 @@ const boolFlag = (val: string | undefined): boolean => val === "1" || val === "t
  * degrade to absent.
  */
 export function parseColumnProps(xml: string): ColumnProps[] {
-	const out: ColumnProps[] = []
+	const out: ColumnProps[] = [];
 	for (const token of tokenize(xml)) {
-		if (token.kind !== "open") continue
-		const name = localName(token.name)
+		if (token.kind !== "open") continue;
+		const name = localName(token.name);
 		// <cols> always precedes <sheetData>; a col-named element after it (extension lists,
 		// alternate content) is not column geometry — stop scanning at the cell region.
-		if (name === "sheetData") break
-		if (name !== "col") continue
-		const min = Number(token.attrs.min)
-		const max = Number(token.attrs.max)
-		if (!Number.isInteger(min) || !Number.isInteger(max)) continue
-		if (min < 1 || max < min || max > MAX_COL) continue
-		const props: { min: number; max: number; width?: number; hidden?: boolean } = { min, max }
+		if (name === "sheetData") break;
+		if (name !== "col") continue;
+		const min = Number(token.attrs.min);
+		const max = Number(token.attrs.max);
+		if (!Number.isInteger(min) || !Number.isInteger(max)) continue;
+		if (min < 1 || max < min || max > MAX_COL) continue;
+		const props: { min: number; max: number; width?: number; hidden?: boolean } = { min, max };
 		if (token.attrs.width !== undefined) {
-			const width = Number(token.attrs.width)
-			if (Number.isFinite(width) && width > 0 && width <= MAX_COL_WIDTH) props.width = width
+			const width = Number(token.attrs.width);
+			if (Number.isFinite(width) && width > 0 && width <= MAX_COL_WIDTH) props.width = width;
 		}
-		if (boolFlag(token.attrs.hidden)) props.hidden = true
-		if (props.width !== undefined || props.hidden) out.push(props)
+		if (boolFlag(token.attrs.hidden)) props.hidden = true;
+		if (props.width !== undefined || props.hidden) out.push(props);
 	}
-	return out
+	return out;
 }
 
 /**
@@ -692,41 +692,41 @@ export function parseColumnProps(xml: string): ColumnProps[] {
  * assembler). Rows with neither property are absent; heights outside (0, 409.5] degrade.
  */
 export function parseRowProperties(xml: string): Map<number, RowProps> {
-	const out = new Map<number, RowProps>()
-	let lastRow = 0
-	let inSheetData = false
+	const out = new Map<number, RowProps>();
+	let lastRow = 0;
+	let inSheetData = false;
 	for (const token of tokenize(xml)) {
-		if (token.kind === "text") continue
-		const name = localName(token.name)
+		if (token.kind === "text") continue;
+		const name = localName(token.name);
 		if (token.kind === "close") {
-			if (name === "sheetData") inSheetData = false
-			continue
+			if (name === "sheetData") inSheetData = false;
+			continue;
 		}
 		if (name === "sheetData") {
-			if (!token.selfClosing) inSheetData = true
-			continue
+			if (!token.selfClosing) inSheetData = true;
+			continue;
 		}
-		if (!inSheetData || name !== "row") continue
+		if (!inSheetData || name !== "row") continue;
 		// Resolve the row index with the EXACT rule the row assembler uses (parseInt, positional
 		// fallback) — Number() disagrees with parseInt on tolerated-malformed values ("1e3",
 		// "3abc"), which would attach a height to a different row than its cells and cascade the
 		// positional counter for every r-less row after it (adversarial review, F4.5).
-		const rAttr = token.attrs.r
-		const parsed = rAttr !== undefined ? Number.parseInt(rAttr, 10) : Number.NaN
-		const rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
-		lastRow = rowIndex
-		if (rowIndex > MAX_ROW) continue
-		const props: { height?: number; hidden?: boolean } = {}
+		const rAttr = token.attrs.r;
+		const parsed = rAttr !== undefined ? Number.parseInt(rAttr, 10) : Number.NaN;
+		const rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
+		lastRow = rowIndex;
+		if (rowIndex > MAX_ROW) continue;
+		const props: { height?: number; hidden?: boolean } = {};
 		if (token.attrs.ht !== undefined) {
-			const height = Number(token.attrs.ht)
+			const height = Number(token.attrs.ht);
 			if (Number.isFinite(height) && height > 0 && height <= MAX_ROW_HEIGHT) {
-				props.height = height
+				props.height = height;
 			}
 		}
-		if (boolFlag(token.attrs.hidden)) props.hidden = true
-		if (props.height !== undefined || props.hidden) out.set(rowIndex, props)
+		if (boolFlag(token.attrs.hidden)) props.hidden = true;
+		if (props.height !== undefined || props.hidden) out.set(rowIndex, props);
 	}
-	return out
+	return out;
 }
 
 /**
@@ -740,28 +740,28 @@ export function parseRowProperties(xml: string): Map<number, RowProps> {
  * active view doesn't have (adversarial review, F4.5).
  */
 export function parseFreezePane(xml: string): FreezePane | undefined {
-	let inSheetViews = false
+	let inSheetViews = false;
 	for (const token of tokenize(xml)) {
-		if (token.kind === "text") continue
-		const name = localName(token.name)
+		if (token.kind === "text") continue;
+		const name = localName(token.name);
 		if (name === "sheetViews") {
 			// The block closed (or was empty) without a pane: nothing is frozen. sheetViews
 			// precedes sheetData, so stopping here also skips the whole cell region.
-			if (token.kind === "close" || token.selfClosing) return undefined
-			inSheetViews = true
-			continue
+			if (token.kind === "close" || token.selfClosing) return undefined;
+			inSheetViews = true;
+			continue;
 		}
-		if (!inSheetViews || token.kind !== "open" || name !== "pane") continue
-		if (token.attrs.state !== "frozen") return undefined
-		const x = token.attrs.xSplit === undefined ? 0 : Number(token.attrs.xSplit)
-		const y = token.attrs.ySplit === undefined ? 0 : Number(token.attrs.ySplit)
-		const cols = Number.isInteger(x) && x > 0 && x < MAX_COL ? x : 0
-		const rows = Number.isInteger(y) && y > 0 && y < MAX_ROW ? y : 0
-		if (cols === 0 && rows === 0) return undefined
-		const out: { rows?: number; cols?: number } = {}
-		if (rows > 0) out.rows = rows
-		if (cols > 0) out.cols = cols
-		return out
+		if (!inSheetViews || token.kind !== "open" || name !== "pane") continue;
+		if (token.attrs.state !== "frozen") return undefined;
+		const x = token.attrs.xSplit === undefined ? 0 : Number(token.attrs.xSplit);
+		const y = token.attrs.ySplit === undefined ? 0 : Number(token.attrs.ySplit);
+		const cols = Number.isInteger(x) && x > 0 && x < MAX_COL ? x : 0;
+		const rows = Number.isInteger(y) && y > 0 && y < MAX_ROW ? y : 0;
+		if (cols === 0 && rows === 0) return undefined;
+		const out: { rows?: number; cols?: number } = {};
+		if (rows > 0) out.rows = rows;
+		if (cols > 0) out.cols = cols;
+		return out;
 	}
-	return undefined
+	return undefined;
 }

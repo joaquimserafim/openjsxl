@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { parseWorkbook } from "../workbook"
+import { describe, expect, it } from "vitest";
+import { parseWorkbook } from "../workbook";
 
 describe("parseWorkbook", () => {
 	it("lists sheets in order with name, r:id, and visibility", () => {
@@ -8,12 +8,12 @@ describe("parseWorkbook", () => {
 		<sheet name="First" sheetId="1" r:id="rId1"/>
 		<sheet name="Second" sheetId="2" r:id="rId2"/>
 	</sheets>
-</workbook>`
+</workbook>`;
 		expect(parseWorkbook(xml).sheets).toEqual([
 			{ name: "First", rid: "rId1", visible: true, state: "visible" },
 			{ name: "Second", rid: "rId2", visible: true, state: "visible" },
-		])
-	})
+		]);
+	});
 
 	it("marks hidden and very-hidden sheets not visible, with their state (F4.6)", () => {
 		const xml =
@@ -21,43 +21,43 @@ describe("parseWorkbook", () => {
 			'<sheet name="A" r:id="rId1" state="visible"/>' +
 			'<sheet name="B" r:id="rId2" state="hidden"/>' +
 			'<sheet name="C" r:id="rId3" state="veryHidden"/>' +
-			"</sheets></workbook>"
-		expect(parseWorkbook(xml).sheets.map((s) => s.visible)).toEqual([true, false, false])
+			"</sheets></workbook>";
+		expect(parseWorkbook(xml).sheets.map((s) => s.visible)).toEqual([true, false, false]);
 		expect(parseWorkbook(xml).sheets.map((s) => s.state)).toEqual([
 			"visible",
 			"hidden",
 			"veryHidden",
-		])
-	})
+		]);
+	});
 
 	it("reads an unrecognized state as visible (the spec default)", () => {
 		const xml =
-			'<workbook><sheets><sheet name="A" r:id="rId1" state="banana"/></sheets></workbook>'
-		expect(parseWorkbook(xml).sheets[0]?.state).toBe("visible")
-		expect(parseWorkbook(xml).sheets[0]?.visible).toBe(true)
-	})
+			'<workbook><sheets><sheet name="A" r:id="rId1" state="banana"/></sheets></workbook>';
+		expect(parseWorkbook(xml).sheets[0]?.state).toBe("visible");
+		expect(parseWorkbook(xml).sheets[0]?.visible).toBe(true);
+	});
 
 	it("finds the relationship id under any namespace prefix", () => {
-		const xml = '<workbook><sheets><sheet name="A" x:id="rId7"/></sheets></workbook>'
-		expect(parseWorkbook(xml).sheets[0]?.rid).toBe("rId7")
-	})
+		const xml = '<workbook><sheets><sheet name="A" x:id="rId7"/></sheets></workbook>';
+		expect(parseWorkbook(xml).sheets[0]?.rid).toBe("rId7");
+	});
 
 	it("skips sheets missing a name or relationship id", () => {
 		const xml =
-			'<workbook><sheets><sheet name="A"/><sheet r:id="rId2"/><sheet name="C" r:id="rId3"/></sheets></workbook>'
-		expect(parseWorkbook(xml).sheets.map((s) => s.name)).toEqual(["C"])
-	})
+			'<workbook><sheets><sheet name="A"/><sheet r:id="rId2"/><sheet name="C" r:id="rId3"/></sheets></workbook>';
+		expect(parseWorkbook(xml).sheets.map((s) => s.name)).toEqual(["C"]);
+	});
 
 	it("reads the date1904 flag from <workbookPr>, defaulting to false", () => {
-		expect(parseWorkbook("<workbook><sheets/></workbook>").date1904).toBe(false)
+		expect(parseWorkbook("<workbook><sheets/></workbook>").date1904).toBe(false);
 		expect(
 			parseWorkbook('<workbook><workbookPr date1904="1"/><sheets/></workbook>').date1904,
-		).toBe(true)
+		).toBe(true);
 		expect(
 			parseWorkbook('<workbook><workbookPr date1904="true"/><sheets/></workbook>').date1904,
-		).toBe(true)
+		).toBe(true);
 		expect(
 			parseWorkbook('<workbook><workbookPr date1904="0"/><sheets/></workbook>').date1904,
-		).toBe(false)
-	})
-})
+		).toBe(false);
+	});
+});

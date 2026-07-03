@@ -10,11 +10,11 @@
 // and note it in ../THIRD_PARTY.md. Gathering fixtures that exercise each feature end-to-end is
 // a great first contribution.
 
-import { createHash } from "node:crypto"
-import { writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 
-const CALAMINE = "https://raw.githubusercontent.com/tafia/calamine/master/tests"
-const CALAMINE_MIT = "MIT — Copyright (c) 2016 Johann Tuffe (tafia/calamine)"
+const CALAMINE = "https://raw.githubusercontent.com/tafia/calamine/master/tests";
+const CALAMINE_MIT = "MIT — Copyright (c) 2016 Johann Tuffe (tafia/calamine)";
 
 /** @type {{ file: string, url: string, license: string, sha256: string }[]} */
 const manifest = [
@@ -66,29 +66,29 @@ const manifest = [
 		license: CALAMINE_MIT,
 		sha256: "fba48e0141f847d80738a4417f0a336cba92e4ac692d8dd7516eac41e32c9e4f",
 	},
-]
+];
 
-const dataDir = new URL("../data/", import.meta.url)
-let failures = 0
+const dataDir = new URL("../data/", import.meta.url);
+let failures = 0;
 
 for (const { file, url, sha256 } of manifest) {
 	try {
-		const res = await fetch(url)
-		if (!res.ok) throw new Error(`HTTP ${res.status}`)
-		const bytes = new Uint8Array(await res.arrayBuffer())
-		const got = createHash("sha256").update(bytes).digest("hex")
-		if (got !== sha256) throw new Error(`sha256 mismatch: expected ${sha256}, got ${got}`)
-		await writeFile(new URL(file, dataDir), bytes)
-		console.log(`ok   ${file} (${bytes.length} bytes)`)
+		const res = await fetch(url);
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const bytes = new Uint8Array(await res.arrayBuffer());
+		const got = createHash("sha256").update(bytes).digest("hex");
+		if (got !== sha256) throw new Error(`sha256 mismatch: expected ${sha256}, got ${got}`);
+		await writeFile(new URL(file, dataDir), bytes);
+		console.log(`ok   ${file} (${bytes.length} bytes)`);
 	} catch (err) {
-		failures++
-		console.error(`FAIL ${file}: ${err instanceof Error ? err.message : err}`)
+		failures++;
+		console.error(`FAIL ${file}: ${err instanceof Error ? err.message : err}`);
 	}
 }
 
 if (failures > 0) {
-	console.error(`\n${failures} fixture(s) failed to fetch/verify.`)
-	process.exitCode = 1
+	console.error(`\n${failures} fixture(s) failed to fetch/verify.`);
+	process.exitCode = 1;
 } else {
-	console.log(`\n${manifest.length} real-producer fixtures verified.`)
+	console.log(`\n${manifest.length} real-producer fixtures verified.`);
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { MAX_FORMULA_LEN, translateFormula } from "../formula"
+import { describe, expect, it } from "vitest";
+import { MAX_FORMULA_LEN, translateFormula } from "../formula";
 
 // F5.4 — the shared-formula translator. The vectors below are openpyxl's own Translator output
 // (openpyxl.formula.translate.Translator) for a master formula shifted by (Δrow, Δcol); matching
@@ -42,33 +42,33 @@ const VECTORS: [string, number, number, string][] = [
 	["A5:A", 0, 1, "B5:A"], // mixed: only the full-ref side shifts
 	["A:A10", 0, 1, "A:B10"],
 	["COUNTIF(B:B,A1)", 4, 2, "COUNTIF(D:D,C5)"],
-]
+];
 
 describe("translateFormula — matches openpyxl's Translator", () => {
 	it("reproduces every reference vector", () => {
 		for (const [formula, dRow, dCol, expected] of VECTORS) {
-			expect(translateFormula(formula, dRow, dCol), formula).toBe(expected)
+			expect(translateFormula(formula, dRow, dCol), formula).toBe(expected);
 		}
-	})
+	});
 
 	it("is the identity for a zero offset (the master cell itself)", () => {
-		expect(translateFormula("A1+$B$2*Sheet1!C3", 0, 0)).toBe("A1+$B$2*Sheet1!C3")
-	})
+		expect(translateFormula("A1+$B$2*Sheet1!C3", 0, 0)).toBe("A1+$B$2*Sheet1!C3");
+	});
 
 	it("rewrites a reference shifted off the grid to #REF! (Excel behavior; openpyxl throws)", () => {
-		expect(translateFormula("A1", -1, 0)).toBe("#REF!") // row 0
-		expect(translateFormula("A1", 0, -1)).toBe("#REF!") // column 0
-		expect(translateFormula("B2*2", -5, 0)).toBe("#REF!*2") // only the off-grid ref becomes #REF!
-	})
+		expect(translateFormula("A1", -1, 0)).toBe("#REF!"); // row 0
+		expect(translateFormula("A1", 0, -1)).toBe("#REF!"); // column 0
+		expect(translateFormula("B2*2", -5, 0)).toBe("#REF!*2"); // only the off-grid ref becomes #REF!
+	});
 
 	it("does not shift things that only look like references", () => {
 		// A lowercase name (stored refs are uppercase), a function name, and a string are left alone.
-		expect(translateFormula('myRange+SUM(A1)&"B7"', 1, 0)).toBe('myRange+SUM(A2)&"B7"')
+		expect(translateFormula('myRange+SUM(A1)&"B7"', 1, 0)).toBe('myRange+SUM(A2)&"B7"');
 		// A pseudo-column past XFD (ZZZ = 18278 > 16384) is not an addressable cell — leave verbatim.
-		expect(translateFormula("ZZZ1+A1", 1, 0)).toBe("ZZZ1+A2")
-	})
+		expect(translateFormula("ZZZ1+A1", 1, 0)).toBe("ZZZ1+A2");
+	});
 
 	it("exposes Excel's formula length ceiling", () => {
-		expect(MAX_FORMULA_LEN).toBe(8192)
-	})
-})
+		expect(MAX_FORMULA_LEN).toBe(8192);
+	});
+});

@@ -6,7 +6,7 @@
 // numeric character references for anything else — the bytes go out as UTF-8.
 
 export function escapeText(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function escapeAttr(s: string): string {
@@ -19,22 +19,22 @@ export function escapeAttr(s: string): string {
 		.replace(/"/g, "&quot;")
 		.replace(/\t/g, "&#9;")
 		.replace(/\n/g, "&#10;")
-		.replace(/\r/g, "&#13;")
+		.replace(/\r/g, "&#13;");
 }
 
 // XML safety lives in utils (shared with the reader's style model, which degrades unsafe
 // producer strings so the bridge only ever carries writable values). Re-exported here so the
 // writer keeps one import site for its serialization helpers.
-export { isXmlSafe } from "../utils"
+export { isXmlSafe } from "../utils";
 
 // A string whose meaningful leading/trailing whitespace would be stripped by an XML reader needs
 // `xml:space="preserve"` on its element, or Excel drops those spaces on load. We flag it whenever
 // trimming would change the string (covers leading/trailing spaces, tabs, and newlines).
 export function needsPreserve(s: string): boolean {
-	return s !== s.trim()
+	return s !== s.trim();
 }
 
 /** The ` xml:space="preserve"` attribute (with leading space) when `s` needs it, else `''`. */
 export function preserveAttr(s: string): string {
-	return needsPreserve(s) ? ' xml:space="preserve"' : ""
+	return needsPreserve(s) ? ' xml:space="preserve"' : "";
 }

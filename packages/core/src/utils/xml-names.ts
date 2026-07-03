@@ -5,8 +5,8 @@
 // resolution), so consumers that only care about the local name normalise here. Excel
 // almost always uses the default (unprefixed) namespace, but other producers may not.
 export function localName(name: string): string {
-	const colon = name.indexOf(":")
-	return colon === -1 ? name : name.slice(colon + 1)
+	const colon = name.indexOf(":");
+	return colon === -1 ? name : name.slice(colon + 1);
 }
 
 // The relationship id on an element is conventionally `r:id`, but the `r` prefix is only
@@ -19,9 +19,9 @@ export function localName(name: string): string {
 // relationship id, so the fallback cannot mis-match. Reusing it on an element that may carry a
 // foreign `*:id` attribute would need revisiting.
 export function relationshipId(attrs: Readonly<Record<string, string>>): string | undefined {
-	if (attrs["r:id"] !== undefined) return attrs["r:id"]
+	if (attrs["r:id"] !== undefined) return attrs["r:id"];
 	for (const key of Object.keys(attrs)) {
-		if (localName(key) === "id") return attrs[key]
+		if (localName(key) === "id") return attrs[key];
 	}
-	return undefined
+	return undefined;
 }

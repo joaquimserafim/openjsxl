@@ -7,13 +7,13 @@
 // 1900-03-01 onward correct — the convention every major library follows.
 // 1904 system (legacy Mac): serial 0 is 1904-01-01.
 
-const MS_PER_DAY = 86_400_000
-const EPOCH_1900_UTC = Date.UTC(1899, 11, 30)
-const EPOCH_1904_UTC = Date.UTC(1904, 0, 1)
+const MS_PER_DAY = 86_400_000;
+const EPOCH_1900_UTC = Date.UTC(1899, 11, 30);
+const EPOCH_1904_UTC = Date.UTC(1904, 0, 1);
 
 export function serialToDate(serial: number, date1904 = false): Date {
-	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC
-	return new Date(epoch + Math.round(serial * MS_PER_DAY))
+	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC;
+	return new Date(epoch + Math.round(serial * MS_PER_DAY));
 }
 
 // The exact inverse of serialToDate, for the writer: a JS Date → the Excel serial number that
@@ -24,6 +24,6 @@ export function serialToDate(serial: number, date1904 = false): Date {
 // time-of-day component, exactly as Excel stores it. Returns NaN for an invalid Date (getTime NaN);
 // the writer rejects that before emitting.
 export function dateToSerial(date: Date, date1904 = false): number {
-	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC
-	return (date.getTime() - epoch) / MS_PER_DAY
+	const epoch = date1904 ? EPOCH_1904_UTC : EPOCH_1900_UTC;
+	return (date.getTime() - epoch) / MS_PER_DAY;
 }

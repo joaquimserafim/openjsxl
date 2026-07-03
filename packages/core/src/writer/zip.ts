@@ -1,6 +1,6 @@
-import { XlsxError } from "../errors"
-import { crc32 } from "./crc32"
-import { deflateRaw } from "./deflate"
+import { XlsxError } from "../errors";
+import { crc32 } from "./crc32";
+import { deflateRaw } from "./deflate";
 
 // Write the OPC/ZIP container that wraps every .xlsx — the mirror image of zip/central-directory.ts.
 // Given a list of named byte-parts, emit an archive whose bytes re-read byte-identically through
@@ -24,48 +24,48 @@ import { deflateRaw } from "./deflate"
 //
 // This layer knows nothing about worksheets; it just packs named parts. The OOXML wiring is F3.2.
 
-const encoder = new TextEncoder()
+const encoder = new TextEncoder();
 
-const SIG_LOCAL = 0x04034b50
-const SIG_CENTRAL = 0x02014b50
-const SIG_EOCD = 0x06054b50
+const SIG_LOCAL = 0x04034b50;
+const SIG_CENTRAL = 0x02014b50;
+const SIG_EOCD = 0x06054b50;
 
-const METHOD_STORE = 0
-const METHOD_DEFLATE = 8
+const METHOD_STORE = 0;
+const METHOD_DEFLATE = 8;
 // Version 2.0 — the ZIP spec level that introduced DEFLATE. Used for "version needed to extract"
 // (and "version made by") on every entry, whether stored or deflated, to keep the layout uniform.
-const VERSION = 20
+const VERSION = 20;
 
 // u32 size/offset fields must stay strictly below the ZIP64 sentinel; the u16 entry count strictly
 // below its own. Hitting either forces ZIP64, which we don't emit.
-const U32_CEILING = 0xffffffff
-const MAX_ENTRIES = 0xffff
+const U32_CEILING = 0xffffffff;
+const MAX_ENTRIES = 0xffff;
 
 // Fixed DOS date (1980-01-01) and time (00:00) for deterministic output — mirrors the fixtures
 // builder so both produce reproducible archives.
-const DOS_TIME = 0
-const DOS_DATE = 0x0021
+const DOS_TIME = 0;
+const DOS_DATE = 0x0021;
 
-const u16 = (n: number): Uint8Array => Uint8Array.from([n & 0xff, (n >>> 8) & 0xff])
+const u16 = (n: number): Uint8Array => Uint8Array.from([n & 0xff, (n >>> 8) & 0xff]);
 const u32 = (n: number): Uint8Array =>
-	Uint8Array.from([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff])
+	Uint8Array.from([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]);
 
 function concat(parts: Uint8Array[]): Uint8Array {
-	let total = 0
-	for (const part of parts) total += part.length
-	const out = new Uint8Array(total)
-	let offset = 0
+	let total = 0;
+	for (const part of parts) total += part.length;
+	const out = new Uint8Array(total);
+	let offset = 0;
 	for (const part of parts) {
-		out.set(part, offset)
-		offset += part.length
+		out.set(part, offset);
+		offset += part.length;
 	}
-	return out
+	return out;
 }
 
 /** One part to pack: an OPC path (e.g. `xl/workbook.xml`) and its uncompressed bytes. */
 export interface ZipInput {
-	readonly name: string
-	readonly data: Uint8Array
+	readonly name: string;
+	readonly data: Uint8Array;
 }
 
 /**
@@ -83,25 +83,25 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 		throw new XlsxError(
 			"unsupported",
 			`too many zip entries (${entries.length}); would require ZIP64, which is not supported`,
-		)
+		);
 	}
 
-	const seen = new Set<string>()
-	const local: Uint8Array[] = []
-	const central: Uint8Array[] = []
-	let offset = 0
+	const seen = new Set<string>();
+	const local: Uint8Array[] = [];
+	const central: Uint8Array[] = [];
+	let offset = 0;
 
 	for (const entry of entries) {
 		// A name ending in `/` is a ZIP directory placeholder: the reader skips it (line 108 of
 		// central-directory.ts) so it never enters the entries map. Writing a real part under such
 		// a name would emit bytes that vanish on read — refuse it rather than break the round-trip.
 		if (entry.name.endsWith("/")) {
-			throw new Error(`invalid zip entry name (directory placeholder): ${entry.name}`)
+			throw new Error(`invalid zip entry name (directory placeholder): ${entry.name}`);
 		}
-		if (seen.has(entry.name)) throw new Error(`duplicate zip entry name: ${entry.name}`)
-		seen.add(entry.name)
+		if (seen.has(entry.name)) throw new Error(`duplicate zip entry name: ${entry.name}`);
+		seen.add(entry.name);
 
-		const name = encoder.encode(entry.name)
+		const name = encoder.encode(entry.name);
 		// The name-length header field is a u16 with no ZIP64 escape. A name whose UTF-8 encoding
 		// exceeds 65535 bytes would be silently truncated by u16() while the full name bytes are
 		// still appended, desyncing the reader's payload offset (header+30+nameLen+extraLen) and
@@ -110,18 +110,18 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 			throw new XlsxError(
 				"unsupported",
 				`zip entry name too long (${name.length} bytes); exceeds the classic-ZIP name-length field`,
-			)
+			);
 		}
-		const data = entry.data
-		const crc = crc32(data)
-		const uncompressedSize = data.length
+		const data = entry.data;
+		const crc = crc32(data);
+		const uncompressedSize = data.length;
 
 		// Compress, but keep it only when it's a strict win — otherwise store the raw bytes.
-		const deflated = await deflateRaw(data)
-		const useDeflate = deflated.length < data.length
-		const method = useDeflate ? METHOD_DEFLATE : METHOD_STORE
-		const payload = useDeflate ? deflated : data
-		const compressedSize = payload.length
+		const deflated = await deflateRaw(data);
+		const useDeflate = deflated.length < data.length;
+		const method = useDeflate ? METHOD_DEFLATE : METHOD_STORE;
+		const payload = useDeflate ? deflated : data;
+		const compressedSize = payload.length;
 
 		if (
 			uncompressedSize >= U32_CEILING ||
@@ -131,7 +131,7 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 			throw new XlsxError(
 				"unsupported",
 				`zip entry ${entry.name} too large for a classic (ZIP64-free) archive`,
-			)
+			);
 		}
 
 		const header = concat([
@@ -147,8 +147,8 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 			u16(name.length),
 			u16(0), // extra field length
 			name,
-		])
-		local.push(header, payload)
+		]);
+		local.push(header, payload);
 
 		central.push(
 			concat([
@@ -171,19 +171,19 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 				u32(offset), // relative offset of the local header
 				name,
 			]),
-		)
+		);
 
-		offset += header.length + payload.length
+		offset += header.length + payload.length;
 	}
 
-	const directory = concat(central)
+	const directory = concat(central);
 	// After the loop, `offset` is the total size of all local blocks — i.e. where the central
 	// directory begins. Guard it and the directory size against the same u32 ceiling.
 	if (offset >= U32_CEILING || directory.length >= U32_CEILING) {
 		throw new XlsxError(
 			"unsupported",
 			"zip archive too large for a classic (ZIP64-free) archive",
-		)
+		);
 	}
 
 	const eocd = concat([
@@ -195,7 +195,7 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 		u32(directory.length), // size of the central directory
 		u32(offset), // offset of the central directory from the start of the archive
 		u16(0), // comment length
-	])
+	]);
 
-	return concat([...local, directory, eocd])
+	return concat([...local, directory, eocd]);
 }

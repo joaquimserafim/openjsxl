@@ -12,29 +12,29 @@ export async function inflateRaw(
 ): Promise<Uint8Array> {
 	// The Blob accepts our bytes at runtime; the cast sidesteps a TS lib / @types/node
 	// disagreement over whether the backing buffer is an ArrayBuffer or SharedArrayBuffer.
-	const blob = new Blob([data as BlobPart])
-	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader()
+	const blob = new Blob([data as BlobPart]);
+	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
 
-	const chunks: Uint8Array[] = []
-	let total = 0
+	const chunks: Uint8Array[] = [];
+	let total = 0;
 	for (;;) {
-		const { done, value } = await reader.read()
-		if (done) break
-		total += value.byteLength
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
 		if (total > maxBytes) {
-			await reader.cancel()
-			throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`)
+			await reader.cancel();
+			throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`);
 		}
-		chunks.push(value)
+		chunks.push(value);
 	}
 
-	const out = new Uint8Array(total)
-	let offset = 0
+	const out = new Uint8Array(total);
+	let offset = 0;
 	for (const chunk of chunks) {
-		out.set(chunk, offset)
-		offset += chunk.byteLength
+		out.set(chunk, offset);
+		offset += chunk.byteLength;
 	}
-	return out
+	return out;
 }
 
 // Streaming variant: yield decompressed chunks instead of one buffer, so a large part can be
@@ -44,21 +44,21 @@ export async function* inflateRawStream(
 	data: Uint8Array,
 	maxBytes = Number.POSITIVE_INFINITY,
 ): AsyncGenerator<Uint8Array> {
-	const blob = new Blob([data as BlobPart])
-	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader()
+	const blob = new Blob([data as BlobPart]);
+	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
 
-	let total = 0
+	let total = 0;
 	try {
 		for (;;) {
-			const { done, value } = await reader.read()
-			if (done) break
-			total += value.byteLength
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
 			if (total > maxBytes) {
-				throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`)
+				throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`);
 			}
-			yield value
+			yield value;
 		}
 	} finally {
-		await reader.cancel().catch(() => {})
+		await reader.cancel().catch(() => {});
 	}
 }

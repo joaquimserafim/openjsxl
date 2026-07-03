@@ -1,4 +1,4 @@
-import { XlsxError } from "../errors"
+import { XlsxError } from "../errors";
 import {
 	type DecodeContext,
 	parseRels,
@@ -11,7 +11,7 @@ import {
 	resolveTarget,
 	type StyleTable,
 	type ThemeColors,
-} from "../ooxml"
+} from "../ooxml";
 import type {
 	Cell,
 	CellStyle,
@@ -23,8 +23,8 @@ import type {
 	RowProps,
 	SheetInfo,
 	SheetState,
-} from "../types"
-import { openZip, type ZipArchive } from "../zip"
+} from "../types";
+import { openZip, type ZipArchive } from "../zip";
 import {
 	parseCellStyles,
 	parseColumnProps,
@@ -38,7 +38,7 @@ import {
 	type Row,
 	readRows,
 	streamRows,
-} from "./worksheet"
+} from "./worksheet";
 
 // The reader's public entry point. `openXlsx` follows the OPC relationship graph — never
 // guessed filenames — from the package root to the workbook, then to each worksheet and the
@@ -47,56 +47,56 @@ import {
 // Worksheet XML is decompressed up front (so cell access is synchronous) but only parsed
 // into cells on first use; a sheet you never touch costs a decompression, not a parse.
 
-const decoder = new TextDecoder()
+const decoder = new TextDecoder();
 
 // Relationship type URIs end in these segments; matching the suffix avoids hard-coding the
 // 2006 namespace and tolerates the strict/transitional variants.
-const REL_OFFICE_DOCUMENT = "/officeDocument"
-const REL_SHARED_STRINGS = "/sharedStrings"
-const REL_STYLES = "/styles"
-const REL_COMMENTS = "/comments"
-const REL_THEME = "/theme"
+const REL_OFFICE_DOCUMENT = "/officeDocument";
+const REL_SHARED_STRINGS = "/sharedStrings";
+const REL_STYLES = "/styles";
+const REL_COMMENTS = "/comments";
+const REL_THEME = "/theme";
 
 function directoryOf(path: string): string {
-	const slash = path.lastIndexOf("/")
-	return slash === -1 ? "" : path.slice(0, slash)
+	const slash = path.lastIndexOf("/");
+	return slash === -1 ? "" : path.slice(0, slash);
 }
 
 // The relationships for a part live in `<dir>/_rels/<file>.rels`.
 function relsPathFor(path: string): string {
-	const slash = path.lastIndexOf("/")
-	const dir = slash === -1 ? "" : path.slice(0, slash)
-	const file = slash === -1 ? path : path.slice(slash + 1)
-	return dir === "" ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`
+	const slash = path.lastIndexOf("/");
+	const dir = slash === -1 ? "" : path.slice(0, slash);
+	const file = slash === -1 ? path : path.slice(slash + 1);
+	return dir === "" ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`;
 }
 
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))
-		throw new XlsxError("missing-part", `xlsx is missing a required part: ${path}`)
-	return decoder.decode(await zip.read(path))
+		throw new XlsxError("missing-part", `xlsx is missing a required part: ${path}`);
+	return decoder.decode(await zip.read(path));
 }
 
 export class Worksheet {
 	/** Sheet name as shown on Excel's tab. */
-	readonly name: string
-	readonly #info: SheetInfo
-	readonly #xml: string
-	readonly #context: DecodeContext
-	readonly #rels: Map<string, Relationship> | undefined
-	readonly #commentsXml: string | undefined
+	readonly name: string;
+	readonly #info: SheetInfo;
+	readonly #xml: string;
+	readonly #context: DecodeContext;
+	readonly #rels: Map<string, Relationship> | undefined;
+	readonly #commentsXml: string | undefined;
 
-	#cells: Map<string, Cell> | undefined
-	#merged: readonly string[] | undefined
-	#hyperlinks: readonly Hyperlink[] | undefined
-	#formulas: Map<string, string> | undefined
-	#cellStyles: Map<string, number> | undefined
-	#dimension: string | undefined
-	#dimensionRead = false
-	#comments: readonly Comment[] | undefined
-	#columns: readonly ColumnProps[] | undefined
-	#rowProps: ReadonlyMap<number, RowProps> | undefined
-	#freeze: FreezePane | undefined
-	#freezeRead = false
+	#cells: Map<string, Cell> | undefined;
+	#merged: readonly string[] | undefined;
+	#hyperlinks: readonly Hyperlink[] | undefined;
+	#formulas: Map<string, string> | undefined;
+	#cellStyles: Map<string, number> | undefined;
+	#dimension: string | undefined;
+	#dimensionRead = false;
+	#comments: readonly Comment[] | undefined;
+	#columns: readonly ColumnProps[] | undefined;
+	#rowProps: ReadonlyMap<number, RowProps> | undefined;
+	#freeze: FreezePane | undefined;
+	#freezeRead = false;
 
 	constructor(
 		info: SheetInfo,
@@ -105,27 +105,27 @@ export class Worksheet {
 		rels?: Map<string, Relationship>,
 		commentsXml?: string,
 	) {
-		this.name = info.name
-		this.#info = info
-		this.#xml = xml
-		this.#context = context
-		this.#rels = rels
-		this.#commentsXml = commentsXml
+		this.name = info.name;
+		this.#info = info;
+		this.#xml = xml;
+		this.#context = context;
+		this.#rels = rels;
+		this.#commentsXml = commentsXml;
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
 	get path(): string {
-		return this.#info.path
+		return this.#info.path;
 	}
 
 	/** false for hidden or very-hidden sheets. */
 	get visible(): boolean {
-		return this.#info.visible
+		return this.#info.visible;
 	}
 
 	/** The tab's visibility state (F4.6): `"visible"`, `"hidden"`, or `"veryHidden"`. */
 	get state(): SheetState {
-		return this.#info.state
+		return this.#info.state;
 	}
 
 	/**
@@ -133,8 +133,8 @@ export class Worksheet {
 	 * top-left cell of a merge holds a value; the rest read as `empty`. Empty when none.
 	 */
 	get mergedCells(): readonly string[] {
-		if (this.#merged === undefined) this.#merged = parseMergedCells(this.#xml)
-		return this.#merged
+		if (this.#merged === undefined) this.#merged = parseMergedCells(this.#xml);
+		return this.#merged;
 	}
 
 	/**
@@ -144,9 +144,9 @@ export class Worksheet {
 	 */
 	get hyperlinks(): readonly Hyperlink[] {
 		if (this.#hyperlinks === undefined) {
-			this.#hyperlinks = parseHyperlinks(this.#xml, this.#rels)
+			this.#hyperlinks = parseHyperlinks(this.#xml, this.#rels);
 		}
-		return this.#hyperlinks
+		return this.#hyperlinks;
 	}
 
 	/**
@@ -156,7 +156,7 @@ export class Worksheet {
 	 * 0, usually `"General"`), mirroring how date detection defaults.
 	 */
 	numberFormat(ref: string): string | undefined {
-		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref))
+		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref));
 	}
 
 	/**
@@ -168,7 +168,7 @@ export class Worksheet {
 	 * per distinct format record: two cells sharing a format return the same object.
 	 */
 	style(ref: string): CellStyle | undefined {
-		return this.#context.styles?.cellStyle(this.#cellStyleMap().get(ref))
+		return this.#context.styles?.cellStyle(this.#cellStyleMap().get(ref));
 	}
 
 	/**
@@ -178,10 +178,10 @@ export class Worksheet {
 	 */
 	get dimension(): string | undefined {
 		if (!this.#dimensionRead) {
-			this.#dimension = parseDimension(this.#xml)
-			this.#dimensionRead = true
+			this.#dimension = parseDimension(this.#xml);
+			this.#dimensionRead = true;
 		}
-		return this.#dimension
+		return this.#dimension;
 	}
 
 	/**
@@ -190,9 +190,10 @@ export class Worksheet {
 	 */
 	get comments(): readonly Comment[] {
 		if (this.#comments === undefined) {
-			this.#comments = this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml)
+			this.#comments =
+				this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml);
 		}
-		return this.#comments
+		return this.#comments;
 	}
 
 	/**
@@ -202,8 +203,8 @@ export class Worksheet {
 	 * holds the cached result, so a formula and its last computed value are read independently.
 	 */
 	formula(ref: string): string | undefined {
-		if (this.#formulas === undefined) this.#formulas = parseFormulas(this.#xml)
-		return this.#formulas.get(ref)
+		if (this.#formulas === undefined) this.#formulas = parseFormulas(this.#xml);
+		return this.#formulas.get(ref);
 	}
 
 	/**
@@ -212,8 +213,8 @@ export class Worksheet {
 	 * them. Empty when the sheet declares none.
 	 */
 	get columns(): readonly ColumnProps[] {
-		if (this.#columns === undefined) this.#columns = parseColumnProps(this.#xml)
-		return this.#columns
+		if (this.#columns === undefined) this.#columns = parseColumnProps(this.#xml);
+		return this.#columns;
 	}
 
 	/**
@@ -221,8 +222,8 @@ export class Worksheet {
 	 * height or hidden flag appear. Empty map when none do.
 	 */
 	get rowProperties(): ReadonlyMap<number, RowProps> {
-		if (this.#rowProps === undefined) this.#rowProps = parseRowProperties(this.#xml)
-		return this.#rowProps
+		if (this.#rowProps === undefined) this.#rowProps = parseRowProperties(this.#xml);
+		return this.#rowProps;
 	}
 
 	/**
@@ -231,68 +232,68 @@ export class Worksheet {
 	 */
 	get freeze(): FreezePane | undefined {
 		if (!this.#freezeRead) {
-			this.#freeze = parseFreezePane(this.#xml)
-			this.#freezeRead = true
+			this.#freeze = parseFreezePane(this.#xml);
+			this.#freezeRead = true;
 		}
-		return this.#freeze
+		return this.#freeze;
 	}
 
 	#cellStyleMap(): Map<string, number> {
-		if (this.#cellStyles === undefined) this.#cellStyles = parseCellStyles(this.#xml)
-		return this.#cellStyles
+		if (this.#cellStyles === undefined) this.#cellStyles = parseCellStyles(this.#xml);
+		return this.#cellStyles;
 	}
 
 	/** The cell at an A1 reference. Absent cells read as `empty` (Excel treats them blank). */
 	cell(ref: string): Cell {
-		return this.#index().get(ref) ?? { ref, type: "empty", value: null }
+		return this.#index().get(ref) ?? { ref, type: "empty", value: null };
 	}
 
 	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
 	async *rows(): AsyncGenerator<Row> {
 		for (const row of readRows(this.#xml, this.#context)) {
-			yield row
+			yield row;
 		}
 	}
 
 	#index(): Map<string, Cell> {
 		if (this.#cells === undefined) {
-			const cells = new Map<string, Cell>()
+			const cells = new Map<string, Cell>();
 			for (const row of readRows(this.#xml, this.#context)) {
-				for (const cell of row.cells) cells.set(cell.ref, cell)
+				for (const cell of row.cells) cells.set(cell.ref, cell);
 			}
-			this.#cells = cells
+			this.#cells = cells;
 		}
-		return this.#cells
+		return this.#cells;
 	}
 }
 
 export class Workbook {
 	/** Sheets in tab order. */
-	readonly sheets: readonly SheetInfo[]
-	readonly #byName: Map<string, Worksheet>
-	readonly #themeXml: string | undefined
+	readonly sheets: readonly SheetInfo[];
+	readonly #byName: Map<string, Worksheet>;
+	readonly #themeXml: string | undefined;
 	// The parsed theme is computed on first resolveColor; `undefined` is a valid result (no theme
 	// part, or an unparseable one), so a separate flag records that the parse already ran.
-	#theme: ThemeColors | undefined
-	#themeParsed = false
+	#theme: ThemeColors | undefined;
+	#themeParsed = false;
 
 	constructor(sheets: SheetInfo[], byName: Map<string, Worksheet>, themeXml?: string) {
-		this.sheets = sheets
-		this.#byName = byName
-		this.#themeXml = themeXml
+		this.sheets = sheets;
+		this.#byName = byName;
+		this.#themeXml = themeXml;
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
 	sheet(name: string): Worksheet {
-		const worksheet = this.#byName.get(name)
+		const worksheet = this.#byName.get(name);
 		if (worksheet === undefined) {
-			const available = this.sheets.map((s) => s.name).join(", ")
+			const available = this.sheets.map((s) => s.name).join(", ");
 			throw new XlsxError(
 				"no-such-sheet",
 				`no sheet named ${JSON.stringify(name)}; available: ${available}`,
-			)
+			);
 		}
-		return worksheet
+		return worksheet;
 	}
 
 	/**
@@ -302,7 +303,7 @@ export class Workbook {
 	 * {@link resolveColor} instead of parsing this themselves.
 	 */
 	get themeXml(): string | undefined {
-		return this.#themeXml
+		return this.#themeXml;
 	}
 
 	/**
@@ -314,21 +315,21 @@ export class Workbook {
 	 */
 	resolveColor(color: Color): string | undefined {
 		if (!this.#themeParsed) {
-			this.#theme = this.#themeXml === undefined ? undefined : parseTheme(this.#themeXml)
-			this.#themeParsed = true
+			this.#theme = this.#themeXml === undefined ? undefined : parseTheme(this.#themeXml);
+			this.#themeParsed = true;
 		}
-		return resolveColorAgainst(color, this.#theme)
+		return resolveColorAgainst(color, this.#theme);
 	}
 }
 
 interface LoadedWorkbook {
-	readonly zip: ZipArchive
+	readonly zip: ZipArchive;
 	/** Shared decode context (shared strings, styles, date system) for every sheet. */
-	readonly context: DecodeContext
+	readonly context: DecodeContext;
 	/** Sheets in tab order, each with its resolved part path. */
-	readonly sheets: ReadonlyArray<{ readonly info: SheetInfo; readonly path: string }>
+	readonly sheets: ReadonlyArray<{ readonly info: SheetInfo; readonly path: string }>;
 	/** Raw `xl/theme/theme1.xml`, when present — for color resolution and theme carry (F5.3). */
-	readonly themeXml: string | undefined
+	readonly themeXml: string | undefined;
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -339,73 +340,73 @@ async function loadWorkbook(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<LoadedWorkbook> {
-	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source)
-	const zip = openZip(bytes, options)
+	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+	const zip = openZip(bytes, options);
 
 	// Package relationships → the workbook part.
-	const packageRels = parseRels(await readText(zip, "_rels/.rels"))
-	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT))
+	const packageRels = parseRels(await readText(zip, "_rels/.rels"));
+	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT));
 	if (office === undefined) {
-		throw new XlsxError("not-xlsx", "not an xlsx: no officeDocument relationship")
+		throw new XlsxError("not-xlsx", "not an xlsx: no officeDocument relationship");
 	}
-	const workbookPath = resolveTarget("", office.target)
-	const workbookDir = directoryOf(workbookPath)
+	const workbookPath = resolveTarget("", office.target);
+	const workbookDir = directoryOf(workbookPath);
 
 	// Workbook sheet list + date system + the workbook's own relationships.
-	const { sheets: workbookSheets, date1904 } = parseWorkbook(await readText(zip, workbookPath))
-	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)))
+	const { sheets: workbookSheets, date1904 } = parseWorkbook(await readText(zip, workbookPath));
+	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
 
 	// Shared string table (optional — a workbook may use only inline strings).
-	let sharedStrings: string[] = []
-	const sst = [...workbookRels.values()].find((r) => r.type.endsWith(REL_SHARED_STRINGS))
+	let sharedStrings: string[] = [];
+	const sst = [...workbookRels.values()].find((r) => r.type.endsWith(REL_SHARED_STRINGS));
 	if (sst !== undefined && sst.targetMode !== "External") {
-		const sstPath = resolveTarget(workbookDir, sst.target)
+		const sstPath = resolveTarget(workbookDir, sst.target);
 		if (zip.has(sstPath)) {
-			sharedStrings = parseSharedStrings(decoder.decode(await zip.read(sstPath)))
+			sharedStrings = parseSharedStrings(decoder.decode(await zip.read(sstPath)));
 		}
 	}
 
 	// Style table (optional) — needed to tell date-styled numbers from plain ones.
-	let styles: StyleTable | undefined
-	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES))
+	let styles: StyleTable | undefined;
+	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES));
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
-		const stylesPath = resolveTarget(workbookDir, stylesRel.target)
+		const stylesPath = resolveTarget(workbookDir, stylesRel.target);
 		if (zip.has(stylesPath)) {
-			styles = parseStyles(decoder.decode(await zip.read(stylesPath)))
+			styles = parseStyles(decoder.decode(await zip.read(stylesPath)));
 		}
 	}
 	const context: DecodeContext =
-		styles !== undefined ? { sharedStrings, date1904, styles } : { sharedStrings, date1904 }
+		styles !== undefined ? { sharedStrings, date1904, styles } : { sharedStrings, date1904 };
 
 	// Theme part (optional) — the color scheme resolveColor needs and the bytes the bridge carries.
-	let themeXml: string | undefined
-	const themeRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_THEME))
+	let themeXml: string | undefined;
+	const themeRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_THEME));
 	if (themeRel !== undefined && themeRel.targetMode !== "External") {
-		const themePath = resolveTarget(workbookDir, themeRel.target)
+		const themePath = resolveTarget(workbookDir, themeRel.target);
 		if (zip.has(themePath)) {
-			const decoded = decoder.decode(await zip.read(themePath))
+			const decoded = decoder.decode(await zip.read(themePath));
 			// A present-but-EMPTY theme part (a truncated/corrupt producer) is no usable theme —
 			// treat it as absent so resolveColor degrades to `undefined` and, crucially, the bridge
 			// doesn't carry "" into the writer's non-empty check (which would reject the workbook's
 			// own read-back). An empty part and a missing part are semantically identical.
-			if (decoded.length > 0) themeXml = decoded
+			if (decoded.length > 0) themeXml = decoded;
 		}
 	}
 
 	// Resolve each sheet's r:id to a part path.
-	const sheets: Array<{ info: SheetInfo; path: string }> = []
+	const sheets: Array<{ info: SheetInfo; path: string }> = [];
 	for (const entry of workbookSheets) {
-		const rel = workbookRels.get(entry.rid)
-		if (rel === undefined || rel.targetMode === "External") continue
-		const path = resolveTarget(workbookDir, rel.target)
-		if (!zip.has(path)) continue
+		const rel = workbookRels.get(entry.rid);
+		if (rel === undefined || rel.targetMode === "External") continue;
+		const path = resolveTarget(workbookDir, rel.target);
+		if (!zip.has(path)) continue;
 		sheets.push({
 			info: { name: entry.name, path, visible: entry.visible, state: entry.state },
 			path,
-		})
+		});
 	}
 
-	return { zip, context, sheets, themeXml }
+	return { zip, context, sheets, themeXml };
 }
 
 /**
@@ -413,43 +414,43 @@ async function loadWorkbook(
  * zip-bomb guard independent of the archive's own (untrusted) size fields. Omit for no ceiling.
  */
 export interface ReadOptions {
-	readonly maxPartBytes?: number
+	readonly maxPartBytes?: number;
 }
 
 export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml } = await loadWorkbook(source, options)
+	const { zip, context, sheets, themeXml } = await loadWorkbook(source, options);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
-	const infos: SheetInfo[] = []
-	const byName = new Map<string, Worksheet>()
+	const infos: SheetInfo[] = [];
+	const byName = new Map<string, Worksheet>();
 	for (const { info, path } of sheets) {
-		const xml = decoder.decode(await zip.read(path))
+		const xml = decoder.decode(await zip.read(path));
 		// The sheet's own relationships (xl/worksheets/_rels/sheetN.xml.rels) resolve hyperlink
 		// r:ids and locate the comments part. Optional — a plain sheet has no rels part.
-		const relsPath = relsPathFor(path)
+		const relsPath = relsPathFor(path);
 		const rels = zip.has(relsPath)
 			? parseRels(decoder.decode(await zip.read(relsPath)))
-			: undefined
+			: undefined;
 
 		// Comments live in a separate part linked from the worksheet rels.
-		let commentsXml: string | undefined
-		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS))
+		let commentsXml: string | undefined;
+		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS));
 		if (commentsRel !== undefined && commentsRel.targetMode !== "External") {
-			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target)
-			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath))
+			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target);
+			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath));
 		}
 
-		infos.push(info)
+		infos.push(info);
 		// First definition wins if two sheets somehow share a name.
 		if (!byName.has(info.name)) {
-			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml))
+			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml));
 		}
 	}
 
-	return new Workbook(infos, byName, themeXml)
+	return new Workbook(infos, byName, themeXml);
 }
 
 /**
@@ -463,22 +464,22 @@ export async function* streamSheetRows(
 	sheetName?: string,
 	options?: ReadOptions,
 ): AsyncGenerator<Row> {
-	const { zip, context, sheets } = await loadWorkbook(source, options)
-	const first = sheets[0]
-	if (first === undefined) throw new XlsxError("not-xlsx", "xlsx has no readable worksheets")
+	const { zip, context, sheets } = await loadWorkbook(source, options);
+	const first = sheets[0];
+	if (first === undefined) throw new XlsxError("not-xlsx", "xlsx has no readable worksheets");
 
-	let path = first.path
+	let path = first.path;
 	if (sheetName !== undefined) {
-		const match = sheets.find((s) => s.info.name === sheetName)
+		const match = sheets.find((s) => s.info.name === sheetName);
 		if (match === undefined) {
-			const available = sheets.map((s) => s.info.name).join(", ")
+			const available = sheets.map((s) => s.info.name).join(", ");
 			throw new XlsxError(
 				"no-such-sheet",
 				`no sheet named ${JSON.stringify(sheetName)}; available: ${available}`,
-			)
+			);
 		}
-		path = match.path
+		path = match.path;
 	}
 
-	yield* streamRows(zip.readStream(path), context)
+	yield* streamRows(zip.readStream(path), context);
 }

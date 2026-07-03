@@ -31,7 +31,6 @@
 	"javascript": {
 		"formatter": {
 			"quoteStyle": "double",
-			"semicolons": "asNeeded",
 			"trailingCommas": "all",
 			"arrowParentheses": "always"
 		}

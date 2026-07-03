@@ -1,6 +1,6 @@
-import { loadFixture } from "@openjsxl/fixtures"
-import { describe, expect, it } from "vitest"
-import { openXlsx } from "../workbook"
+import { loadFixture } from "@openjsxl/fixtures";
+import { describe, expect, it } from "vitest";
+import { openXlsx } from "../workbook";
 
 // Real-producer smoke tests. Our generator emits *stored* (uncompressed) entries with no
 // namespace prefixes; genuine apps emit deflate-compressed, namespace-prefixed parts with full
@@ -23,39 +23,39 @@ const probes: Array<{ file: string; sheet: string; ref: string; type: string; va
 		type: "date",
 		value: new Date(Date.UTC(2021, 0, 1)),
 	},
-]
+];
 
 describe("real-producer fixtures — smoke", () => {
 	for (const { file, sheet, ref, type, value } of probes) {
 		it(`opens ${file} and reads ${ref} as ${type}`, async () => {
-			const wb = await openXlsx(await loadFixture(file))
-			const cell = wb.sheet(sheet).cell(ref)
-			expect(cell.type).toBe(type)
-			expect(cell.value).toEqual(value)
-		})
+			const wb = await openXlsx(await loadFixture(file));
+			const cell = wb.sheet(sheet).cell(ref);
+			expect(cell.type).toBe(type);
+			expect(cell.value).toEqual(value);
+		});
 	}
 
 	it("applies the date1904 workbook flag (same serial, different anchor)", async () => {
 		// Cell A3 holds the same time serial in both files; the 1904 system shifts it ~4 years.
-		const v1900 = (await openXlsx(await loadFixture("date.xlsx"))).sheet("Sheet1").cell("A3")
+		const v1900 = (await openXlsx(await loadFixture("date.xlsx"))).sheet("Sheet1").cell("A3");
 		const v1904 = (await openXlsx(await loadFixture("date_1904.xlsx")))
 			.sheet("Sheet1")
-			.cell("A3")
-		expect(v1900.type).toBe("date")
-		expect(v1904.type).toBe("date")
-		expect(v1900.value).toEqual(new Date(Date.UTC(1900, 0, 9, 15, 10, 10)))
-		expect(v1904.value).toEqual(new Date(Date.UTC(1904, 0, 11, 15, 10, 10)))
-	})
+			.cell("A3");
+		expect(v1900.type).toBe("date");
+		expect(v1904.type).toBe("date");
+		expect(v1900.value).toEqual(new Date(Date.UTC(1900, 0, 9, 15, 10, 10)));
+		expect(v1904.value).toEqual(new Date(Date.UTC(1904, 0, 11, 15, 10, 10)));
+	});
 
 	it("reports sheet visibility from a real multi-state workbook", async () => {
 		// any_sheets.xlsx has visible, hidden, and veryHidden sheets — both hidden states
 		// collapse to `visible: false`.
-		const wb = await openXlsx(await loadFixture("any_sheets.xlsx"))
-		const byName = Object.fromEntries(wb.sheets.map((s) => [s.name, s.visible]))
+		const wb = await openXlsx(await loadFixture("any_sheets.xlsx"));
+		const byName = Object.fromEntries(wb.sheets.map((s) => [s.name, s.visible]));
 		expect(byName).toMatchObject({
 			Visible: true,
 			Hidden: false,
 			VeryHidden: false,
-		})
-	})
-})
+		});
+	});
+});

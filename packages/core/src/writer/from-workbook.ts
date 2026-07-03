@@ -1,6 +1,6 @@
-import { XlsxError } from "../errors"
-import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1"
-import type { Workbook, Worksheet } from "../reader/workbook"
+import { XlsxError } from "../errors";
+import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1";
+import type { Workbook, Worksheet } from "../reader/workbook";
 import type {
 	Cell,
 	ColumnProps,
@@ -9,8 +9,8 @@ import type {
 	Hyperlink,
 	RowProps,
 	SheetState,
-} from "../types"
-import type { CellInput, SheetInput, WorkbookInput } from "./types"
+} from "../types";
+import type { CellInput, SheetInput, WorkbookInput } from "./types";
 
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
 // so a file can be read, optionally tweaked, and written back. This closes the round trip (F3.3);
@@ -50,17 +50,17 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 // which is how a border or fill on a blank cell survives the trip. style(ref) returns one cached
 // object per distinct format, so the wrapping adds O(distinct formats) objects, not O(cells).
 function cellToInput(worksheet: Worksheet, cell: Cell): CellInput {
-	const style = worksheet.style(cell.ref)
-	const formula = worksheet.formula(cell.ref)
+	const style = worksheet.style(cell.ref);
+	const formula = worksheet.formula(cell.ref);
 	if (formula !== undefined) {
 		// A formula cell (F5.4) carries the formula text plus its cached value (and any style), so a
 		// non-recalculating consumer still sees the last computed result. An error-typed cached value
 		// writes as its string text — the formula is what matters; Excel recomputes the real error.
 		return style === undefined
 			? { formula, value: cell.value }
-			: { formula, value: cell.value, style }
+			: { formula, value: cell.value, style };
 	}
-	return style === undefined ? cell.value : { value: cell.value, style }
+	return style === undefined ? cell.value : { value: cell.value, style };
 }
 
 /**
@@ -72,84 +72,84 @@ function cellToInput(worksheet: Worksheet, cell: Cell): CellInput {
  * on rewrite.
  */
 export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput> {
-	const sheets: SheetInput[] = []
+	const sheets: SheetInput[] = [];
 	for (const info of workbook.sheets) {
-		const worksheet = workbook.sheet(info.name)
-		const rows: CellInput[][] = []
+		const worksheet = workbook.sheet(info.name);
+		const rows: CellInput[][] = [];
 		// Verbatim source ref per occupied grid slot (canonical ref → the ref string that filled
 		// it). The reader's cell identity is the VERBATIM ref: "A1" and "a1" are two different
 		// cells to cell(), yet parse to one grid slot — silently letting one overwrite the other
 		// would vanish a value with no error. Same-spelling duplicates stay last-wins, which is
 		// exactly how the reader's own cell() map resolves them, so the two sides agree.
-		const occupied = new Map<string, string>()
+		const occupied = new Map<string, string>();
 		for await (const row of worksheet.rows()) {
 			for (const cell of row.cells) {
 				// Place by the cell's own ref, not the row index — the two agree for well-formed
 				// files, and the ref is authoritative for the column in either case.
-				let placed: CellRef | undefined
+				let placed: CellRef | undefined;
 				try {
-					placed = parseRef(cell.ref)
+					placed = parseRef(cell.ref);
 				} catch {
-					placed = undefined
+					placed = undefined;
 				}
 				// A ref that doesn't parse OR lies outside Excel's grid has no writable position.
 				// The grid cap also matters mechanically: `rows` is indexed by row number, so a
 				// hostile row like 1e14 would otherwise become an array LENGTH the writer iterates.
 				if (placed === undefined || placed.row > MAX_ROW || placed.col > MAX_COL) {
-					const shown = cell.ref.length > 24 ? `${cell.ref.slice(0, 24)}…` : cell.ref
+					const shown = cell.ref.length > 24 ? `${cell.ref.slice(0, 24)}…` : cell.ref;
 					throw new XlsxError(
 						"invalid-input",
 						`sheet "${info.name}": cell reference "${shown}" has no writable grid position`,
-					)
+					);
 				}
-				const canonical = formatRef(placed)
-				const prior = occupied.get(canonical)
+				const canonical = formatRef(placed);
+				const prior = occupied.get(canonical);
 				if (prior !== undefined && prior !== cell.ref) {
 					throw new XlsxError(
 						"invalid-input",
 						`sheet "${info.name}": cells "${prior}" and "${cell.ref}" are distinct to the reader but occupy one grid position (${canonical})`,
-					)
+					);
 				}
-				occupied.set(canonical, cell.ref)
-				const { col, row: rowNum } = placed
-				let rowArr = rows[rowNum - 1]
+				occupied.set(canonical, cell.ref);
+				const { col, row: rowNum } = placed;
+				let rowArr = rows[rowNum - 1];
 				if (rowArr === undefined) {
-					rowArr = []
-					rows[rowNum - 1] = rowArr
+					rowArr = [];
+					rows[rowNum - 1] = rowArr;
 				}
-				rowArr[col - 1] = cellToInput(worksheet, cell)
+				rowArr[col - 1] = cellToInput(worksheet, cell);
 			}
 		}
 		// Geometry (F4.5) and structural metadata (F4.6): carried only when present, so a workbook
 		// using neither produces the exact same WorkbookInput — and the exact same bytes — as before.
 		const sheet: {
-			name: string
-			rows: CellInput[][]
-			columns?: readonly ColumnProps[]
-			rowProperties?: Readonly<Record<number, RowProps>>
-			freeze?: FreezePane
-			merges?: readonly string[]
-			hyperlinks?: readonly Hyperlink[]
-			state?: SheetState
-			comments?: readonly Comment[]
-		} = { name: info.name, rows }
-		const columns = worksheet.columns
-		if (columns.length > 0) sheet.columns = columns
-		const rowProperties = worksheet.rowProperties
-		if (rowProperties.size > 0) sheet.rowProperties = Object.fromEntries(rowProperties)
-		const freeze = worksheet.freeze
-		if (freeze !== undefined) sheet.freeze = freeze
-		const merges = worksheet.mergedCells
-		if (merges.length > 0) sheet.merges = merges
-		const hyperlinks = worksheet.hyperlinks
-		if (hyperlinks.length > 0) sheet.hyperlinks = hyperlinks
-		if (info.state !== "visible") sheet.state = info.state
-		const comments = worksheet.comments
-		if (comments.length > 0) sheet.comments = comments
-		sheets.push(sheet)
+			name: string;
+			rows: CellInput[][];
+			columns?: readonly ColumnProps[];
+			rowProperties?: Readonly<Record<number, RowProps>>;
+			freeze?: FreezePane;
+			merges?: readonly string[];
+			hyperlinks?: readonly Hyperlink[];
+			state?: SheetState;
+			comments?: readonly Comment[];
+		} = { name: info.name, rows };
+		const columns = worksheet.columns;
+		if (columns.length > 0) sheet.columns = columns;
+		const rowProperties = worksheet.rowProperties;
+		if (rowProperties.size > 0) sheet.rowProperties = Object.fromEntries(rowProperties);
+		const freeze = worksheet.freeze;
+		if (freeze !== undefined) sheet.freeze = freeze;
+		const merges = worksheet.mergedCells;
+		if (merges.length > 0) sheet.merges = merges;
+		const hyperlinks = worksheet.hyperlinks;
+		if (hyperlinks.length > 0) sheet.hyperlinks = hyperlinks;
+		if (info.state !== "visible") sheet.state = info.state;
+		const comments = worksheet.comments;
+		if (comments.length > 0) sheet.comments = comments;
+		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when
 	// the workbook has no theme part — then the writer falls back to the built-in Office theme.
-	const themeXml = workbook.themeXml
-	return themeXml !== undefined ? { sheets, themeXml } : { sheets }
+	const themeXml = workbook.themeXml;
+	return themeXml !== undefined ? { sheets, themeXml } : { sheets };
 }

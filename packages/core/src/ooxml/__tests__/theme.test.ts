@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { parseTheme, resolveColor, resolveTint } from "../theme"
+import { describe, expect, it } from "vitest";
+import { parseTheme, resolveColor, resolveTint } from "../theme";
 
 // F5.3 — theme parse + Excel tint resolution. The tint algorithm is Excel's own Win32 integer HLS
 // (HLSMAX=240); the vectors below were produced by an INDEPENDENT reference implementation of that
@@ -105,36 +105,36 @@ const VECTORS: [string, number, string][] = [
 	["70AD47", -0.4999237898604048, "385724"],
 	["70AD47", 0.1, "7EBA56"],
 	["70AD47", -0.1, "659C41"],
-]
+];
 
 describe("resolveTint — Excel integer-HLS tint algorithm", () => {
 	it("matches every independent reference vector", () => {
 		for (const [base, tint, expected] of VECTORS) {
-			expect(resolveTint(base, tint), `${base} @ ${tint}`).toBe(expected)
+			expect(resolveTint(base, tint), `${base} @ ${tint}`).toBe(expected);
 		}
-	})
+	});
 
 	it("is the identity for tint 0 even where the HLS round trip is lossy", () => {
 		// 4472C4 does not survive an integer HLS round trip, so tint 0 must short-circuit.
-		expect(resolveTint("4472C4", 0)).toBe("4472C4")
-		expect(resolveTint("abcdef", 0)).toBe("ABCDEF") // also uppercases
-	})
+		expect(resolveTint("4472C4", 0)).toBe("4472C4");
+		expect(resolveTint("abcdef", 0)).toBe("ABCDEF"); // also uppercases
+	});
 
 	it("clamps an out-of-range or non-finite tint instead of going out of gamut", () => {
-		expect(resolveTint("4F81BD", 5)).toBe(resolveTint("4F81BD", 1)) // >1 clamps to +1
-		expect(resolveTint("4F81BD", -5)).toBe(resolveTint("4F81BD", -1)) // <-1 clamps to -1
-		expect(resolveTint("4F81BD", Number.NaN)).toBe("4F81BD") // non-finite → identity
-		expect(resolveTint("4F81BD", Number.POSITIVE_INFINITY)).toBe("4F81BD")
-	})
+		expect(resolveTint("4F81BD", 5)).toBe(resolveTint("4F81BD", 1)); // >1 clamps to +1
+		expect(resolveTint("4F81BD", -5)).toBe(resolveTint("4F81BD", -1)); // <-1 clamps to -1
+		expect(resolveTint("4F81BD", Number.NaN)).toBe("4F81BD"); // non-finite → identity
+		expect(resolveTint("4F81BD", Number.POSITIVE_INFINITY)).toBe("4F81BD");
+	});
 
 	it("matches Excel's documented grayscale swatches exactly", () => {
 		// Black lighter / white darker — unambiguous middle grays only the integer algorithm nails.
-		expect(resolveTint("000000", 0.499984740745262)).toBe("808080")
-		expect(resolveTint("000000", 0.3499862666707358)).toBe("595959")
-		expect(resolveTint("FFFFFF", -0.049989318502332)).toBe("F2F2F2")
-		expect(resolveTint("FFFFFF", -0.4999237898604048)).toBe("808080")
-	})
-})
+		expect(resolveTint("000000", 0.499984740745262)).toBe("808080");
+		expect(resolveTint("000000", 0.3499862666707358)).toBe("595959");
+		expect(resolveTint("FFFFFF", -0.049989318502332)).toBe("F2F2F2");
+		expect(resolveTint("FFFFFF", -0.4999237898604048)).toBe("808080");
+	});
+});
 
 describe("parseTheme — <a:clrScheme>", () => {
 	// Distinct colors in the four dark/light slots so the index swap is observable.
@@ -156,22 +156,22 @@ describe("parseTheme — <a:clrScheme>", () => {
 		'<a:folHlink><a:srgbClr val="aa0008"/></a:folHlink>' +
 		// a fmtScheme srgbClr that must NOT be mistaken for a scheme color
 		'</a:clrScheme><a:fmtScheme><a:solidFill><a:srgbClr val="deadbe"/></a:solidFill></a:fmtScheme>' +
-		"</a:themeElements></a:theme>"
+		"</a:themeElements></a:theme>";
 
 	it("applies the dark/light index swap (0→lt1, 1→dk1, 2→lt2, 3→dk2)", () => {
-		const t = parseTheme(scheme())
-		expect(t).toBeDefined()
-		expect(t?.[0]).toBe("222222") // theme 0 = Background 1 = lt1
-		expect(t?.[1]).toBe("111111") // theme 1 = Text 1 = dk1
-		expect(t?.[2]).toBe("444444") // theme 2 = Background 2 = lt2
-		expect(t?.[3]).toBe("333333") // theme 3 = Text 2 = dk2
-		expect(t?.[4]).toBe("AA0001") // theme 4 = accent1 (uppercased)
-		expect(t?.[11]).toBe("AA0008") // theme 11 = folHlink
-	})
+		const t = parseTheme(scheme());
+		expect(t).toBeDefined();
+		expect(t?.[0]).toBe("222222"); // theme 0 = Background 1 = lt1
+		expect(t?.[1]).toBe("111111"); // theme 1 = Text 1 = dk1
+		expect(t?.[2]).toBe("444444"); // theme 2 = Background 2 = lt2
+		expect(t?.[3]).toBe("333333"); // theme 3 = Text 2 = dk2
+		expect(t?.[4]).toBe("AA0001"); // theme 4 = accent1 (uppercased)
+		expect(t?.[11]).toBe("AA0008"); // theme 11 = folHlink
+	});
 
 	it("reads <a:sysClr> via lastClr", () => {
-		expect(parseTheme(scheme(true))?.[1]).toBe("0A0B0C") // dk1 sysClr lastClr
-	})
+		expect(parseTheme(scheme(true))?.[1]).toBe("0A0B0C"); // dk1 sysClr lastClr
+	});
 
 	it("falls back to the standard system color when sysClr has no lastClr", () => {
 		const s =
@@ -181,21 +181,21 @@ describe("parseTheme — <a:clrScheme>", () => {
 			[1, 2, 3, 4, 5, 6]
 				.map((n) => `<a:accent${n}><a:srgbClr val="00000${n}"/></a:accent${n}>`)
 				.join("") +
-			'<a:hlink><a:srgbClr val="000007"/></a:hlink><a:folHlink><a:srgbClr val="000008"/></a:folHlink></a:clrScheme>'
-		const t = parseTheme(s)
-		expect(t?.[1]).toBe("000000") // dk1 = windowText → black
-		expect(t?.[0]).toBe("FFFFFF") // lt1 = window → white
-	})
+			'<a:hlink><a:srgbClr val="000007"/></a:hlink><a:folHlink><a:srgbClr val="000008"/></a:folHlink></a:clrScheme>';
+		const t = parseTheme(s);
+		expect(t?.[1]).toBe("000000"); // dk1 = windowText → black
+		expect(t?.[0]).toBe("FFFFFF"); // lt1 = window → white
+	});
 
 	it("returns undefined when a slot is missing or the scheme is absent", () => {
-		expect(parseTheme("<a:theme><a:themeElements/></a:theme>")).toBeUndefined()
+		expect(parseTheme("<a:theme><a:themeElements/></a:theme>")).toBeUndefined();
 		const missingAccent6 = scheme().replace(
 			'<a:accent6><a:srgbClr val="aa0006"/></a:accent6>',
 			"",
-		)
-		expect(parseTheme(missingAccent6)).toBeUndefined()
-	})
-})
+		);
+		expect(parseTheme(missingAccent6)).toBeUndefined();
+	});
+});
 
 describe("resolveColor", () => {
 	const theme = parseTheme(
@@ -206,23 +206,23 @@ describe("resolveColor", () => {
 				.map((n) => `<a:accent${n}><a:srgbClr val="00000${n}"/></a:accent${n}>`)
 				.join("") +
 			'<a:hlink><a:srgbClr val="000007"/></a:hlink><a:folHlink><a:srgbClr val="000008"/></a:folHlink></a:clrScheme>',
-	)
+	);
 
 	it("normalizes an rgb color to 8-digit uppercase ARGB", () => {
-		expect(resolveColor({ rgb: "ff0000" }, theme)).toBe("FFFF0000") // 6-digit gains FF alpha
-		expect(resolveColor({ rgb: "8000FF00" }, theme)).toBe("8000FF00") // 8-digit passthrough
-	})
+		expect(resolveColor({ rgb: "ff0000" }, theme)).toBe("FFFF0000"); // 6-digit gains FF alpha
+		expect(resolveColor({ rgb: "8000FF00" }, theme)).toBe("8000FF00"); // 8-digit passthrough
+	});
 
 	it("resolves a theme color with and without tint", () => {
-		expect(resolveColor({ theme: 4 }, theme)).toBe("FF4F81BD") // accent1, no tint
-		expect(resolveColor({ theme: 4, tint: 0.3999755851924192 }, theme)).toBe("FF96B4D8")
-		expect(resolveColor({ theme: 0 }, theme)).toBe("FFFFFFFF") // Background 1 = white (swap)
-	})
+		expect(resolveColor({ theme: 4 }, theme)).toBe("FF4F81BD"); // accent1, no tint
+		expect(resolveColor({ theme: 4, tint: 0.3999755851924192 }, theme)).toBe("FF96B4D8");
+		expect(resolveColor({ theme: 0 }, theme)).toBe("FFFFFFFF"); // Background 1 = white (swap)
+	});
 
 	it("returns undefined when it cannot resolve", () => {
-		expect(resolveColor({ theme: 4 }, undefined)).toBeUndefined() // no theme part
-		expect(resolveColor({ theme: 99 }, theme)).toBeUndefined() // index past the 12 slots
-		expect(resolveColor({ indexed: 5 }, theme)).toBeUndefined() // palette out of F5.3 scope
-		expect(resolveColor({ auto: true }, theme)).toBeUndefined() // consumer decides
-	})
-})
+		expect(resolveColor({ theme: 4 }, undefined)).toBeUndefined(); // no theme part
+		expect(resolveColor({ theme: 99 }, theme)).toBeUndefined(); // index past the 12 slots
+		expect(resolveColor({ indexed: 5 }, theme)).toBeUndefined(); // palette out of F5.3 scope
+		expect(resolveColor({ auto: true }, theme)).toBeUndefined(); // consumer decides
+	});
+});

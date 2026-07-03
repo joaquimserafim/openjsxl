@@ -6,9 +6,9 @@
 // Real-world fixtures produced by Excel, LibreOffice, and Google Sheets live under ./data too
 // and are NOT generated here — see data/README.md and ../THIRD_PARTY.md.
 
-import { mkdir, writeFile } from "node:fs/promises"
-import { fileURLToPath } from "node:url"
-import { buildWorkbook, packParts } from "./build-workbook.mjs"
+import { mkdir, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { buildWorkbook, packParts } from "./build-workbook.mjs";
 
 // One sheet covering every value type the reader must handle, matching the original basic.xlsx:
 // a shared string, a number, a date-styled serial (built-in numFmtId 14), a boolean, a cached
@@ -76,13 +76,13 @@ const fixtures = [
 			],
 		},
 	},
-]
+];
 
 // Deliberately-broken packages for the error paths (F2.4b). Valid ZIPs, invalid OOXML.
-const RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+const RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const OFFICE_DOC =
-	"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
-const XMLD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+	"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+const XMLD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const broken = [
 	// Package relationships name no officeDocument → XlsxError('not-xlsx').
 	{
@@ -146,20 +146,20 @@ const broken = [
 			},
 		],
 	},
-]
+];
 
-const dataDir = new URL("../data/", import.meta.url)
-await mkdir(dataDir, { recursive: true })
+const dataDir = new URL("../data/", import.meta.url);
+await mkdir(dataDir, { recursive: true });
 
 for (const { file, spec } of fixtures) {
-	const outUrl = new URL(file, dataDir)
-	const archive = buildWorkbook(spec)
-	await writeFile(outUrl, archive)
-	console.log(`wrote ${fileURLToPath(outUrl)} (${archive.length} bytes)`)
+	const outUrl = new URL(file, dataDir);
+	const archive = buildWorkbook(spec);
+	await writeFile(outUrl, archive);
+	console.log(`wrote ${fileURLToPath(outUrl)} (${archive.length} bytes)`);
 }
 
 for (const { file, parts } of broken) {
-	const outUrl = new URL(file, dataDir)
-	await writeFile(outUrl, packParts(parts))
-	console.log(`wrote ${fileURLToPath(outUrl)} (broken fixture)`)
+	const outUrl = new URL(file, dataDir);
+	await writeFile(outUrl, packParts(parts));
+	console.log(`wrote ${fileURLToPath(outUrl)} (broken fixture)`);
 }

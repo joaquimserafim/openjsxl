@@ -11,9 +11,9 @@ import type {
 	PatternType,
 	UnderlineStyle,
 	VerticalAlignment,
-} from "../types"
-import { isXmlSafe, localName } from "../utils"
-import { tokenize } from "../xml"
+} from "../types";
+import { isXmlSafe, localName } from "../utils";
+import { tokenize } from "../xml";
 
 // xl/styles.xml — the workbook's style tables. A cell's `s` attribute indexes `<cellXfs>`; each
 // `<xf>` names a numFmtId plus fontId/fillId/borderId into the component tables and may carry an
@@ -37,19 +37,19 @@ import { tokenize } from "../xml"
 
 export interface StyleTable {
 	/** True when the cell format at this `s` index applies a date/time number format. */
-	isDateStyle(styleIndex: number | undefined): boolean
+	isDateStyle(styleIndex: number | undefined): boolean;
 	/**
 	 * The number-format code applied at this `s` index — a custom code (`<numFmts>`) or a
 	 * built-in one (e.g. `"0.00%"`, `"mm-dd-yy"`). `undefined` when the id is a locale/reserved
 	 * built-in with no portable code, or the index is out of range.
 	 */
-	formatCode(styleIndex: number | undefined): string | undefined
+	formatCode(styleIndex: number | undefined): string | undefined;
 	/**
 	 * The full resolved style at this `s` index — number format code, font, fill, border, and
 	 * alignment. `undefined` when the index is out of range or the xf resolves to the workbook
 	 * default (no distinguishing component). Cached: repeated calls return the same object.
 	 */
-	cellStyle(styleIndex: number | undefined): CellStyle | undefined
+	cellStyle(styleIndex: number | undefined): CellStyle | undefined;
 }
 
 // Built-in number formats (ECMA-376 §18.8.30) with a fixed, non-locale code. The locale and
@@ -90,7 +90,7 @@ export const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
 	47: "mmss.0",
 	48: "##0.0E+0",
 	49: "@",
-}
+};
 
 function isBuiltinDateId(id: number): boolean {
 	return (
@@ -98,7 +98,7 @@ function isBuiltinDateId(id: number): boolean {
 		(id >= 27 && id <= 36) ||
 		(id >= 45 && id <= 47) ||
 		(id >= 50 && id <= 58)
-	)
+	);
 }
 
 // A format code is a date/time format when, after removing the parts that can never be date
@@ -111,17 +111,17 @@ function isBuiltinDateId(id: number): boolean {
 // brackets: testing the raw code instead would let a quoted literal containing "[h]" (e.g.
 // `"[h] rate" 0.00`, a plain number format) masquerade as elapsed time — a written cell would
 // then re-read as a date while Excel shows a number (adversarial review, F4.3).
-const ELAPSED_TIME = /\[(?:h+|m+|s+)\]/i
+const ELAPSED_TIME = /\[(?:h+|m+|s+)\]/i;
 // Quoted literals, backslash escapes, and the ECMA-376 skip (_x) / fill (*x) tokens: their
 // characters render literally (or pad), so an m/d/h inside them is not a date token ("0.00_m").
-const LITERALS = /"[^"]*"|\\.|[_*]./g
-const BRACKETS = /\[[^\]]*\]/g
-const DATE_TOKEN = /[dmyhs]/i
+const LITERALS = /"[^"]*"|\\.|[_*]./g;
+const BRACKETS = /\[[^\]]*\]/g;
+const DATE_TOKEN = /[dmyhs]/i;
 
 export function isDateFormatCode(formatCode: string): boolean {
-	const withoutLiterals = formatCode.replace(LITERALS, "")
-	if (ELAPSED_TIME.test(withoutLiterals)) return true
-	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ""))
+	const withoutLiterals = formatCode.replace(LITERALS, "");
+	if (ELAPSED_TIME.test(withoutLiterals)) return true;
+	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ""));
 }
 
 // ── Attribute parsing helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ export function isDateFormatCode(formatCode: string): boolean {
 // val="0"/"false" negates it. Anything else (including absence of the element) is handled by the
 // caller — this decides only what a PRESENT element with this `val` means.
 function boolAttr(val: string | undefined): boolean {
-	return val !== "0" && val !== "false"
+	return val !== "0" && val !== "false";
 }
 
 // Shared read/write bounds for style values. The reader DEGRADES anything outside them (a
@@ -139,11 +139,11 @@ function boolAttr(val: string | undefined): boolean {
 // whatever cellStyle() emits, the writer's validators accept, so read → modify → write can never
 // crash on a style the reader was happy to produce (adversarial review, F4.4).
 /** 6-digit RGB or 8-digit ARGB hex — the only rgb forms real files carry. */
-export const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/
+export const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 /** xsd:unsignedInt ceiling for theme/indexed color values. */
-export const MAX_COLOR_INDEX = 0xffffffff
+export const MAX_COLOR_INDEX = 0xffffffff;
 /** Excel's own maximum alignment indent. */
-export const MAX_INDENT = 250
+export const MAX_INDENT = 250;
 
 // A <color> / <fgColor> / <bgColor> element's attributes → the raw Color union. The spec allows
 // exactly one addressing mode per element; if a producer emits several, precedence follows what
@@ -151,23 +151,23 @@ export const MAX_INDENT = 250
 // non-hex rgb, out-of-range indexes — yield undefined (no color) rather than an unwritable record.
 function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color | undefined {
 	if (attrs.rgb !== undefined) {
-		return HEX_COLOR.test(attrs.rgb) ? { rgb: attrs.rgb } : undefined
+		return HEX_COLOR.test(attrs.rgb) ? { rgb: attrs.rgb } : undefined;
 	}
 	if (attrs.theme !== undefined) {
-		const theme = Number(attrs.theme)
-		if (!Number.isInteger(theme) || theme < 0 || theme > MAX_COLOR_INDEX) return undefined
-		const tint = attrs.tint === undefined ? undefined : Number(attrs.tint)
-		if (tint !== undefined && Number.isFinite(tint)) return { theme, tint }
-		return { theme }
+		const theme = Number(attrs.theme);
+		if (!Number.isInteger(theme) || theme < 0 || theme > MAX_COLOR_INDEX) return undefined;
+		const tint = attrs.tint === undefined ? undefined : Number(attrs.tint);
+		if (tint !== undefined && Number.isFinite(tint)) return { theme, tint };
+		return { theme };
 	}
 	if (attrs.indexed !== undefined) {
-		const indexed = Number(attrs.indexed)
+		const indexed = Number(attrs.indexed);
 		return Number.isInteger(indexed) && indexed >= 0 && indexed <= MAX_COLOR_INDEX
 			? { indexed }
-			: undefined
+			: undefined;
 	}
-	if (attrs.auto !== undefined && boolAttr(attrs.auto)) return { auto: true }
-	return undefined
+	if (attrs.auto !== undefined && boolAttr(attrs.auto)) return { auto: true };
+	return undefined;
 }
 
 // Enum whitelists: attribute values are producer-controlled strings, so gate them through the
@@ -193,7 +193,7 @@ export const PATTERN_TYPES = new Set<PatternType>([
 	"lightTrellis",
 	"gray125",
 	"gray0625",
-])
+]);
 export const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
 	"thin",
 	"medium",
@@ -208,7 +208,7 @@ export const BORDER_LINE_STYLES = new Set<BorderLineStyle>([
 	"dashDotDot",
 	"mediumDashDotDot",
 	"slantDashDot",
-])
+]);
 export const H_ALIGNMENTS = new Set<HorizontalAlignment>([
 	"left",
 	"center",
@@ -217,142 +217,142 @@ export const H_ALIGNMENTS = new Set<HorizontalAlignment>([
 	"fill",
 	"centerContinuous",
 	"distributed",
-])
+]);
 export const V_ALIGNMENTS = new Set<VerticalAlignment>([
 	"top",
 	"center",
 	"bottom",
 	"justify",
 	"distributed",
-])
+]);
 
 // The <font> child elements the model reads. The font-children dispatch branch is gated on THIS
 // set (not just "a font is open") so a dangling unclosed <font> can never swallow structural
 // tokens like <fills> or <xf> — see the dispatch chain below.
-const FONT_CHILDREN = new Set(["name", "sz", "b", "i", "u", "strike", "color"])
+const FONT_CHILDREN = new Set(["name", "sz", "b", "i", "u", "strike", "color"]);
 
 function parseAlignment(
 	attrs: Readonly<Record<string, string | undefined>>,
 ): Alignment | undefined {
 	const out: {
-		horizontal?: HorizontalAlignment
-		vertical?: VerticalAlignment
-		wrapText?: boolean
-		shrinkToFit?: boolean
-		indent?: number
-		textRotation?: number
-	} = {}
+		horizontal?: HorizontalAlignment;
+		vertical?: VerticalAlignment;
+		wrapText?: boolean;
+		shrinkToFit?: boolean;
+		indent?: number;
+		textRotation?: number;
+	} = {};
 	if (
 		attrs.horizontal !== undefined &&
 		H_ALIGNMENTS.has(attrs.horizontal as HorizontalAlignment)
 	) {
-		out.horizontal = attrs.horizontal as HorizontalAlignment
+		out.horizontal = attrs.horizontal as HorizontalAlignment;
 	}
 	if (attrs.vertical !== undefined && V_ALIGNMENTS.has(attrs.vertical as VerticalAlignment)) {
-		out.vertical = attrs.vertical as VerticalAlignment
+		out.vertical = attrs.vertical as VerticalAlignment;
 	}
-	if (attrs.wrapText !== undefined && boolAttr(attrs.wrapText)) out.wrapText = true
-	if (attrs.shrinkToFit !== undefined && boolAttr(attrs.shrinkToFit)) out.shrinkToFit = true
+	if (attrs.wrapText !== undefined && boolAttr(attrs.wrapText)) out.wrapText = true;
+	if (attrs.shrinkToFit !== undefined && boolAttr(attrs.shrinkToFit)) out.shrinkToFit = true;
 	if (attrs.indent !== undefined) {
-		const indent = Number(attrs.indent)
+		const indent = Number(attrs.indent);
 		// Excel's own indent ceiling; a larger value in a file is producer garbage — degrade.
-		if (Number.isInteger(indent) && indent > 0 && indent <= MAX_INDENT) out.indent = indent
+		if (Number.isInteger(indent) && indent > 0 && indent <= MAX_INDENT) out.indent = indent;
 	}
 	if (attrs.textRotation !== undefined) {
 		// 0–180 per the spec (91–180 = downward). The legacy 255 "vertical stacked" marker is not
 		// modelled — degrade to no rotation rather than misrepresent it as 255 degrees.
-		const rotation = Number(attrs.textRotation)
+		const rotation = Number(attrs.textRotation);
 		if (Number.isInteger(rotation) && rotation > 0 && rotation <= 180)
-			out.textRotation = rotation
+			out.textRotation = rotation;
 	}
-	return Object.keys(out).length > 0 ? out : undefined
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-const hasKeys = (o: object): boolean => Object.keys(o).length > 0
+const hasKeys = (o: object): boolean => Object.keys(o).length > 0;
 
 // One cellXfs <xf> as read: the numFmt id the hot path needs plus the component table ids and
 // inline alignment the style path resolves through.
 interface XfRecord {
-	readonly numFmtId: number
-	readonly fontId: number
-	readonly fillId: number
-	readonly borderId: number
-	readonly alignment: Alignment | undefined
+	readonly numFmtId: number;
+	readonly fontId: number;
+	readonly fillId: number;
+	readonly borderId: number;
+	readonly alignment: Alignment | undefined;
 }
 
 export function parseStyles(xml: string): StyleTable {
-	const customFormats = new Map<number, string>()
-	const xfs: XfRecord[] = []
+	const customFormats = new Map<number, string>();
+	const xfs: XfRecord[] = [];
 	// Component tables by index. A slot is undefined when the record isn't representable in the
 	// model (a gradient fill) — a cell referencing it simply has no such component.
-	const fonts: FontStyle[] = []
-	const fills: (FillStyle | undefined)[] = []
-	const borders: BorderStyle[] = []
+	const fonts: FontStyle[] = [];
+	const fills: (FillStyle | undefined)[] = [];
+	const borders: BorderStyle[] = [];
 
-	let inNumFmts = false
-	let inCellXfs = false // NOT cellStyleXfs — a cell's `s` indexes cellXfs only
-	let inXf = false // inside a non-self-closing cellXfs <xf>, awaiting <alignment>
+	let inNumFmts = false;
+	let inCellXfs = false; // NOT cellStyleXfs — a cell's `s` indexes cellXfs only
+	let inXf = false; // inside a non-self-closing cellXfs <xf>, awaiting <alignment>
 
 	// <fonts> builder state: the font record under construction.
-	let inFonts = false
+	let inFonts = false;
 	let font:
 		| {
-				name?: string
-				size?: number
-				bold?: boolean
-				italic?: boolean
-				underline?: UnderlineStyle
-				strike?: boolean
-				color?: Color
+				name?: string;
+				size?: number;
+				bold?: boolean;
+				italic?: boolean;
+				underline?: UnderlineStyle;
+				strike?: boolean;
+				color?: Color;
 		  }
-		| undefined
+		| undefined;
 
 	// <fills> builder state. `fill` is set by <patternFill> (and stays undefined for
 	// <gradientFill>, so the slot records "not representable").
-	let inFills = false
-	let inFill = false
-	let fill: { patternType: PatternType; fgColor?: Color; bgColor?: Color } | undefined
+	let inFills = false;
+	let inFill = false;
+	let fill: { patternType: PatternType; fgColor?: Color; bgColor?: Color } | undefined;
 
 	// <borders> builder state. `edge` holds a started edge element awaiting an optional <color>
 	// child; edges without a style attribute are not borders and never commit.
-	let inBorders = false
+	let inBorders = false;
 	let border:
 		| { top?: BorderEdge; right?: BorderEdge; bottom?: BorderEdge; left?: BorderEdge }
-		| undefined
-	let edgeName: "top" | "right" | "bottom" | "left" | undefined
-	let edgeStyle: BorderLineStyle | undefined
-	let edgeColor: Color | undefined
+		| undefined;
+	let edgeName: "top" | "right" | "bottom" | "left" | undefined;
+	let edgeStyle: BorderLineStyle | undefined;
+	let edgeColor: Color | undefined;
 
 	const commitEdge = (): void => {
 		if (border !== undefined && edgeName !== undefined && edgeStyle !== undefined) {
 			border[edgeName] =
 				edgeColor !== undefined
 					? { style: edgeStyle, color: edgeColor }
-					: { style: edgeStyle }
+					: { style: edgeStyle };
 		}
-		edgeName = undefined
-		edgeStyle = undefined
-		edgeColor = undefined
-	}
+		edgeName = undefined;
+		edgeStyle = undefined;
+		edgeColor = undefined;
+	};
 
 	for (const token of tokenize(xml)) {
-		if (token.kind === "text") continue
-		const name = localName(token.name)
+		if (token.kind === "text") continue;
+		const name = localName(token.name);
 
 		if (token.kind === "open") {
 			if (name === "numFmts") {
-				if (!token.selfClosing) inNumFmts = true
+				if (!token.selfClosing) inNumFmts = true;
 			} else if (name === "numFmt" && inNumFmts) {
-				const id = Number(token.attrs.numFmtId)
-				const code = token.attrs.formatCode
-				if (Number.isInteger(id) && code !== undefined) customFormats.set(id, code)
+				const id = Number(token.attrs.numFmtId);
+				const code = token.attrs.formatCode;
+				if (Number.isInteger(id) && code !== undefined) customFormats.set(id, code);
 			} else if (name === "fonts") {
-				if (!token.selfClosing) inFonts = true
+				if (!token.selfClosing) inFonts = true;
 			} else if (name === "font" && inFonts) {
-				font = {}
+				font = {};
 				if (token.selfClosing) {
-					fonts.push({})
-					font = undefined
+					fonts.push({});
+					font = undefined;
 				}
 			} else if (font !== undefined && FONT_CHILDREN.has(name)) {
 				// Children of the open <font>, gated by NAME so this branch can never swallow a
@@ -364,94 +364,94 @@ export function parseStyles(xml: string): StyleTable {
 				if (name === "name" && token.attrs.val !== undefined) {
 					// An empty or XML-unsafe name (a control character can arrive via a decoded
 					// numeric reference) is unwritable — degrade to "no per-cell font name".
-					const val = token.attrs.val
-					if (val !== "" && isXmlSafe(val)) font.name = val
+					const val = token.attrs.val;
+					if (val !== "" && isXmlSafe(val)) font.name = val;
 				} else if (name === "sz") {
-					const size = Number(token.attrs.val)
-					if (Number.isFinite(size) && size > 0) font.size = size
+					const size = Number(token.attrs.val);
+					if (Number.isFinite(size) && size > 0) font.size = size;
 				} else if (name === "b") {
-					if (boolAttr(token.attrs.val)) font.bold = true
+					if (boolAttr(token.attrs.val)) font.bold = true;
 				} else if (name === "i") {
-					if (boolAttr(token.attrs.val)) font.italic = true
+					if (boolAttr(token.attrs.val)) font.italic = true;
 				} else if (name === "u") {
 					// <u/> is single; val names the variant. Accounting variants degrade (deferred).
-					const val = token.attrs.val ?? "single"
-					if (val === "single" || val === "double") font.underline = val
+					const val = token.attrs.val ?? "single";
+					if (val === "single" || val === "double") font.underline = val;
 				} else if (name === "strike") {
-					if (boolAttr(token.attrs.val)) font.strike = true
+					if (boolAttr(token.attrs.val)) font.strike = true;
 				} else if (name === "color") {
-					const color = parseColor(token.attrs)
-					if (color !== undefined) font.color = color
+					const color = parseColor(token.attrs);
+					if (color !== undefined) font.color = color;
 				}
 			} else if (name === "fills") {
-				if (!token.selfClosing) inFills = true
+				if (!token.selfClosing) inFills = true;
 			} else if (name === "fill" && inFills) {
-				if (token.selfClosing) fills.push(undefined)
+				if (token.selfClosing) fills.push(undefined);
 				else {
-					inFill = true
-					fill = undefined
+					inFill = true;
+					fill = undefined;
 				}
 			} else if (name === "patternFill" && inFill) {
-				const patternType = token.attrs.patternType
+				const patternType = token.attrs.patternType;
 				fill = {
 					patternType:
 						patternType !== undefined && PATTERN_TYPES.has(patternType as PatternType)
 							? (patternType as PatternType)
 							: "none",
-				}
+				};
 			} else if (name === "fgColor" && fill !== undefined) {
-				const color = parseColor(token.attrs)
-				if (color !== undefined) fill.fgColor = color
+				const color = parseColor(token.attrs);
+				if (color !== undefined) fill.fgColor = color;
 			} else if (name === "bgColor" && fill !== undefined) {
-				const color = parseColor(token.attrs)
-				if (color !== undefined) fill.bgColor = color
+				const color = parseColor(token.attrs);
+				if (color !== undefined) fill.bgColor = color;
 			} else if (name === "borders") {
-				if (!token.selfClosing) inBorders = true
+				if (!token.selfClosing) inBorders = true;
 			} else if (name === "border" && inBorders) {
-				if (token.selfClosing) borders.push({})
-				else border = {}
+				if (token.selfClosing) borders.push({});
+				else border = {};
 			} else if (
 				border !== undefined &&
 				(name === "left" || name === "right" || name === "top" || name === "bottom")
 			) {
-				const style = token.attrs.style
+				const style = token.attrs.style;
 				const lineStyle =
 					style !== undefined && BORDER_LINE_STYLES.has(style as BorderLineStyle)
 						? (style as BorderLineStyle)
-						: undefined
+						: undefined;
 				if (token.selfClosing) {
 					// <left style="thin"/> — complete edge; <left/> — no border on this edge.
 					if (lineStyle !== undefined && border !== undefined)
-						border[name] = { style: lineStyle }
+						border[name] = { style: lineStyle };
 				} else {
-					edgeName = name
-					edgeStyle = lineStyle
-					edgeColor = undefined
+					edgeName = name;
+					edgeStyle = lineStyle;
+					edgeColor = undefined;
 				}
 			} else if (name === "color" && edgeName !== undefined) {
-				const color = parseColor(token.attrs)
-				if (color !== undefined) edgeColor = color
+				const color = parseColor(token.attrs);
+				if (color !== undefined) edgeColor = color;
 			} else if (name === "cellXfs") {
-				if (!token.selfClosing) inCellXfs = true
+				if (!token.selfClosing) inCellXfs = true;
 			} else if (name === "xf" && inCellXfs) {
-				const numFmtId = Number(token.attrs.numFmtId ?? "0")
-				const fontId = Number(token.attrs.fontId ?? "0")
-				const fillId = Number(token.attrs.fillId ?? "0")
-				const borderId = Number(token.attrs.borderId ?? "0")
+				const numFmtId = Number(token.attrs.numFmtId ?? "0");
+				const fontId = Number(token.attrs.fontId ?? "0");
+				const fillId = Number(token.attrs.fillId ?? "0");
+				const borderId = Number(token.attrs.borderId ?? "0");
 				xfs.push({
 					numFmtId: Number.isInteger(numFmtId) ? numFmtId : 0,
 					fontId: Number.isInteger(fontId) ? fontId : 0,
 					fillId: Number.isInteger(fillId) ? fillId : 0,
 					borderId: Number.isInteger(borderId) ? borderId : 0,
 					alignment: undefined,
-				})
-				if (!token.selfClosing) inXf = true
+				});
+				if (!token.selfClosing) inXf = true;
 			} else if (name === "alignment" && inXf) {
 				// Inline alignment belongs to the last-opened cellXfs <xf>.
-				const alignment = parseAlignment(token.attrs)
+				const alignment = parseAlignment(token.attrs);
 				if (alignment !== undefined && xfs.length > 0) {
-					const last = xfs[xfs.length - 1] as XfRecord
-					xfs[xfs.length - 1] = { ...last, alignment }
+					const last = xfs[xfs.length - 1] as XfRecord;
+					xfs[xfs.length - 1] = { ...last, alignment };
 				}
 			}
 		} else if (token.kind === "close") {
@@ -461,125 +461,125 @@ export function parseStyles(xml: string): StyleTable {
 			// the builder stops it from capturing look-alike elements later in the document (a
 			// <dxf> block legitimately contains <font>/<fill>/<border> children — adversarial
 			// review showed a leaked builder grafting a dxf fill/color onto cell styles).
-			if (name === "numFmts") inNumFmts = false
+			if (name === "numFmts") inNumFmts = false;
 			else if (name === "fonts") {
-				inFonts = false
+				inFonts = false;
 				if (font !== undefined) {
-					fonts.push(font)
-					font = undefined
+					fonts.push(font);
+					font = undefined;
 				}
 			} else if (name === "font") {
 				if (font !== undefined) {
-					fonts.push(font)
-					font = undefined
+					fonts.push(font);
+					font = undefined;
 				}
 			} else if (name === "fills") {
-				inFills = false
+				inFills = false;
 				if (inFill) {
-					fills.push(fill)
-					fill = undefined
-					inFill = false
+					fills.push(fill);
+					fill = undefined;
+					inFill = false;
 				}
 			} else if (name === "fill") {
 				if (inFill) {
-					fills.push(fill)
-					fill = undefined
-					inFill = false
+					fills.push(fill);
+					fill = undefined;
+					inFill = false;
 				}
 			} else if (name === "borders") {
-				inBorders = false
+				inBorders = false;
 				if (border !== undefined) {
-					commitEdge()
-					borders.push(border)
-					border = undefined
+					commitEdge();
+					borders.push(border);
+					border = undefined;
 				}
 			} else if (name === "border") {
 				if (border !== undefined) {
-					commitEdge()
-					borders.push(border)
-					border = undefined
+					commitEdge();
+					borders.push(border);
+					border = undefined;
 				}
 			} else if (name === "left" || name === "right" || name === "top" || name === "bottom") {
-				if (edgeName === name) commitEdge()
+				if (edgeName === name) commitEdge();
 			} else if (name === "cellXfs") {
-				inCellXfs = false
-				inXf = false
-			} else if (name === "xf") inXf = false
+				inCellXfs = false;
+				inXf = false;
+			} else if (name === "xf") inXf = false;
 		}
 	}
 
 	function isDateStyle(styleIndex: number | undefined): boolean {
 		// An omitted `s` means style 0, the implicit default format.
-		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId
-		if (numFmtId === undefined) return false
-		const custom = customFormats.get(numFmtId)
-		return custom !== undefined ? isDateFormatCode(custom) : isBuiltinDateId(numFmtId)
+		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId;
+		if (numFmtId === undefined) return false;
+		const custom = customFormats.get(numFmtId);
+		return custom !== undefined ? isDateFormatCode(custom) : isBuiltinDateId(numFmtId);
 	}
 
 	function formatCode(styleIndex: number | undefined): string | undefined {
 		// An omitted `s` means style 0, the implicit default format. A custom code for the id
 		// wins over the built-in table (a file may redefine one); unknown ids stay undefined.
-		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId
-		if (numFmtId === undefined) return undefined
-		return customFormats.get(numFmtId) ?? BUILTIN_FORMATS[numFmtId]
+		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId;
+		if (numFmtId === undefined) return undefined;
+		return customFormats.get(numFmtId) ?? BUILTIN_FORMATS[numFmtId];
 	}
 
 	// Materialize (and cache) the resolved CellStyle for an xf index. The cache makes results
 	// reference-stable — cellStyle(i) === cellStyle(i) — which downstream consumers (the bridge,
 	// the writer's interner) rely on to dedup styles by identity instead of deep comparison.
-	const styleCache = new Map<number, CellStyle | undefined>()
+	const styleCache = new Map<number, CellStyle | undefined>();
 
 	function cellStyle(styleIndex: number | undefined): CellStyle | undefined {
-		const index = styleIndex ?? 0
-		const cached = styleCache.get(index)
-		if (cached !== undefined || styleCache.has(index)) return cached
+		const index = styleIndex ?? 0;
+		const cached = styleCache.get(index);
+		if (cached !== undefined || styleCache.has(index)) return cached;
 
-		const xf = xfs[index]
-		let result: CellStyle | undefined
+		const xf = xfs[index];
+		let result: CellStyle | undefined;
 		if (xf !== undefined) {
 			const style: {
-				numberFormat?: string
-				font?: FontStyle
-				fill?: FillStyle
-				border?: BorderStyle
-				alignment?: Alignment
-			} = {}
+				numberFormat?: string;
+				font?: FontStyle;
+				fill?: FillStyle;
+				border?: BorderStyle;
+				alignment?: Alignment;
+			} = {};
 			// numberFormat: "General" is the absence of a format, not a format — whether as id 0
 			// or as an explicitly interned custom code (LibreOffice writes <numFmt numFmtId="164"
 			// formatCode="General"/> and points xfs at it). Normalizing it away here keeps the
 			// style model symmetric with the writer, which reverse-maps 'General' to id 0. Locale
 			// ids with no portable code stay absent too (documented; nothing faithful to return).
 			if (xf.numFmtId !== 0) {
-				const code = customFormats.get(xf.numFmtId) ?? BUILTIN_FORMATS[xf.numFmtId]
+				const code = customFormats.get(xf.numFmtId) ?? BUILTIN_FORMATS[xf.numFmtId];
 				// An EMPTY custom code is as meaningless as General — degrade both to "no format".
 				// An XML-UNSAFE code (a control character can arrive via a decoded numeric
 				// reference in formatCode) is unwritable, exactly like an unsafe font name —
 				// degrade it too, or the bridge would crash on a file the reader tolerated.
 				if (code !== undefined && code !== "" && code !== "General" && isXmlSafe(code)) {
-					style.numberFormat = code
+					style.numberFormat = code;
 				}
 			}
 			// font: id 0 is the workbook default font — "no per-cell font", by definition. A
 			// non-zero id counts even if its content happens to match the default (content dedup
 			// is the writer's job, not the reader's).
 			if (xf.fontId !== 0) {
-				const fontRecord = fonts[xf.fontId]
-				if (fontRecord !== undefined && hasKeys(fontRecord)) style.font = fontRecord
+				const fontRecord = fonts[xf.fontId];
+				if (fontRecord !== undefined && hasKeys(fontRecord)) style.font = fontRecord;
 			}
 			// fill: judged by VALUE, not id — fill 0 is 'none' by spec, and any other id whose
 			// pattern is 'none' paints nothing either.
-			const fillRecord = fills[xf.fillId]
+			const fillRecord = fills[xf.fillId];
 			if (fillRecord !== undefined && fillRecord.patternType !== "none")
-				style.fill = fillRecord
+				style.fill = fillRecord;
 			// border: only when at least one edge draws a line.
-			const borderRecord = borders[xf.borderId]
-			if (borderRecord !== undefined && hasKeys(borderRecord)) style.border = borderRecord
-			if (xf.alignment !== undefined) style.alignment = xf.alignment
-			result = hasKeys(style) ? style : undefined
+			const borderRecord = borders[xf.borderId];
+			if (borderRecord !== undefined && hasKeys(borderRecord)) style.border = borderRecord;
+			if (xf.alignment !== undefined) style.alignment = xf.alignment;
+			result = hasKeys(style) ? style : undefined;
 		}
-		styleCache.set(index, result)
-		return result
+		styleCache.set(index, result);
+		return result;
 	}
 
-	return { isDateStyle, formatCode, cellStyle }
+	return { isDateStyle, formatCode, cellStyle };
 }

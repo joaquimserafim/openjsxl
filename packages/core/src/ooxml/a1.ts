@@ -3,73 +3,73 @@
 
 export interface CellRef {
 	/** 1-based column index (A = 1). */
-	readonly col: number
+	readonly col: number;
 	/** 1-based row index. */
-	readonly row: number
+	readonly row: number;
 }
 
 // Excel's grid limits (XFD1048576). The tolerant READER keeps cells beyond them, faithful to the
 // bytes; the WRITER and the bridge refuse them — a ref outside the grid is unopenable in Excel,
 // and an absurd row number would otherwise become the length of an array someone iterates.
 /** Highest row Excel supports (1,048,576). */
-export const MAX_ROW = 1_048_576
+export const MAX_ROW = 1_048_576;
 /** Highest column Excel supports (16,384 = XFD). */
-export const MAX_COL = 16_384
+export const MAX_COL = 16_384;
 /** Excel's column-width ceiling (in characters of the default font). */
-export const MAX_COL_WIDTH = 255
+export const MAX_COL_WIDTH = 255;
 /** Excel's row-height ceiling (in points). */
-export const MAX_ROW_HEIGHT = 409.5
+export const MAX_ROW_HEIGHT = 409.5;
 
-const CODE_UPPER_A = 65
-const CODE_UPPER_Z = 90
-const CODE_LOWER_A = 97
-const CODE_LOWER_Z = 122
+const CODE_UPPER_A = 65;
+const CODE_UPPER_Z = 90;
+const CODE_LOWER_A = 97;
+const CODE_LOWER_Z = 122;
 
 export function columnToIndex(letters: string): number {
-	if (letters.length === 0) throw new Error("empty column reference")
-	let index = 0
+	if (letters.length === 0) throw new Error("empty column reference");
+	let index = 0;
 	for (let i = 0; i < letters.length; i++) {
-		const code = letters.charCodeAt(i)
-		let value = 0
-		if (code >= CODE_UPPER_A && code <= CODE_UPPER_Z) value = code - CODE_UPPER_A + 1
-		else if (code >= CODE_LOWER_A && code <= CODE_LOWER_Z) value = code - CODE_LOWER_A + 1
-		else throw new Error(`invalid column reference: ${letters}`)
-		index = index * 26 + value
+		const code = letters.charCodeAt(i);
+		let value = 0;
+		if (code >= CODE_UPPER_A && code <= CODE_UPPER_Z) value = code - CODE_UPPER_A + 1;
+		else if (code >= CODE_LOWER_A && code <= CODE_LOWER_Z) value = code - CODE_LOWER_A + 1;
+		else throw new Error(`invalid column reference: ${letters}`);
+		index = index * 26 + value;
 		// An absurdly long ref (far beyond Excel's XFD/16384 limit) overflows past exact
 		// integer precision — bail before it silently becomes a lossy float or Infinity, which
 		// would poison downstream column arithmetic and formatRef. Bailing here also caps work
 		// on a megabyte-long attacker-supplied ref. Callers that tolerate bad refs (the reader's
 		// safeColumn) catch this and fall back to positional addressing.
 		if (index > Number.MAX_SAFE_INTEGER)
-			throw new Error(`column reference too large: ${letters}`)
+			throw new Error(`column reference too large: ${letters}`);
 	}
-	return index
+	return index;
 }
 
 export function indexToColumn(index: number): string {
-	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid column index: ${index}`)
-	let remaining = index
-	let letters = ""
+	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid column index: ${index}`);
+	let remaining = index;
+	let letters = "";
 	while (remaining > 0) {
-		const digit = (remaining - 1) % 26
-		letters = String.fromCharCode(CODE_UPPER_A + digit) + letters
-		remaining = Math.floor((remaining - 1) / 26)
+		const digit = (remaining - 1) % 26;
+		letters = String.fromCharCode(CODE_UPPER_A + digit) + letters;
+		remaining = Math.floor((remaining - 1) / 26);
 	}
-	return letters
+	return letters;
 }
 
-const A1_PATTERN = /^([A-Za-z]+)([1-9][0-9]*)$/
+const A1_PATTERN = /^([A-Za-z]+)([1-9][0-9]*)$/;
 
 export function parseRef(ref: string): CellRef {
-	const match = A1_PATTERN.exec(ref)
-	if (match === null) throw new Error(`invalid A1 reference: ${ref}`)
+	const match = A1_PATTERN.exec(ref);
+	if (match === null) throw new Error(`invalid A1 reference: ${ref}`);
 	return {
 		col: columnToIndex(match[1] as string),
 		row: Number.parseInt(match[2] as string, 10),
-	}
+	};
 }
 
 export function formatRef(ref: CellRef): string {
-	if (!Number.isInteger(ref.row) || ref.row < 1) throw new Error(`invalid row index: ${ref.row}`)
-	return `${indexToColumn(ref.col)}${ref.row}`
+	if (!Number.isInteger(ref.row) || ref.row < 1) throw new Error(`invalid row index: ${ref.row}`);
+	return `${indexToColumn(ref.col)}${ref.row}`;
 }
