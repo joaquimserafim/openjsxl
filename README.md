@@ -9,12 +9,12 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **reader + writer — pre-1.0.** Read typed cells, styles, number formats, merged ranges,
-> hyperlinks, and comments; stream large sheets in roughly constant memory; get typed errors on
-> malformed input. Write `.xlsx` from plain data with `writeXlsx`, and read → modify → write with
-> `workbookToInput`. **New in 0.4:** cell styles (fonts, fills, borders, alignment, number
-> formats) read *and* write, sheet geometry (column widths, row heights, frozen panes), and
-> structural metadata (merged ranges, hyperlinks, sheet visibility) — all of it round-trips.
+> Status: **reader + writer — pre-1.0.** Read typed cells, styles, number formats, formulas,
+> merged ranges, hyperlinks, and comments; stream large sheets in roughly constant memory; get
+> typed errors on malformed input. Write `.xlsx` from plain data with `writeXlsx`, and
+> read → modify → write with `workbookToInput`. **New in 0.5:** comments write (visible in
+> Excel), formula text round-trip, custom-theme carry + `resolveColor`, a constant-memory
+> streaming writer (`streamXlsx`), and [published benchmarks](./docs/benchmarks.md).
 > Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
 > [implementation plan](./IMPLEMENTATION.md).
 
@@ -96,6 +96,7 @@ const sheet = wb.sheet(wb.sheets[0].name);
 
 sheet.style('B2'); // { font?, fill?, border?, alignment?, numberFormat? } | undefined
 sheet.numberFormat('C1'); // "mm-dd-yy" — the format code, independent of the value
+sheet.formula('E1'); // "B1*2" — the formula text (shared formulas come back translated)
 sheet.dimension; // "A1:E2" | undefined (the declared used range)
 sheet.mergedCells; // ["A1:B1", "A2:A4", …]
 sheet.hyperlinks; // [{ ref: "A1", target: "https://…", tooltip?, location?, display? }, …]
@@ -104,6 +105,9 @@ sheet.columns; // [{ min: 2, max: 3, width: 25.5, hidden? }, …] — column geo
 sheet.rowProperties; // Map<row, { height?, hidden? }>
 sheet.freeze; // { rows?, cols? } | undefined — the frozen pane
 sheet.state; // "visible" | "hidden" | "veryHidden" (sheet.visible is the boolean)
+
+wb.resolveColor({ theme: 4, tint: 0.4 }); // "FF96B4D8" — a style color as 8-digit ARGB,
+// resolved against the workbook's own theme (colors stay raw {theme, tint} in the style model)
 ```
 
 ## Writing
@@ -167,6 +171,32 @@ const bytes = await writeXlsx({
 });
 ```
 
+### Comments, formulas & streaming (0.5)
+
+A cell can carry a formula (`{ formula, value? }` — the cached `value` is what non-recalculating
+readers see), sheets take `comments` (written with the legacy VML part Excel needs to actually
+*show* them on hover), and `streamXlsx` is the constant-memory mirror of `writeXlsx` — each
+sheet's `rows` may be any sync or async iterable (a DB cursor, a paged API), pulled only as the
+output stream drains, so the full sheet never lives in memory:
+
+```ts
+import { streamXlsx, writeXlsx } from 'openjsxl';
+
+const bytes = await writeXlsx({
+	sheets: [
+		{
+			name: 'Report',
+			rows: [[42, { formula: 'A1*2', value: 84 }]],
+			comments: [{ ref: 'A1', author: 'Ada', text: 'the answer' }],
+		},
+	],
+});
+
+// Same input shape, but rows can be lazy — memory stays flat at any row count.
+const stream = streamXlsx({ sheets: [{ name: 'Big', rows: millionRowCursor() }] });
+await stream.pipeTo(destination);
+```
+
 ### Read → modify → write
 
 `workbookToInput` turns an open `Workbook` back into writer input, so you can round-trip a file:
@@ -181,26 +211,29 @@ input.sheets[0].rows.push(['appended', 'row']); // tweak the plain data
 await writeFile('out.xlsx', await writeXlsx(input));
 ```
 
-The round trip is **lossless for values, types, sheet names/order, styles, geometry, and
-structural metadata**:
+The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
+geometry, and structural metadata**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
-| string, number, boolean, `Date` values | comments (planned for 0.5) |
-| number formats — built-in & custom codes | formulas (only the cached value survives) |
-| fonts, fills, borders, alignment | error cells (written as their text) |
+| string, number, boolean, `Date` values | error cells without a formula (written as their text) |
+| number formats — built-in & custom codes | |
+| fonts, fills, borders, alignment | |
 | colors: rgb, indexed, theme + tint (raw) | |
+| custom theme part (carried byte-identical) | |
+| formula text + cached value | |
+| comments (author + text, Excel-visible) | |
 | empty cells (sparse), incl. styled blanks | |
 | column widths, row heights, hidden, freeze | |
 | merged ranges & hyperlinks | |
 | sheet visibility (hidden / veryHidden) | |
 | sheet names & tab order | |
 
-Three documented flattenings (values stay exact; internal spelling normalizes): row/column
-*default* styles resolve into per-cell styles (each cell keeps its effective format); files
-authored under a **custom theme** keep their `{theme, tint}` color indexes but re-render against
-the standard Office theme after a rewrite (`rgb`/`indexed` colors are unaffected); and a
-tolerated non-canonical cell ref spelling (e.g. lowercase `a1`) re-emits canonically (`A1`).
+Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
+styles resolve into per-cell styles (each cell keeps its effective format); shared and array
+formulas re-emit as per-cell plain formulas (the same text Excel shows in each cell — data-table
+formulas keep only their cached value); and a tolerated non-canonical cell ref spelling (e.g.
+lowercase `a1`) re-emits canonically (`A1`).
 
 ## Why
 
