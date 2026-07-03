@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.5.0` (already set) — skip this step. For a later
+For the current release the version is `0.5.1` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -110,6 +110,11 @@ git push -f origin v<version>
   streaming writer fed by sync/async row iterables. The round-trip drop-list is down to bare
   error cells. Additive reader API: `Worksheet.formula(ref)`, `Workbook.resolveColor`/`themeXml`.
   Published, reproducible benchmarks land in `docs/benchmarks.md` (`pnpm bench`).
+- **`0.5.1`** — two writer fixes from a post-release cross-cutting review: `streamXlsx` no longer
+  drops `rowProperties` addressed past the last streamed row (it now emits the trailing
+  property-only `<row/>` elements exactly like `writeXlsx`), and the zip entry cap is 65 534 in
+  both writers so the EOCD count can never carry `0xffff`, the ZIP64 sentinel. Benchmarks
+  re-measured on the fixed build (no regression). No API change.
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes

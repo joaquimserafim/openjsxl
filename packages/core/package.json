@@ -1,6 +1,6 @@
 {
 	"name": "@openjsxl/core",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"description": "Core OOXML engine for openjsxl — zero-dependency .xlsx primitives (zip, xml, cell typing, read + write).",
 	"type": "module",
 	"license": "MIT",

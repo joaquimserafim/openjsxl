@@ -253,10 +253,10 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
 | --- | --- | --- | --- |
-| **read** | **0.71 s · 205 MB** | 1.6 s · 717 MB | 2.2 s · 547 MB |
-| **write** | **0.73 s · 389 MB** | 3.2 s · 1.5 GB | 2.5 s · 566 MB |
+| **read** | **0.70 s · 205 MB** | 1.5 s · 820 MB | 2.1 s · 521 MB |
+| **write** | **0.69 s · 395 MB** | 3.1 s · 1.5 GB | 2.2 s · 565 MB |
 
-Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~100 MB)** no matter
+Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~95 MB)** no matter
 the row count. The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write),
 the methodology, and out-of-band **openpyxl** / **python-calamine** reference numbers are in
 [`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce it end-to-end with `pnpm bench`.
