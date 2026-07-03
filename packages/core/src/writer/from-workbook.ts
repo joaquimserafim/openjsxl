@@ -1,7 +1,15 @@
 import { XlsxError } from "../errors"
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1"
 import type { Workbook, Worksheet } from "../reader/workbook"
-import type { Cell, ColumnProps, FreezePane, Hyperlink, RowProps, SheetState } from "../types"
+import type {
+	Cell,
+	ColumnProps,
+	Comment,
+	FreezePane,
+	Hyperlink,
+	RowProps,
+	SheetState,
+} from "../types"
 import type { CellInput, SheetInput, WorkbookInput } from "./types"
 
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
@@ -14,9 +22,8 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 // documented, not silently mangled:
 //   - formulas               → only the cached value survives (its type/number)
 //   - error cells            → written as their literal text (e.g. "#DIV/0!"), so they become strings
-//   - comments               → dropped (they need a VML legacy-drawing part; planned for 0.5)
-//   (column widths, row heights, hidden flags, frozen panes — F4.5 — and merges, hyperlinks,
-//   sheet visibility — F4.6 — DO carry across)
+//   (column widths, row heights, hidden flags, frozen panes — F4.5 — merges, hyperlinks, sheet
+//   visibility — F4.6 — and cell comments — F5.2 — DO carry across)
 //   - locale-only number formats (ids 23–36, 50–58) → no portable code exists; the format flattens
 //     (a date keeps its value and date-ness via the implicit format)
 // Three documented FLATTENINGS (values stay exact; the file's internal spelling normalizes):
@@ -113,6 +120,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			merges?: readonly string[]
 			hyperlinks?: readonly Hyperlink[]
 			state?: SheetState
+			comments?: readonly Comment[]
 		} = { name: info.name, rows }
 		const columns = worksheet.columns
 		if (columns.length > 0) sheet.columns = columns
@@ -125,6 +133,8 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		const hyperlinks = worksheet.hyperlinks
 		if (hyperlinks.length > 0) sheet.hyperlinks = hyperlinks
 		if (info.state !== "visible") sheet.state = info.state
+		const comments = worksheet.comments
+		if (comments.length > 0) sheet.comments = comments
 		sheets.push(sheet)
 	}
 	return { sheets }

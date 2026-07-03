@@ -3,7 +3,15 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
-import type { CellStyle, ColumnProps, FreezePane, Hyperlink, RowProps, SheetState } from "../types"
+import type {
+	CellStyle,
+	ColumnProps,
+	Comment,
+	FreezePane,
+	Hyperlink,
+	RowProps,
+	SheetState,
+} from "../types"
 
 /**
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:
@@ -70,6 +78,12 @@ export interface SheetInput {
 	 * remain visible, or Excel refuses the file.
 	 */
 	readonly state?: SheetState
+	/**
+	 * Cell comments on this sheet (F5.2) — the same records `Worksheet.comments` returns. Each needs
+	 * a single-cell `ref` and `text`; `author` is optional. Excel shows a comment only alongside a
+	 * legacy VML drawing, which the writer emits automatically for every commented sheet.
+	 */
+	readonly comments?: readonly Comment[]
 }
 
 export interface WorkbookInput {

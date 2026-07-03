@@ -607,7 +607,7 @@ refactor; F5.1 (streaming) lands AFTER them so it reuses one final set of helper
 (benchmarks) needs F5.1 for the streaming numbers. Suggested order: F5.2, F5.3, F5.4,
 F5.1, F5.5 — one feature per session, each proceed-gated.
 
-### F5.2 — Comments write (legacy VML) + bridge carry ☐
+### F5.2 — Comments write (legacy VML) + bridge carry ☑
 **Context.** The reader parses legacy comments (`xl/commentsN.xml`: authors + rich-text
 runs concatenated to plain text) since F2.3; the bridge documents dropping them. Excel only
 SHOWS a comment if the workbook also carries the legacy **VML drawing** part with a shape
@@ -634,17 +634,28 @@ text runs — plain text only, matching the reader.
 - VML is written from one minified template with per-shape substitution; byte-determinism
   as everywhere.
 **Tasks**
-- [ ] Per-sheet rels refactor (hyperlinks keep their bytes when no comments present — the
-      F4.6 tests must not change).
-- [ ] comments + VML emission, validation, content types; `Worksheet` re-reads its own
+- [x] Per-sheet rels refactor (`WorksheetResult.rels: SheetRel[]`, one rId counter; hyperlinks
+      keep their exact bytes when no comments present — F4.6 tests unchanged, byte-identity 7/7).
+- [x] comments + VML emission, validation, content types; `Worksheet` re-reads its own
       output verbatim (`comments` accessor).
-- [ ] Bridge carries `comments`; corpus snapshot gains `comments`; drop-list shrinks to
+- [x] Bridge carries `comments`; corpus snapshot gains `comments`; drop-list shrinks to
       formulas + error cells.
-- [ ] Fixture: openpyxl-authored comments file already exists in the vendored corpus —
-      confirm coverage; add one if the corpus lacks an author-less comment.
-- [ ] openpyxl reads our comments (author + text) warnings-as-errors; adversarial review.
+- [x] Fixture: `openpyxl-comments.xlsx` added (two resolved authors + an author-less comment;
+      every commented cell valued so no empty-anchor placeholder); provenance in data/README.md.
+- [x] openpyxl reads our comments (author + text) warnings-as-errors; adversarial review.
 **Acceptance.** A written comment is visible in Excel/LibreOffice on hover (openpyxl
 proxy-verified: both `comment.text` and `comment.author` match); round-trip lossless.
+**Landed (uncommitted, awaiting owner approval).** `SheetInput.comments`; per-sheet
+`xl/commentsN.xml` + `xl/drawings/vmlDrawingN.vml` (hidden note shapes, 0-based Row/Column, no
+explicit `<x:Anchor>` — matches openpyxl) + `<legacyDrawing r:id>` after `</hyperlinks>`; the
+per-sheet rels part is now generic so hyperlinks/comments/vmlDrawing share one non-colliding rId
+counter. **Design note:** comments on an otherwise-empty cell keep the comment but drop the blank
+anchor `<c>` (like every unstyled empty cell) — pinned by a test. Gate: biome 0 / tsc 0 /
+**397 tests** / byte-identity 7/7 vs pre-F5.2 build / openpyxl both ways / all emitted parts (incl.
+VML) well-formed. **Adversarial review: 0 findings** — 4 finders (spec-conformance, round-trip/
+bridge, hostile-input, algorithm-correctness) with deep empirical probing surfaced nothing;
+independently re-verified byte-identity, TOCTOU single-read, dup-ref tolerance (openpyxl accepts,
+no repair), and multi-sheet VML idmap reuse (matches openpyxl).
 
 ### F5.3 — Theme fidelity: parse, resolve, carry ☐
 **Context.** Colors are kept RAW (`{theme, tint?}` never resolved) — correct for

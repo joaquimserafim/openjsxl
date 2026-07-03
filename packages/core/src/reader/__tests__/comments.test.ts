@@ -65,6 +65,21 @@ describe("Worksheet.comments — no comments part", () => {
 	})
 })
 
+// Real-producer e2e (openpyxl 3.1.5 — see fixtures/data/README.md). Committed to the corpus so it
+// always runs, unlike the local-only POI file above. Covers two resolved authors plus an
+// author-less comment (openpyxl writes <author/>, which the reader omits rather than fabricating).
+describe("Worksheet.comments — openpyxl-authored fixture (e2e)", () => {
+	it("reads resolved authors and omits the author-less one", async () => {
+		const wb = await openXlsx(await loadFixture("openpyxl-comments.xlsx"))
+		expect(wb.sheet("Notes").comments).toEqual([
+			{ ref: "B2", author: "Ada", text: "check this figure" },
+			{ ref: "C3", author: "Grace", text: "EMEA only" },
+			{ ref: "D4", text: "no attribution" }, // <author/> → author omitted
+		])
+		expect(wb.sheet("Plain").comments).toEqual([])
+	})
+})
+
 // Real Excel comment output — Apache-2.0 POI fixtures kept local-only (git/npm-ignored).
 // Runs when present; skipped on a fresh clone or in CI.
 const poi = "SimpleWithComments.xlsx"

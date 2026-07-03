@@ -9,7 +9,7 @@ import {
 	parseRef,
 } from "../ooxml/a1"
 import { dateToSerial } from "../ooxml/dates"
-import type { ColumnProps, FreezePane, Hyperlink, RowProps } from "../types"
+import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
 import type { StyleRegistry } from "./styles"
 import type { CellInput, CellValue, SheetInput, StyledCell } from "./types"
 import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml"
@@ -446,26 +446,166 @@ function hyperlinksXml(
 	return { xml: `<hyperlinks>${entries.join("")}</hyperlinks>`, targets }
 }
 
-export interface WorksheetResult {
-	readonly xml: string
-	/** External hyperlink targets in r:id order — non-empty means the sheet needs a rels part. */
-	readonly hyperlinkTargets: readonly string[]
+// ── Comments (F5.2): xl/commentsN.xml + legacy VML drawing — validation + emission ─────────────
+// Excel renders a comment only when the sheet carries BOTH parts: the comments part (an authors
+// table + a commentList) AND a legacy VML drawing with one hidden note shape per comment. A
+// comments part alone reads back through a tolerant parser but shows nothing in Excel — which is
+// why openpyxl always writes both. We emit both from one validated list. Validation mirrors
+// hyperlinks: a single-cell canonical `ref` (no ranges), every caller property read exactly once
+// (TOCTOU), unknown keys rejected, author/text gated by isXmlSafe. Authors form a
+// first-occurrence-ordered unique table; a comment with no author shares one empty-string author
+// entry (matching openpyxl). Unused ⇒ nothing emitted, so byte-identity holds for comment-free
+// sheets.
+
+// The VML shell is constant; only the note shapes vary. Standard v/o/x prefixes; the box style,
+// fill, and shadow are copied verbatim from openpyxl's proven-rendering output.
+const VML_HEAD =
+	'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">' +
+	'<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
+	'<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">' +
+	'<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>'
+const VML_TAIL = "</xml>"
+
+// One hidden note shape. `index` gives a unique shape id (Excel's ids start at _x0000_s1025) and a
+// z-index; `row0`/`col0` are the 0-based cell coordinates. openpyxl emits no explicit <x:Anchor> —
+// Excel positions the box from Row/Column plus the fixed margin style — so those coordinates ARE
+// the anchor arithmetic.
+function vmlShape(index: number, row0: number, col0: number): string {
+	return (
+		`<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202" ` +
+		`style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:144px;height:79px;z-index:${index + 1};visibility:hidden" ` +
+		'fillcolor="#ffffe1" o:insetmode="auto">' +
+		'<v:fill color2="#ffffe1"/><v:shadow color="black" obscured="t"/><v:path o:connecttype="none"/>' +
+		'<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
+		'<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:AutoFill>False</x:AutoFill>' +
+		`<x:Row>${row0}</x:Row><x:Column>${col0}</x:Column></x:ClientData></v:shape>`
+	)
 }
 
-/** Build the worksheet XML for one sheet, interning cell styles into the shared registry. */
+interface CommentsParts {
+	readonly commentsXml: string
+	readonly vmlXml: string
+}
+
+// Validate the comments and build both parts, or `undefined` when the sheet has none.
+function commentsParts(
+	sheetName: string,
+	comments: readonly Comment[] | undefined,
+): CommentsParts | undefined {
+	if (comments === undefined) return undefined
+	if (!Array.isArray(comments)) sheetInvalid(sheetName, "comments must be an array")
+	if (comments.length === 0) return undefined
+	const authors: string[] = []
+	const authorIndex = new Map<string, number>()
+	const items: {
+		readonly ref: string
+		readonly authorId: number
+		readonly text: string
+		readonly row: number
+		readonly col: number
+	}[] = []
+	for (let i = 0; i < comments.length; i++) {
+		const raw = comments[i] as unknown
+		const what = `comments[${i}]`
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
+		checkKeys(sheetName, what, raw, ["ref", "author", "text"])
+		// A comment anchors to ONE cell — a range has no meaning (Excel writes a single-cell ref).
+		const ref = raw.ref
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`)
+		const cell = parseCanonicalRef(ref)
+		if (cell === undefined) {
+			sheetInvalid(
+				sheetName,
+				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell within Excel's grid`,
+			)
+		}
+		// text is required (the reader always yields one, possibly empty) and must be XML-safe.
+		const text = raw.text
+		if (typeof text !== "string") sheetInvalid(sheetName, `${what}.text must be a string`)
+		if (!isXmlSafe(text)) {
+			sheetInvalid(
+				sheetName,
+				`${what}.text contains a character not allowed in XML (a control character or lone surrogate)`,
+			)
+		}
+		// author is optional; an absent author shares the single empty-string author entry.
+		const rawAuthor = raw.author
+		let key: string
+		if (rawAuthor === undefined) key = ""
+		else {
+			if (typeof rawAuthor !== "string")
+				sheetInvalid(sheetName, `${what}.author must be a string`)
+			if (!isXmlSafe(rawAuthor)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.author contains a character not allowed in XML (a control character or lone surrogate)`,
+				)
+			}
+			key = rawAuthor
+		}
+		let id = authorIndex.get(key)
+		if (id === undefined) {
+			id = authors.length
+			authors.push(key)
+			authorIndex.set(key, id)
+		}
+		items.push({ ref, authorId: id, text, row: cell.row, col: cell.col })
+	}
+	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join("")
+	const listXml = items
+		.map(
+			(c) =>
+				`<comment ref="${c.ref}" authorId="${c.authorId}" shapeId="0"><text><t${preserveAttr(c.text)}>${escapeText(c.text)}</t></text></comment>`,
+		)
+		.join("")
+	const commentsXml = `${XML_DECL}\n<comments xmlns="${NS_MAIN}"><authors>${authorsXml}</authors><commentList>${listXml}</commentList></comments>`
+	const vmlXml = `${VML_HEAD}${items.map((c, j) => vmlShape(j, c.row - 1, c.col - 1)).join("")}${VML_TAIL}`
+	return { commentsXml, vmlXml }
+}
+
+/** A single-sourced sheet relationship — one <Relationship> line in the sheet's rels part. */
+export interface SheetRel {
+	/** Full relationship type URI (e.g. `${NS_REL}/comments`). */
+	readonly type: string
+	/** The Target value: an external URL, or an internal part path relative to the worksheet. */
+	readonly target: string
+	/** TargetMode="External" — set for hyperlink URLs, clear for internal parts. */
+	readonly external: boolean
+}
+
+export interface WorksheetResult {
+	readonly xml: string
+	/**
+	 * The sheet's relationships in rId order (rId = index + 1) — non-empty means it needs a rels
+	 * part. Hyperlinks come first so a hyperlinks-only sheet keeps its exact pre-F5.2 rels bytes.
+	 */
+	readonly rels: readonly SheetRel[]
+	/** `xl/commentsN.xml` content — present iff the sheet has comments (paired with {@link vmlXml}). */
+	readonly commentsXml?: string
+	/** `xl/drawings/vmlDrawingN.vml` content — the legacy drawing that makes comments render. */
+	readonly vmlXml?: string
+}
+
+/**
+ * Build the worksheet XML for one sheet, interning cell styles into the shared registry.
+ * `sheetIndex` (0-based) names the sheet's own extra parts (comments, VML) so their rel targets and
+ * package paths agree.
+ */
 export function worksheetXml(
 	sheet: SheetInput,
+	sheetIndex: number,
 	date1904: boolean,
 	styles: StyleRegistry,
 ): WorksheetResult {
 	const rows = sheet.rows
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
-	// column/row/freeze/merge/hyperlink spec must surface before any cell work.
+	// column/row/freeze/merge/hyperlink/comment spec must surface before any cell work.
 	const cols = colsXml(sheet.name, sheet.columns)
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties)
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze)
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges)
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks)
+	const comments = commentsParts(sheet.name, sheet.comments)
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
 	let minRow = 0
@@ -537,15 +677,49 @@ export function worksheetXml(
 				? formatRef({ col: minCol, row: minRow })
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`
 
-	// Hyperlink r:ids live in the relationships namespace — declared only when one is used, so a
-	// sheet without external links keeps the exact pre-F4.6 root element.
-	const nsR = links.targets.length > 0 ? ` xmlns:r="${NS_REL}"` : ""
+	// One rId counter for the sheet's relationships part. Hyperlink targets come FIRST (rId1..rIdN,
+	// matching the r:ids hyperlinksXml already emitted), so a hyperlinks-only sheet keeps its exact
+	// pre-F5.2 rels bytes; the comments and vmlDrawing parts (F5.2) take the ids after them.
+	const rels: SheetRel[] = links.targets.map((target) => ({
+		type: `${NS_REL}/hyperlink`,
+		target,
+		external: true,
+	}))
+	let legacyDrawing = ""
+	if (comments !== undefined) {
+		// The comments part is located by rel TYPE (no r:id in the sheet body); the vmlDrawing IS
+		// referenced by <legacyDrawing r:id>. Targets are relative to the worksheet's own directory.
+		rels.push({
+			type: `${NS_REL}/comments`,
+			target: `../comments${sheetIndex + 1}.xml`,
+			external: false,
+		})
+		rels.push({
+			type: `${NS_REL}/vmlDrawing`,
+			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
+			external: false,
+		})
+		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>` // the vmlDrawing rel, just pushed
+	}
+
+	// xmlns:r is declared whenever the body references an rId — a hyperlink and/or the legacyDrawing.
+	// A sheet using neither keeps the exact pre-F4.6 root element.
+	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : ""
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
-	// hyperlinks. Geometry/metadata blocks are empty strings when unused, so a sheet using none
-	// of them emits the exact pre-F4.5/F4.6 bytes.
+	// hyperlinks, legacyDrawing (CT_Worksheet sequence — legacyDrawing follows the hyperlinks/
+	// pageMargins block). Every optional block is an empty string when unused, so a sheet using none
+	// of them emits the exact pre-F4.5/F4.6/F5.2 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
-		.join("")}</sheetData>${mergeCells}${links.xml}</worksheet>`
-	return { xml, hyperlinkTargets: links.targets }
+		.join("")}</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`
+	// Comment parts are present as a pair or absent entirely — spread them only when the sheet has
+	// comments so the optional properties stay truly absent (exactOptionalPropertyTypes).
+	return {
+		xml,
+		rels,
+		...(comments !== undefined
+			? { commentsXml: comments.commentsXml, vmlXml: comments.vmlXml }
+			: {}),
+	}
 }

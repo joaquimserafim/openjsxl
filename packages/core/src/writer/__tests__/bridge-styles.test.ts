@@ -38,6 +38,8 @@ async function styleSnapshot(wb: Workbook) {
 			mergedCells: sheet.mergedCells,
 			hyperlinks: sheet.hyperlinks,
 			state: info.state,
+			// Comments (F5.2) round-trip too — ref, resolved author, and plain text.
+			comments: sheet.comments,
 		}
 	}
 	return out

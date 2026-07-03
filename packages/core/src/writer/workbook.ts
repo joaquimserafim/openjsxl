@@ -129,9 +129,15 @@ export async function writeXlsx(
 	// interning every style into one shared registry. What the registry saw decides whether
 	// styles.xml (any non-default format) and theme1.xml (any theme color) are emitted at all.
 	const styles = createStyleRegistry()
-	const worksheets = sheets.map((sheet) => worksheetXml(sheet, date1904, styles))
+	const worksheets = sheets.map((sheet, i) => worksheetXml(sheet, i, date1904, styles))
 	const needStyles = styles.needed()
 	const needTheme = styles.usesTheme()
+
+	// Comments (F5.2) each ride on a legacy VML drawing part; a workbook with any comment gains the
+	// `vml` Default content type, and every comments part gets an Override. Sheets are named by index
+	// so a comments/VML part never collides with another sheet's.
+	const commentSheets = worksheets.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []))
+	const needVml = commentSheets.length > 0
 
 	const parts: ZipInput[] = []
 	const add = (name: string, xml: string): void => {
@@ -153,10 +159,19 @@ export async function writeXlsx(
 					'<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>',
 				]
 			: []),
+		...commentSheets.map(
+			(i) =>
+				`<Override PartName="/xl/comments${i + 1}.xml" ContentType="${CT_BASE}.comments+xml"/>`,
+		),
 	].join("")
+	// The `vml` Default covers every vmlDrawing part (F5.2); emitted only when a comment exists, so a
+	// comment-free workbook keeps its exact pre-F5.2 [Content_Types].xml bytes.
+	const vmlDefault = needVml
+		? '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>'
+		: ""
 	add(
 		"[Content_Types].xml",
-		`${XML_DECL}\n<Types xmlns="${NS_CT}"><Default Extension="rels" ContentType="${CT_RELS}"/><Default Extension="xml" ContentType="application/xml"/>${overrides}</Types>`,
+		`${XML_DECL}\n<Types xmlns="${NS_CT}"><Default Extension="rels" ContentType="${CT_RELS}"/><Default Extension="xml" ContentType="application/xml"/>${vmlDefault}${overrides}</Types>`,
 	)
 
 	// _rels/.rels — the package's single relationship: officeDocument → the workbook.
@@ -217,14 +232,15 @@ export async function writeXlsx(
 
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml)
-		// The writer's first per-sheet rels part (F4.6): external hyperlink targets, one
-		// TargetMode="External" relationship per link, ids matching the r:ids in the sheet XML.
-		// Covered by the `Default Extension="rels"` content type — no Override needed.
-		if (w.hyperlinkTargets.length > 0) {
-			const rels = w.hyperlinkTargets
+		// The per-sheet rels part (F4.6 hyperlinks, F5.2 comments + vmlDrawing): one <Relationship>
+		// per entry, ids matching the r:ids in the sheet XML. Hyperlink targets carry
+		// TargetMode="External"; internal parts don't. Covered by the `Default Extension="rels"`
+		// content type — no Override needed. A hyperlinks-only sheet reproduces its pre-F5.2 bytes.
+		if (w.rels.length > 0) {
+			const rels = w.rels
 				.map(
-					(target, j) =>
-						`<Relationship Id="rId${j + 1}" Type="${NS_REL}/hyperlink" Target="${escapeAttr(target)}" TargetMode="External"/>`,
+					(rel, j) =>
+						`<Relationship Id="rId${j + 1}" Type="${rel.type}" Target="${escapeAttr(rel.target)}"${rel.external ? ' TargetMode="External"' : ""}/>`,
 				)
 				.join("")
 			add(
@@ -232,6 +248,10 @@ export async function writeXlsx(
 				`${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${rels}</Relationships>`,
 			)
 		}
+		// Comments (F5.2): the comments part and its paired VML legacy drawing, named by sheet index
+		// to match the rel targets built in worksheetXml.
+		if (w.commentsXml !== undefined) add(`xl/comments${i + 1}.xml`, w.commentsXml)
+		if (w.vmlXml !== undefined) add(`xl/drawings/vmlDrawing${i + 1}.vml`, w.vmlXml)
 	})
 
 	return writeZip(parts)

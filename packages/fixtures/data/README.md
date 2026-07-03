@@ -65,6 +65,13 @@ git-ignored [`../local/`](../local) directory and are never committed.
   (`Meta`/`Plain` visible, `Hidden` hidden, `Very` veryHidden), and a bare `Plain` sheet.
   `reader/__tests__/metadata.test.ts` asserts it verbatim.
 
+- **`openpyxl-comments.xlsx`** — authored by **openpyxl 3.1.5** to exercise cell comments (F5.2):
+  a `Notes` sheet with three comments — `B2` (author "Ada"), `C3` (author "Grace"), and `D4` with
+  no author (openpyxl writes `<author/>`, which the reader omits rather than fabricating) — every
+  commented cell carrying a value so no empty anchor placeholder is written, plus a comment-free
+  `Plain` sheet. `reader/__tests__/comments.test.ts` asserts it verbatim; the writer round-trips it
+  through the bridge in `writer/__tests__/comments-write.test.ts`.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.
