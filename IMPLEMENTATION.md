@@ -857,15 +857,171 @@ updated BEFORE any version bump, per CLAUDE.md #4).
 
 ---
 
-## M6+ — Later milestones (outline; expanded when reached)
+## M6 — Images (v0.6)
 
-- **M6 — Images + native lane (v0.6):** picture read (drawingML anchors → `{ref, bytes,
-  mime}`) and basic image write; the **optional** `@openjsxl/native` napi-rs binding to
-  the Rust `calamine` reader (and a WASM build) behind the zip/xml interface, selected via
-  `optionalDependencies` with the pure-TS path as universal fallback — justified (or not)
-  by the F5.5 numbers.
+**Theme.** Pictures are the last fidelity gap a user can *see*: every real invoice or report
+has a logo, and today the reader drops drawings entirely and the bridge silently loses them.
+M6 closes it — drawingML picture read, anchored picture write (both writers), bridge carry.
+
+**Re-scope vs the original outline (owner-approved with this section): the native lane is
+DEFERRED, not built.** The original M6 bundled the optional `@openjsxl/native` napi-rs/WASM
+`calamine` backend, "justified (or not) by the F5.5 numbers". The numbers came back *not*:
+pure-TS openjsxl reads 1M cells in ~0.70 s — within ~1.5× of native `python-calamine`
+(~0.46 s) and 2–3× faster than every JS incumbent (docs/benchmarks.md, 2026-07-03). A
+prebuilt-binary release matrix is permanent maintenance to buy back fractions of a second,
+and it serves exactly the runtimes (browser/edge) that are the differentiator worst. The
+zip/xml interface stays swappable; revisit only if a future workload shifts the math.
+
+**Standing gates for every M6 feature** (see CLAUDE.md for the full contract): biome by
+exit code + tsc + vitest green; byte-identity for input not using the new feature (in-tree
+golden pins + the worktree recipe); the corpus property test extended to newly-carried
+state; openpyxl cross-validation both directions; adversarial review (finders + refuting
+verifiers; UNVERIFIED ≠ refuted — re-verify dead agents' claims empirically) with confirmed
+findings fixed and pinned before the commit is proposed. Probes stay in the scratchpad.
+
+**Dependency order for hand-off:** F6.1 (the per-sheet wiring dedup) lands FIRST — the M5
+analysis flagged that the rel/part wiring already exists in 2–3 hand-synchronized copies,
+and images add a fourth per-sheet part family; pay the debt before growing it. Then
+F6.2 (read) → F6.3 (write) → F6.4 (bridge + corpus). One feature per session, each
+proceed-gated: "proceed" → implement → gates → adversarial review → report + commit
+message → WAIT for the owner's "commit".
+
+### F6.1 — Per-sheet part wiring dedup (pre-image refactor) ☐
+**Context.** The hyperlinks→comments→vmlDrawing rel block and the comment/VML part-path
+conventions are spelled independently in `worksheetXml` (writer/sheet.ts ~779–799),
+`streamWorksheet` (~926–944), the buffered part loop (writer/workbook.ts ~98–104), and the
+streaming part loop (writer/stream.ts ~67–83); `contentTypesXml` takes a `needVml` flag both
+callers derive identically. All copies agree today by hand; F6.3 would make it four.
+**Scope (in).** One shared per-sheet builder (in writer/parts.ts or sheet.ts) that owns the
+rel ordering, rId allocation, body element refs (`legacyDrawing`, later `drawing`), and the
+part-name conventions (`xl/comments{N}.xml`, `xl/drawings/vmlDrawing{N}.vml`, later
+`xl/drawings/drawing{N}.xml` + `xl/media/*`); both writers consume it. Derive `needVml`
+inside `contentTypesXml` from `commentSheets`.
+**Scope (out).** The zip-primitive duplication (`u16`/`u32`/DOS constants in zip.ts vs
+stream-zip.ts) — separate, optional cleanup; do NOT bundle it here.
+**Design decisions (made).** Pure refactor: **zero byte change** — the golden pins and the
+full byte-identity recipe are the acceptance gate, not a nice-to-have. No new types on the
+public surface.
+**Tasks**
+- [ ] Extract the shared per-sheet parts/rels builder; both writers consume it; delete the
+      copies. `needVml` derived, parameter dropped.
+- [ ] Gates + byte-identity (full pin set + worktree recipe if in doubt) + adversarial
+      review focused on emission-order/rId regressions.
+**Acceptance.** Identical bytes for every input in the pin set; suite green; the wiring
+exists in exactly one place.
+
+### F6.2 — Picture read: `Worksheet.images` ☐
+**Context.** In `.xlsx`, pictures hang off the worksheet's `<drawing r:id>` →
+`xl/drawings/drawingN.xml` (spreadsheetDrawing `xdr:` namespace) → `xdr:oneCellAnchor` /
+`xdr:twoCellAnchor` each containing `xdr:pic` → `xdr:blipFill` → `a:blip r:embed` → the
+drawing part's OWN rels → `xl/media/imageK.<ext>`. Resolve through the relationship graph,
+never by filename. Mime comes from `[Content_Types].xml` (`Default` by extension, rarely an
+`Override`).
+**Scope (in).** Lazy `Worksheet.images: readonly SheetImage[]` (the `mergedCells` idiom —
+parsed on first access, cached). Shared model (this IS the writer input in F6.3):
+`SheetImage = { anchor: ImageAnchor; bytes: Uint8Array; mime: string; name?: string }`;
+`ImageAnchor = { from: AnchorPoint; to?: AnchorPoint; ext?: { cx: number; cy: number };
+editAs?: 'twoCell' | 'oneCell' | 'absolute' }`; `AnchorPoint = { col: number; row: number;
+colOff?: number; rowOff?: number }`. `to` present ⇔ twoCellAnchor; `ext` present ⇔
+oneCellAnchor.
+**Scope (out).** `absoluteAnchor` pictures (skipped, documented); non-picture drawing
+objects — shapes, charts, group/graphic frames (skipped, documented); chartsheets; picture
+effects/crop (`srcRect`, filters) — dropped, documented.
+**Design decisions (made).**
+- **Raw anchor model** — the colors precedent: only the raw shape round-trips faithfully.
+  EMU offsets/extents kept verbatim as integers (no px helpers; 914 400 EMU/inch, 9 525
+  EMU/px @96dpi goes in the jsdoc, not the API).
+- **`col`/`row` are 1-based** in the public model (consistent with the whole API); OOXML
+  anchors store 0-based — convert at parse and at emit, test the fencepost explicitly.
+- **Bytes are opaque.** Never decode image data. Media parts inflate on demand, cached per
+  part (two pics sharing one media part share one cached `Uint8Array`).
+- **Tolerant reader degrades:** a missing media rel/part, an unresolvable r:embed, or an
+  absoluteAnchor pic ⇒ that picture is skipped, never a throw; a structurally corrupt zip
+  part still fails typed as everywhere.
+- Mime degraded from the extension when content-types has no entry; unknown extension ⇒
+  `application/octet-stream` (reader tolerant; the WRITER's allowlist is the strict side).
+**Tasks**
+- [ ] `ooxml/drawing.ts` — parse drawingN.xml anchors + pics via the tokenizer (never a
+      DOM); resolve blip r:embed through the drawing's rels.
+- [ ] `Worksheet.images` lazy accessor + media caching; export `SheetImage`/`ImageAnchor`/
+      `AnchorPoint` types from the core index.
+- [ ] Fixtures: `openpyxl-images.xlsx` (openpyxl + Pillow in the scratchpad venv: one
+      oneCellAnchor PNG, one twoCellAnchor JPEG, two pics sharing one media part) with
+      provenance per data/README.md; a hand-built fixture for the degrade cases
+      (absoluteAnchor, missing media part) via the fixtures builder.
+- [ ] Tests: exact byte round-out (digest vs the source image), anchors (1-based fencepost
+      pinned), mime, shared-media caching, every degrade case; openpyxl agreement on
+      anchor cells + image bytes.
+**Acceptance.** Fixture images read back with byte-identical content and correct anchors;
+degrades never throw; suite green.
+
+### F6.3 — Picture write (both writers) ☐
+**Context.** The writer mirror: `SheetInput.images?: readonly SheetImage[]` — the reader's
+exact shape (one shared model, no writer flavor).
+**Scope (in).** Per sheet with images: `xl/drawings/drawingN.xml` (+ its rels part) and the
+worksheet `<drawing r:id>` element — schema position: **before `legacyDrawing`** in the
+CT_Worksheet sequence (…mergeCells → hyperlinks → … → drawing → legacyDrawing); media parts
+`xl/media/imageK.<ext>` with **workbook-level dedup**; content-types `Default` entries per
+used extension. Both writers (buffered + streaming) — images are upfront metadata like
+comments, so the streaming writer emits them identically; media parts are plain byte parts.
+**Scope (out).** Generating anchors from pixel sizes (callers give EMU); image re-encoding
+or dimension sniffing (bytes are opaque — a caller wanting "natural size" measures the
+image themselves); absoluteAnchor write.
+**Design decisions (made).**
+- **Validation (typed `invalid-input`, naming the sheet + image index):** mime allowlist
+  `image/png` | `image/jpeg` | `image/gif` (extension derived from mime, never from data);
+  `bytes` a non-empty `Uint8Array`; anchor cols/rows within the shared grid bounds
+  (MAX_ROW/MAX_COL from ooxml/a1.ts); EMU offsets/extents non-negative safe integers
+  (cap at 2^31−1 — the XML schema's int); exactly one of `to` (twoCellAnchor) or `ext`
+  (oneCellAnchor) present; `isPlainRecord` + unknown-key rejection; **single-read TOCTOU**
+  on every property, incl. `bytes` (read the reference once; a getter must not swap the
+  buffer between validation and packing).
+- **Media dedup is deterministic:** identical bytes ⇒ one `xl/media/` part, numbered by
+  first-occurrence order; equality by length-grouped byte-compare (no hashing, no
+  randomness, linear in total media bytes).
+- **Unused emits nothing:** an imageless workbook produces exactly the pre-F6.3 bytes
+  (byte-identity gate), no drawing/media parts, no content-type entries.
+- Drawing XML from minimal templates with escaped/validated substitutions, like VML (F5.2);
+  `xdr:pic` gets the minimal required children (nvPicPr with a deterministic id/name,
+  blipFill, spPr with a bare prstGeom) — copy openpyxl's emission as the reference shape.
+**Tasks**
+- [ ] Shared model types finalized; validation module; media registry (dedup + numbering).
+- [ ] drawingN.xml emission + drawing rels + worksheet element + content types, wired
+      through the F6.1 shared per-sheet builder for BOTH writers.
+- [ ] Tests: write→read deep-equal (bytes byte-identical, anchors exact); byte-identity for
+      imageless input; streamed == buffered reader snapshot with images; validation
+      rejections (each rule); dedup (same bytes twice ⇒ one media part; almost-equal ⇒
+      two); TOCTOU flip-getter pins.
+- [ ] `unzip -t` + openpyxl reads OUR images (bytes + anchors) warnings-as-errors.
+**Acceptance.** Excel/LibreOffice (openpyxl proxy) shows the written picture at the right
+cell; round-trip lossless; imageless output byte-identical.
+
+### F6.4 — Bridge carry + corpus + example ☐
+**Scope (in).** `workbookToInput` carries `sheet.images` per sheet (absent when none —
+byte-identity path preserved); the corpus property snapshot gains images (anchor + mime +
+a bytes digest, not raw bytes); example `10-images.mjs` (write a logo'd report, read it
+back, round-trip it); fidelity docs updated in the README **at 0.6 release prep** (not
+here) — the drop-list line becomes "error cells; absolute-anchored/non-picture drawings".
+**Tasks**
+- [ ] Bridge attachment + corpus snapshot extension (every fixture with pictures
+      round-trips losslessly or fails typed).
+- [ ] Example 10 + examples README/package.json wiring; all examples green.
+- [ ] Full-milestone adversarial review round (cross-feature, the M5-analysis style) +
+      fixes pinned. Release prep (README fidelity table + examples) then 0.6 bump ONLY at
+      the owner's explicit request.
+**Acceptance.** read → bridge → write → read gives identical images across the corpus;
+the M6 drop-list documents exactly: error cells, absolute-anchored pics, non-picture
+drawing objects, picture effects.
+
+---
+
+## M7+ — Later milestones (outline; expanded when reached)
+
 - **M7 — More formats (v0.7):** `.xlsb` (binary) read; `.ods` read; legacy `.xls`
   (BIFF8) read.
+- **Deferred — native lane:** the optional `@openjsxl/native` napi-rs binding to Rust
+  `calamine` (and a WASM build) behind the zip/xml interface. Deferred by the F5.5
+  benchmark evidence (see the M6 re-scope note); revisit if a workload shifts the math.
 - **M8 — Formula evaluation (v0.8):** opt-in parser + evaluator for common functions,
   behind a separate entry point so the core stays lean (text fidelity landed in F5.4).
 - **M9 — Breadth + hardening (v0.9):** tables, data validation, conditional formatting;
