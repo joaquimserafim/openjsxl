@@ -80,6 +80,13 @@ git-ignored [`../local/`](../local) directory and are never committed.
   `reader/__tests__/resolve-color.test.ts` pins the resolved colors; `writer/__tests__/theme-write.test.ts`
   proves the theme carries byte-identically across a rewrite.
 
+- **`shared-formula.xlsx`** — an **openpyxl 3.1.5** body carrying a **shared formula** (F5.4): a
+  `Calc` sheet where `B1` is the shared master `=A1*2` over `B1:B3` and `B2`/`B3` are dependents
+  (`<f t="shared" si>`), plus an array formula in `D1` (`=A1:A3*2`). openpyxl writes each formula in
+  full, so the shared grouping is a post-process edit (a real Excel/LibreOffice shared-formula file
+  would be a welcome upgrade). `reader/__tests__/formula-read.test.ts` pins the translated dependents
+  (`B2`→`A2*2`, `B3`→`A3*2`) and `writer/__tests__/formula-write.test.ts` round-trips them.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

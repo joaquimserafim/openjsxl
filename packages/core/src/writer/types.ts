@@ -21,22 +21,25 @@ import type {
 export type CellValue = string | number | boolean | Date | null | undefined
 
 /**
- * A cell with a {@link CellStyle} attached (F4.2). `value` is required but nullable — a styled
- * BLANK cell (`{ value: null, style }`) is real and emits `<c r s/>`, which is how a border or
- * fill lands on a cell with nothing in it. The style type is exactly what `Worksheet.style(ref)`
- * returns, so read → modify → write carries styles as a pass-through.
+ * A cell carrying a {@link CellStyle} and/or a formula (F4.2, F5.4). Without a formula, `value` is
+ * required but nullable — a styled BLANK cell (`{ value: null, style }`) is real and emits
+ * `<c r s/>`, which is how a border or fill lands on an empty cell. With a `formula` (stored form,
+ * no leading `=`), `value` is the optional cached result and the cell emits `<c s?><f>…</f><v>…</v></c>`.
+ * The style type is exactly what `Worksheet.style(ref)` returns and `formula` is what
+ * `Worksheet.formula(ref)` returns, so read → modify → write carries both as a pass-through.
  */
 export interface StyledCell {
-	readonly value: CellValue
+	readonly value?: CellValue
 	readonly style?: CellStyle
+	readonly formula?: string
 }
 
 /**
- * One cell in a row: a bare value, or a value with a style. Discrimination is total — `null` /
- * `undefined` mean empty, `Date` instances are dates, and any OTHER object must be a
- * {@link StyledCell} (an object without a `value` property throws `invalid-input`, catching stray
- * objects loudly). Bare-value rows are untouched: pre-F4.2 input keeps its exact meaning AND its
- * exact output bytes.
+ * One cell in a row: a bare value, or an object with a style and/or a formula. Discrimination is
+ * total — `null` / `undefined` mean empty, `Date` instances are dates, and any OTHER object must be
+ * a {@link StyledCell} (an object with neither a `value` property nor a `formula` throws
+ * `invalid-input`, catching stray objects loudly). Bare-value rows are untouched: pre-F4.2 input
+ * keeps its exact meaning AND its exact output bytes.
  */
 export type CellInput = CellValue | StyledCell
 

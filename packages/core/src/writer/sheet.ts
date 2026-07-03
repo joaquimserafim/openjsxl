@@ -9,6 +9,7 @@ import {
 	parseRef,
 } from "../ooxml/a1"
 import { dateToSerial } from "../ooxml/dates"
+import { MAX_FORMULA_LEN } from "../ooxml/formula"
 import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
 import type { StyleRegistry } from "./styles"
 import type { CellInput, CellValue, SheetInput, StyledCell } from "./types"
@@ -34,18 +35,25 @@ function numberToXml(n: number): string {
 	return String(n)
 }
 
-// Split a CellInput into its value and (optional) style. Discrimination is total: null/undefined
-// are empty, Date instances are dates, primitives are bare values — any OTHER object must be a
-// StyledCell. One without a `value` property is some stray object (the pre-F4.2 writer rejected
-// every object; keeping that loudness catches typos like { val: 1 } or a nested array).
+// Split a CellInput into its value, (optional) style, and (optional) formula. Discrimination is
+// total: null/undefined are empty, Date instances are dates, primitives are bare values — any OTHER
+// object must be a StyledCell. An object with neither a `value` nor a `formula` property is some
+// stray object (the pre-F4.2 writer rejected every object; keeping that loudness catches typos like
+// { val: 1 } or a nested array). Each caller property is read exactly once (TOCTOU-safe).
 function splitInput(
 	col: number,
 	row: number,
 	input: CellInput,
-): { readonly value: CellValue; readonly styled: StyledCell | undefined } {
-	if (input === null || input === undefined) return { value: input, styled: undefined }
+): {
+	readonly value: CellValue
+	readonly styled: StyledCell | undefined
+	readonly formula: unknown
+} {
+	if (input === null || input === undefined) {
+		return { value: input, styled: undefined, formula: undefined }
+	}
 	if (typeof input !== "object" || input instanceof Date) {
-		return { value: input, styled: undefined }
+		return { value: input, styled: undefined, formula: undefined }
 	}
 	const ref = formatRef({ col, row })
 	if (Array.isArray(input)) {
@@ -53,17 +61,18 @@ function splitInput(
 	}
 	const record = input as unknown as Record<string, unknown>
 	for (const key of Object.keys(record)) {
-		if (key !== "value" && key !== "style") {
+		if (key !== "value" && key !== "style" && key !== "formula") {
 			throw new XlsxError(
 				"invalid-input",
-				`cell ${ref}: a styled cell allows only "value" and "style" (got "${key}")`,
+				`cell ${ref}: a cell object allows only "value", "style", and "formula" (got "${key}")`,
 			)
 		}
 	}
-	if (!("value" in record)) {
+	const hasFormula = "formula" in record
+	if (!hasFormula && !("value" in record)) {
 		throw new XlsxError(
 			"invalid-input",
-			`cell ${ref}: an object cell must be { value, style? } — did you mean a StyledCell?`,
+			`cell ${ref}: an object cell must be { value, style? } or carry a formula`,
 		)
 	}
 	const value = record.value
@@ -75,12 +84,13 @@ function splitInput(
 		typeof value === "object" &&
 		!(value instanceof Date)
 	) {
-		throw new XlsxError(
-			"invalid-input",
-			`cell ${ref}: a styled cell's value cannot be an object`,
-		)
+		throw new XlsxError("invalid-input", `cell ${ref}: a cell's value cannot be an object`)
 	}
-	return { value: value as CellValue, styled: input as StyledCell }
+	return {
+		value: value as CellValue,
+		styled: input as StyledCell,
+		formula: hasFormula ? record.formula : undefined,
+	}
 }
 
 // Render a single cell, or `undefined` for one that produces no output (an empty value with no
@@ -94,7 +104,7 @@ function renderCell(
 	date1904: boolean,
 	styles: StyleRegistry,
 ): string | undefined {
-	const { value, styled } = splitInput(col, row, input)
+	const { value, styled, formula } = splitInput(col, row, input)
 	const ref = formatRef({ col, row })
 
 	// Resolve the xf index. Bare non-date values never touch the registry (zero overhead on the
@@ -106,6 +116,13 @@ function renderCell(
 		xf = styles.xfIndexFor(styled.style, false, ref)
 	}
 	const sAttr = xf === 0 ? "" : ` s="${xf}"`
+
+	// A formula cell (F5.4) emits `<c s?><f>…</f><v>cached</v></c>`: the formula plus its optional
+	// cached result. The result determines the cell type exactly like a bare value, except a string
+	// result uses `t="str"` (a formula string) rather than an inline string.
+	if (formula !== undefined) {
+		return renderFormulaCell(ref, sAttr, formula, value, date1904)
+	}
 
 	if (value === null || value === undefined) {
 		// A styled blank emits a valueless cell; an unstyled (or default-styled) empty is omitted.
@@ -139,6 +156,77 @@ function renderCell(
 		return `<c r="${ref}"${sAttr}><v>${numberToXml(serial)}</v></c>`
 	}
 	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`)
+}
+
+// The cached result of a formula, as a `t` attribute + `<v>` element (empty pair when there is no
+// cached value — Excel computes it on open). A string result is `t="str"` (a formula string), NOT an
+// inline string; other types match a bare value. `styled`'s xf already carries any date format.
+function cachedValueXml(
+	ref: string,
+	value: CellValue,
+	date1904: boolean,
+): { readonly tAttr: string; readonly vXml: string } {
+	if (value === null || value === undefined) return { tAttr: "", vXml: "" }
+	if (typeof value === "string") {
+		if (!isXmlSafe(value)) {
+			throw new XlsxError(
+				"invalid-input",
+				`cell ${ref}: cached string contains a character not allowed in XML (a control character or lone surrogate)`,
+			)
+		}
+		return { tAttr: ' t="str"', vXml: `<v>${escapeText(value)}</v>` }
+	}
+	if (typeof value === "boolean") return { tAttr: ' t="b"', vXml: `<v>${value ? 1 : 0}</v>` }
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`)
+		}
+		return { tAttr: "", vXml: `<v>${numberToXml(value)}</v>` }
+	}
+	if (value instanceof Date) {
+		const serial = dateToSerial(value, date1904)
+		if (!Number.isFinite(serial))
+			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`)
+		return { tAttr: "", vXml: `<v>${numberToXml(serial)}</v>` }
+	}
+	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cached value type`)
+}
+
+// Render a formula cell. `formula` is the caller's value read once (TOCTOU): it must be a non-empty,
+// XML-safe string in stored form (no leading `=`) within Excel's length ceiling.
+function renderFormulaCell(
+	ref: string,
+	sAttr: string,
+	formula: unknown,
+	value: CellValue,
+	date1904: boolean,
+): string {
+	if (typeof formula !== "string") {
+		throw new XlsxError("invalid-input", `cell ${ref}: formula must be a string`)
+	}
+	if (formula.length === 0) {
+		throw new XlsxError("invalid-input", `cell ${ref}: formula must not be empty`)
+	}
+	if (formula.length > MAX_FORMULA_LEN) {
+		throw new XlsxError(
+			"invalid-input",
+			`cell ${ref}: formula exceeds Excel's ${MAX_FORMULA_LEN}-character limit`,
+		)
+	}
+	if (formula.startsWith("=")) {
+		throw new XlsxError(
+			"invalid-input",
+			`cell ${ref}: formula must be in stored form, without a leading "="`,
+		)
+	}
+	if (!isXmlSafe(formula)) {
+		throw new XlsxError(
+			"invalid-input",
+			`cell ${ref}: formula contains a character not allowed in XML (a control character or lone surrogate)`,
+		)
+	}
+	const cached = cachedValueXml(ref, value, date1904)
+	return `<c r="${ref}"${sAttr}${cached.tAttr}><f>${escapeText(formula)}</f>${cached.vXml}</c>`
 }
 
 // ── Sheet geometry (F4.5): validation + emission ───────────────────────────────────────────────

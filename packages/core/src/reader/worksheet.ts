@@ -1,13 +1,16 @@
 import {
+	type CellRef,
 	type DecodeContext,
 	decodeCell,
 	formatRef,
 	MAX_COL,
 	MAX_COL_WIDTH,
+	MAX_FORMULA_LEN,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
 	parseRef,
 	type Relationship,
+	translateFormula,
 } from "../ooxml"
 import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
 import { localName, relationshipId } from "../utils"
@@ -448,6 +451,117 @@ export function parseCellStyles(xml: string): Map<string, number> {
 		if (index !== undefined) styles.set(ref, index)
 	}
 	return styles
+}
+
+/**
+ * The formula text of every cell that carries one, keyed by A1 ref (F5.4) — a lazy dedicated scan
+ * over `<f>` elements, addressing cells with the same positional rule as parseCellStyles. Plain and
+ * array-master formulas are returned verbatim; a SHARED dependent (`<f t="shared" si/>` with no text
+ * of its own) gets the master's text translated by the dependent's offset from the master.
+ * `dataTable` formulas carry no reusable text and are skipped (a documented degradation).
+ */
+export function parseFormulas(xml: string): Map<string, string> {
+	const formulas = new Map<string, string>()
+	const masters = new Map<string, { anchor: CellRef; text: string }>() // si → master
+	const deps: { ref: string; cell: CellRef; si: string }[] = [] // shared dependents to resolve
+	let inSheetData = false
+	let rowIndex = 0
+	let lastRow = 0
+	let lastCol = 0
+	let curRef: string | undefined
+	let curCell: CellRef | undefined
+	let inF = false
+	let fType: string | undefined
+	let fSi: string | undefined
+	let fText = ""
+
+	// Record a completed <f> for the current cell. Empty text ⟺ a shared dependent (its text lives
+	// on the master); non-empty text is a plain, array-master, or shared-master formula.
+	const finalize = (text: string): void => {
+		if (curRef === undefined) return
+		if (fType === "shared") {
+			if (fSi === undefined) return
+			if (text === "") {
+				if (curCell !== undefined) deps.push({ ref: curRef, cell: curCell, si: fSi })
+			} else {
+				// Register the master for translation ONLY when its text is within Excel's length
+				// ceiling. A hostile file with an over-long master would otherwise make the second pass
+				// O(dependents × masterLength) — file-size-quadratic; capping keeps each translation
+				// O(MAX_FORMULA_LEN). Over-long masters degrade (their dependents get no formula).
+				if (curCell !== undefined && text.length <= MAX_FORMULA_LEN) {
+					masters.set(fSi, { anchor: curCell, text })
+				}
+				formulas.set(curRef, text) // the master's own formula is its text
+			}
+		} else if (fType === "dataTable") {
+			// No reusable formula text — degrade to the cached value only.
+		} else if (text !== "") {
+			formulas.set(curRef, text) // plain or array-master formula, verbatim
+		}
+	}
+
+	for (const token of tokenize(xml)) {
+		if (token.kind === "open") {
+			const name = localName(token.name)
+			// Only formulas INSIDE <sheetData> are cells. A stray <c><f> in an oleObjects /
+			// AlternateContent block (or anywhere else) must not fabricate a formula on a real cell —
+			// this mirrors the row assembler's own sheetData gate.
+			if (name === "sheetData") {
+				if (!token.selfClosing) inSheetData = true
+				continue
+			}
+			if (!inSheetData) continue
+			if (name === "row") {
+				const r = token.attrs.r
+				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN
+				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1
+				lastRow = rowIndex
+				lastCol = 0
+			} else if (name === "c") {
+				const r = token.attrs.r
+				if (r !== undefined) {
+					curRef = r
+					const col = safeColumn(r)
+					curCell = col !== undefined ? { col, row: rowIndex } : undefined
+					if (col !== undefined) lastCol = col
+				} else {
+					lastCol += 1
+					curCell = { col: lastCol, row: rowIndex }
+					curRef = formatRef(curCell)
+				}
+			} else if (name === "f") {
+				fType = token.attrs.t
+				fSi = token.attrs.si
+				fText = ""
+				if (token.selfClosing) finalize("")
+				else inF = true
+			}
+		} else if (token.kind === "text") {
+			if (inF) fText += token.value
+		} else {
+			const name = localName(token.name)
+			if (name === "sheetData") inSheetData = false
+			else if (inF && name === "f") {
+				finalize(fText)
+				inF = false
+			}
+		}
+	}
+
+	// Second pass: a dependent's formula is the master's text shifted by the dependent's offset.
+	for (const d of deps) {
+		const master = masters.get(d.si)
+		if (master === undefined) continue
+		formulas.set(
+			d.ref,
+			translateFormula(
+				master.text,
+				d.cell.row - master.anchor.row,
+				d.cell.col - master.anchor.col,
+			),
+		)
+	}
+	return formulas
 }
 
 /** Read rows from a fully in-memory worksheet string. */

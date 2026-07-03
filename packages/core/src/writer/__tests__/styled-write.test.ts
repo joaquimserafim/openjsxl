@@ -193,7 +193,9 @@ describe("writeXlsx — style validation (invalid-input naming the cell)", () =>
 	})
 
 	it("rejects unknown keys on the cell, the style, and its components", async () => {
-		expect(await failure([[{ value: 1, styles: {} }]])).toMatch(/only "value" and "style"/)
+		expect(await failure([[{ value: 1, styles: {} }]])).toMatch(
+			/only "value", "style", and "formula"/,
+		)
 		expect(await failure([[{ value: 1, style: { fonts: {} } }]])).toMatch(
 			/unknown property "fonts"/,
 		)

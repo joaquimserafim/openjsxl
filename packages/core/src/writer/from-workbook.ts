@@ -20,10 +20,13 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 // Fidelity is scoped to values, types, sheet names/order, and cell styles (number format, font,
 // fill, border, alignment). What the writer can't represent is NOT carried across and is
 // documented, not silently mangled:
-//   - formulas               → only the cached value survives (its type/number)
-//   - error cells            → written as their literal text (e.g. "#DIV/0!"), so they become strings
+//   - error cells (no formula) → written as their literal text (e.g. "#DIV/0!"), so they become strings
 //   (column widths, row heights, hidden flags, frozen panes — F4.5 — merges, hyperlinks, sheet
-//   visibility — F4.6 — and cell comments — F5.2 — DO carry across)
+//   visibility — F4.6 — cell comments — F5.2 — and formula TEXT — F5.4 — DO carry across)
+//   Formula degradations (documented, values stay exact): a SHARED-formula dependent carries its
+//   TRANSLATED text (not the shared grouping); an ARRAY formula carries the master's text as a plain
+//   formula (the spilled cells keep their cached values); a `dataTable` formula carries no text (its
+//   cached value survives); an error-typed cached value on a formula cell writes as its string text.
 //   - locale-only number formats (ids 23–36, 50–58) → no portable code exists; the format flattens
 //     (a date keeps its value and date-ness via the implicit format)
 // Three documented FLATTENINGS (values stay exact; the file's internal spelling normalizes):
@@ -48,6 +51,15 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 // object per distinct format, so the wrapping adds O(distinct formats) objects, not O(cells).
 function cellToInput(worksheet: Worksheet, cell: Cell): CellInput {
 	const style = worksheet.style(cell.ref)
+	const formula = worksheet.formula(cell.ref)
+	if (formula !== undefined) {
+		// A formula cell (F5.4) carries the formula text plus its cached value (and any style), so a
+		// non-recalculating consumer still sees the last computed result. An error-typed cached value
+		// writes as its string text — the formula is what matters; Excel recomputes the real error.
+		return style === undefined
+			? { formula, value: cell.value }
+			: { formula, value: cell.value, style }
+	}
 	return style === undefined ? cell.value : { value: cell.value, style }
 }
 

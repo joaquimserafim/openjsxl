@@ -25,6 +25,8 @@ async function styleSnapshot(wb: Workbook) {
 					type: cell.type === "error" ? "string" : cell.type,
 					value: cell.value instanceof Date ? cell.value.getTime() : cell.value,
 					style: sheet.style(cell.ref),
+					// Formula TEXT (F5.4) is part of the fidelity contract too.
+					formula: sheet.formula(cell.ref),
 				}
 			}
 		}

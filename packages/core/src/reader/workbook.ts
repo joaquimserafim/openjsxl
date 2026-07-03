@@ -30,6 +30,7 @@ import {
 	parseColumnProps,
 	parseComments,
 	parseDimension,
+	parseFormulas,
 	parseFreezePane,
 	parseHyperlinks,
 	parseMergedCells,
@@ -87,6 +88,7 @@ export class Worksheet {
 	#cells: Map<string, Cell> | undefined
 	#merged: readonly string[] | undefined
 	#hyperlinks: readonly Hyperlink[] | undefined
+	#formulas: Map<string, string> | undefined
 	#cellStyles: Map<string, number> | undefined
 	#dimension: string | undefined
 	#dimensionRead = false
@@ -191,6 +193,17 @@ export class Worksheet {
 			this.#comments = this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml)
 		}
 		return this.#comments
+	}
+
+	/**
+	 * The formula text of the cell at an A1 reference, or `undefined` when the cell has none (F5.4).
+	 * The text is the stored form (no leading `=`). Shared-formula dependents return the master's
+	 * text translated to their position; array formulas return the master's text. `Cell.value` still
+	 * holds the cached result, so a formula and its last computed value are read independently.
+	 */
+	formula(ref: string): string | undefined {
+		if (this.#formulas === undefined) this.#formulas = parseFormulas(this.#xml)
+		return this.#formulas.get(ref)
 	}
 
 	/**

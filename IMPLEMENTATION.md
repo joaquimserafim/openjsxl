@@ -703,7 +703,7 @@ typed throw on a file the reader accepted (a round-trip regression). Fixed at th
 theme part normalizes to `undefined` (empty ≡ absent), so it degrades to the built-in theme on
 rewrite; the writer's strict `""` rejection stays correct for genuine direct-caller mistakes.
 
-### F5.4 — Formula text: read → bridge → write (no evaluation) ☐
+### F5.4 — Formula text: read → bridge → write (no evaluation) ☑
 **Context.** Formulas are the largest remaining fidelity gap: the reader keeps only the
 cached value; SheetJS/ExcelJS/openpyxl all preserve formula text. Evaluation stays M8 —
 this feature is text fidelity only.
@@ -728,15 +728,37 @@ see data. The shared-formula translator is its own module with exhaustive unit t
 (absolute/relative/mixed refs, ranges, cross-sheet refs untouched, quoted sheet names,
 strings containing ref-lookalikes NOT translated — tokenize, don't regex-replace blindly).
 **Tasks**
-- [ ] `<f>` scan + shared-formula translator + array handling; reader tests incl. a
-      real-producer shared-formula fixture.
-- [ ] writer emission + validation; date1904 interplay checked (none expected — text).
-- [ ] bridge carry; corpus snapshot gains formulas; drop-list shrinks to bare error cells
-      (no formula) + documented degradations only.
-- [ ] openpyxl agreement: `data_only=False` reads our formulas verbatim; Excel recalc
-      sanity via openpyxl round-trip; adversarial review (translator is the hot spot).
+- [x] `<f>` scan (`parseFormulas`) + shared-formula translator (`ooxml/formula.ts`) + array handling;
+      reader tests + shared-formula fixture (`shared-formula.xlsx`).
+- [x] writer emission + validation (no date1904 interplay — formula is text).
+- [x] bridge carry; corpus snapshot gains `formula`; drop-list shrinks to bare error cells only.
+- [x] openpyxl agreement: `data_only` both ways reads our formulas + cached values; adversarial review.
 **Acceptance.** basic.xlsx's cached formula (`E1 = B1*2`) round-trips as a live formula;
 the corpus property holds with formulas in the snapshot.
+**Scope refinement (owner-notified).** ONE SHARED MODEL kept intact: `Worksheet.formula(ref)` returns
+`string`, so the writer accepts `formula?: string` (symmetric). Consequences vs the original sketch:
+array formulas carry the master's text as a PLAIN formula (array-ness/ref not exposed — a write-only
+`t="array"` form would be a parallel "writer flavor" the invariants forbid); an error-typed cached
+value on a formula cell writes as its STRING text (not `t="e"` — Excel recomputes the real error on
+open, so the formula, not the stale cached error, is what matters); `dataTable` degrades to
+cached-value-only. All documented in from-workbook.ts.
+**Landed (uncommitted, awaiting owner approval).** `ooxml/formula.ts`: `translateFormula` (a linear
+TOKENIZER — strings/quoted-sheets/whole-col & whole-row ranges/cell refs/identifiers — shifting
+relative refs incl. the cell part of cross-sheet refs, pinning `$`, `#REF!` off-grid; matches
+openpyxl's `Translator` on **32 reference vectors**) + `MAX_FORMULA_LEN` (8192). `Worksheet.formula(ref)`
++ `parseFormulas` (plain/shared-translated/array/dataTable). Writer `{ formula, value?, style? }`
+cell + validation (non-empty, XML-safe, no leading `=`, ≤8192, single-read TOCTOU; string result
+`t="str"`). Bridge carries formula + cached value. Gate: biome 0 / tsc 0 / **446 tests** /
+byte-identity 8/8 vs pre-F5.4 / openpyxl `data_only` both ways / translator LINEAR on adversarial
+input (500k-quote formula in 1ms). **Adversarial review: 3 CONFIRMED bugs fixed + regression-pinned**
+— (1) whole-column/row refs (`A:A`, `1:1`) were left UNSHIFTED (silent formula corruption on a common
+construct) → added range tokens to the translator, openpyxl-matched; (2) the shared second pass was
+O(dependents × master-length) — a file-size-quadratic DoS on a hostile file → cap master text at
+`MAX_FORMULA_LEN` (over-long masters degrade), re-verified 30k deps of an 18k-char master read in
+40ms; (3) `parseFormulas` lacked the row assembler's `inSheetData` guard, so a stray `<c><f>` in an
+`oleObjects`/`AlternateContent` block fabricated a formula on a real value cell → added the guard.
+(A sibling latent bug — `parseCellStyles` lacks the same guard — is flagged as a separate follow-up,
+out of F5.4 scope.)
 
 ### F5.1 — Constant-memory streaming writer ☐
 **Context.** `writeXlsx` buffers every part, then zips (`writeZip(parts)`); fine to ~1M

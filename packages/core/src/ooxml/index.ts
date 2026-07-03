@@ -3,6 +3,7 @@
 export * from "./a1"
 export * from "./cell"
 export * from "./dates"
+export * from "./formula"
 export * from "./rels"
 export * from "./shared-strings"
 export * from "./styles"
