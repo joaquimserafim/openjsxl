@@ -657,7 +657,7 @@ bridge, hostile-input, algorithm-correctness) with deep empirical probing surfac
 independently re-verified byte-identity, TOCTOU single-read, dup-ref tolerance (openpyxl accepts,
 no repair), and multi-sheet VML idmap reuse (matches openpyxl).
 
-### F5.3 — Theme fidelity: parse, resolve, carry ☐
+### F5.3 — Theme fidelity: parse, resolve, carry ☑
 **Context.** Colors are kept RAW (`{theme, tint?}` never resolved) — correct for
 round-trip, but consumers can't get an RGB without their own theme parser, and the bridge
 re-renders custom-theme files against the standard Office theme (documented flattening).
@@ -676,12 +676,32 @@ the style objects (they stay plain data). Tint rounds exactly as Excel does (rou
 integer RGB after the Lum transform) — validate against openpyxl's `theme` handling on a
 real custom-theme fixture, cell by cell.
 **Tasks**
-- [ ] theme parser + resolveColor + tests (sysClr, srgbClr, tint± cases, index swap).
-- [ ] bridge/writer theme carry + byte-identical theme part round-trip test.
-- [ ] custom-theme real-producer fixture (LibreOffice or Excel authored) + provenance.
-- [ ] README: resolved-color example; adversarial review.
-**Acceptance.** `resolveColor` matches openpyxl's resolution on every themed cell of the
-fixture; a custom-theme file round-trips with its theme byte-identical.
+- [x] theme parser + resolveColor + tests (sysClr, srgbClr, tint± cases, index swap).
+- [x] bridge/writer theme carry + byte-identical theme part round-trip test.
+- [x] custom-theme fixture (`openpyxl-customtheme.xlsx` — accent1 recolored FF0000) + provenance.
+- [x] adversarial review. (README resolved-color example deferred to the 0.5 release-prep docs pass.)
+**Acceptance.** `resolveColor` matches the reference on every themed cell of the fixtures; a
+custom-theme file round-trips with its theme byte-identical.
+**Landed (uncommitted, awaiting owner approval).** `ooxml/theme.ts`: `parseTheme` (12-slot table
+with the dk/lt index swap 0→lt1/1→dk1/2→lt2/3→dk2, sysClr lastClr fallback) + `resolveTint`
+(**Excel's Win32 integer HLS, HLSMAX=240** — the float-HSL variant other libs use is off by ~1 per
+channel; validated against 96 independent reference vectors AND real Excel swatches, grayscale +
+accents exact) + `resolveColor`. `Workbook.resolveColor(color)` → 8-digit ARGB (rgb passthrough,
+`{theme,tint}` resolved with an out-of-range/non-finite-tint clamp; `undefined` for auto/indexed/
+no-theme/out-of-range); the reader loads `theme1.xml` and exposes `themeXml`. `WorkbookInput.themeXml`
+carried by the bridge + emitted by the writer (validated non-empty + isXmlSafe, single-read) instead
+of `DEFAULT_THEME_XML` — **custom themes now round-trip byte-identically; the last color flattening
+is removed.** openpyxl reads our custom-theme rewrite warnings-as-errors. Gate: biome 0 / tsc 0 /
+**418 tests** / byte-identity 7/7 vs pre-F5.3 (incl. theme-color case) / all emitted parts
+well-formed. **Note (F5.3 scope decisions):** `openpyxl` has NO theme-resolution API, so the
+independent oracle is a from-spec reference impl + Excel swatches, not openpyxl; the custom-theme
+fixture is a post-processed openpyxl body (no headless Excel/LibreOffice locally) — a real-producer
+custom theme is a welcome future upgrade; `{indexed}` palette resolution deferred (raw index kept).
+**Adversarial review: 1 CONFIRMED bug fixed + regression-pinned** — a present-but-EMPTY (0-byte)
+theme part read back as `themeXml:""`, which the bridge carried into the writer's non-empty check →
+typed throw on a file the reader accepted (a round-trip regression). Fixed at the reader: an empty
+theme part normalizes to `undefined` (empty ≡ absent), so it degrades to the built-in theme on
+rewrite; the writer's strict `""` rejection stays correct for genuine direct-caller mistakes.
 
 ### F5.4 — Formula text: read → bridge → write (no evaluation) ☐
 **Context.** Formulas are the largest remaining fidelity gap: the reader keeps only the

@@ -72,6 +72,14 @@ git-ignored [`../local/`](../local) directory and are never committed.
   `Plain` sheet. `reader/__tests__/comments.test.ts` asserts it verbatim; the writer round-trips it
   through the bridge in `writer/__tests__/comments-write.test.ts`.
 
+- **`openpyxl-customtheme.xlsx`** — an **openpyxl 3.1.5** body with a **custom theme** (F5.3): the
+  theme's `accent1` is recolored to pure red `FF0000` (a post-process, since neither openpyxl nor a
+  headless tool authors a custom theme directly — a real Excel/LibreOffice custom-theme file would
+  be a welcome upgrade). Cell `B2` uses the theme-4 (accent1) font color and `C3` uses it with a 40%
+  tint, so resolveColor must resolve against the CUSTOM red, not the default blue.
+  `reader/__tests__/resolve-color.test.ts` pins the resolved colors; `writer/__tests__/theme-write.test.ts`
+  proves the theme carries byte-identically across a rewrite.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

@@ -124,6 +124,9 @@ export async function writeXlsx(
 	const states = validate(workbook)
 	const date1904 = options?.date1904 === true
 	const sheets = workbook.sheets
+	// Read the caller's optional carried theme ONCE (a getter/Proxy must not vary it between the
+	// validation below and emission). It only matters if a written style needs a theme part.
+	const carriedTheme = workbook.themeXml
 
 	// Render every worksheet up front — this is also where invalid cell values and styles surface —
 	// interning every style into one shared registry. What the registry saw decides whether
@@ -228,7 +231,26 @@ export async function writeXlsx(
 	)
 
 	if (needStyles) add("xl/styles.xml", styles.stylesXml())
-	if (needTheme) add("xl/theme/theme1.xml", DEFAULT_THEME_XML)
+	if (needTheme) {
+		// A carried custom theme (F5.3) replaces the built-in Office theme, so a rewritten
+		// custom-theme file keeps its exact colors instead of re-rendering against the default. The
+		// caller-supplied XML is opaque but must be a non-empty, XML-safe string or the part would
+		// corrupt the package. Absent → the built-in theme, keeping pre-F5.3 bytes byte-for-byte.
+		let theme = DEFAULT_THEME_XML
+		if (carriedTheme !== undefined) {
+			if (typeof carriedTheme !== "string" || carriedTheme.length === 0) {
+				throw new XlsxError("invalid-input", "themeXml must be a non-empty string")
+			}
+			if (!isXmlSafe(carriedTheme)) {
+				throw new XlsxError(
+					"invalid-input",
+					"themeXml contains a character not allowed in XML (a control character or lone surrogate)",
+				)
+			}
+			theme = carriedTheme
+		}
+		add("xl/theme/theme1.xml", theme)
+	}
 
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml)

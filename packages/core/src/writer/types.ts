@@ -89,6 +89,13 @@ export interface SheetInput {
 export interface WorkbookInput {
 	/** At least one sheet, in tab order. */
 	readonly sheets: readonly SheetInput[]
+	/**
+	 * The workbook's raw theme part (`xl/theme/theme1.xml`), carried verbatim (F5.3). When a written
+	 * style uses a theme color, the writer emits this instead of the built-in Office theme — so a
+	 * custom-theme file keeps its exact colors on rewrite. Must be a non-empty, XML-safe string;
+	 * ignored when no written style needs a theme part.
+	 */
+	readonly themeXml?: string
 }
 
 export interface WriteOptions {

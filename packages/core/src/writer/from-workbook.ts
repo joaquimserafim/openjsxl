@@ -32,9 +32,8 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types"
 //     writer's input is positional, so canonical is the only possible emission.
 //   - row/column DEFAULT styles resolve into per-cell styles (the effective style each cell already
 //     shows through style(ref)) — the rewritten file styles cells directly instead of via defaults.
-//   - files authored under a CUSTOM THEME keep their raw {theme, tint} indexes, but the rewritten
-//     package embeds the standard Office theme, so those indexes re-render against DEFAULT theme
-//     colors. rgb/indexed colors are unaffected.
+// (Custom themes NO LONGER flatten — since F5.3 the source theme1.xml is carried verbatim, so
+//  {theme, tint} indexes re-render against the SAME colors on rewrite.)
 // A source sheet name the writer rejects (>31 chars, forbidden characters, duplicate) will make the
 // subsequent writeXlsx throw invalid-input — such a workbook isn't Excel-valid to re-emit as-is.
 // Likewise a cell whose `r` attribute is unaddressable garbage (the tolerant reader keeps it,
@@ -137,5 +136,8 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		if (comments.length > 0) sheet.comments = comments
 		sheets.push(sheet)
 	}
-	return { sheets }
+	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when
+	// the workbook has no theme part — then the writer falls back to the built-in Office theme.
+	const themeXml = workbook.themeXml
+	return themeXml !== undefined ? { sheets, themeXml } : { sheets }
 }

@@ -4,14 +4,18 @@ import {
 	parseRels,
 	parseSharedStrings,
 	parseStyles,
+	parseTheme,
 	parseWorkbook,
 	type Relationship,
+	resolveColor as resolveColorAgainst,
 	resolveTarget,
 	type StyleTable,
+	type ThemeColors,
 } from "../ooxml"
 import type {
 	Cell,
 	CellStyle,
+	Color,
 	ColumnProps,
 	Comment,
 	FreezePane,
@@ -50,6 +54,7 @@ const REL_OFFICE_DOCUMENT = "/officeDocument"
 const REL_SHARED_STRINGS = "/sharedStrings"
 const REL_STYLES = "/styles"
 const REL_COMMENTS = "/comments"
+const REL_THEME = "/theme"
 
 function directoryOf(path: string): string {
 	const slash = path.lastIndexOf("/")
@@ -252,10 +257,16 @@ export class Workbook {
 	/** Sheets in tab order. */
 	readonly sheets: readonly SheetInfo[]
 	readonly #byName: Map<string, Worksheet>
+	readonly #themeXml: string | undefined
+	// The parsed theme is computed on first resolveColor; `undefined` is a valid result (no theme
+	// part, or an unparseable one), so a separate flag records that the parse already ran.
+	#theme: ThemeColors | undefined
+	#themeParsed = false
 
-	constructor(sheets: SheetInfo[], byName: Map<string, Worksheet>) {
+	constructor(sheets: SheetInfo[], byName: Map<string, Worksheet>, themeXml?: string) {
 		this.sheets = sheets
 		this.#byName = byName
+		this.#themeXml = themeXml
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
@@ -270,6 +281,31 @@ export class Workbook {
 		}
 		return worksheet
 	}
+
+	/**
+	 * The raw `xl/theme/theme1.xml`, or `undefined` when the workbook has no theme part (a
+	 * present-but-empty part is treated as absent). This is the opaque source the bridge carries so a
+	 * rewrite keeps custom theme colors; consumers wanting a concrete color should use
+	 * {@link resolveColor} instead of parsing this themselves.
+	 */
+	get themeXml(): string | undefined {
+		return this.#themeXml
+	}
+
+	/**
+	 * Resolve a raw {@link Color} — as returned by `Worksheet.style(ref)` — to an 8-digit ARGB
+	 * string (F5.3). `rgb` colors normalize to `AARRGGBB`; `{theme, tint?}` colors resolve against
+	 * this workbook's theme using Excel's tint algorithm. Returns `undefined` when it can't be
+	 * resolved: an `{auto}` color, an `{indexed}` palette color, or a theme color with no theme part
+	 * or an out-of-range index.
+	 */
+	resolveColor(color: Color): string | undefined {
+		if (!this.#themeParsed) {
+			this.#theme = this.#themeXml === undefined ? undefined : parseTheme(this.#themeXml)
+			this.#themeParsed = true
+		}
+		return resolveColorAgainst(color, this.#theme)
+	}
 }
 
 interface LoadedWorkbook {
@@ -278,6 +314,8 @@ interface LoadedWorkbook {
 	readonly context: DecodeContext
 	/** Sheets in tab order, each with its resolved part path. */
 	readonly sheets: ReadonlyArray<{ readonly info: SheetInfo; readonly path: string }>
+	/** Raw `xl/theme/theme1.xml`, when present — for color resolution and theme carry (F5.3). */
+	readonly themeXml: string | undefined
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -326,6 +364,21 @@ async function loadWorkbook(
 	const context: DecodeContext =
 		styles !== undefined ? { sharedStrings, date1904, styles } : { sharedStrings, date1904 }
 
+	// Theme part (optional) — the color scheme resolveColor needs and the bytes the bridge carries.
+	let themeXml: string | undefined
+	const themeRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_THEME))
+	if (themeRel !== undefined && themeRel.targetMode !== "External") {
+		const themePath = resolveTarget(workbookDir, themeRel.target)
+		if (zip.has(themePath)) {
+			const decoded = decoder.decode(await zip.read(themePath))
+			// A present-but-EMPTY theme part (a truncated/corrupt producer) is no usable theme —
+			// treat it as absent so resolveColor degrades to `undefined` and, crucially, the bridge
+			// doesn't carry "" into the writer's non-empty check (which would reject the workbook's
+			// own read-back). An empty part and a missing part are semantically identical.
+			if (decoded.length > 0) themeXml = decoded
+		}
+	}
+
 	// Resolve each sheet's r:id to a part path.
 	const sheets: Array<{ info: SheetInfo; path: string }> = []
 	for (const entry of workbookSheets) {
@@ -339,7 +392,7 @@ async function loadWorkbook(
 		})
 	}
 
-	return { zip, context, sheets }
+	return { zip, context, sheets, themeXml }
 }
 
 /**
@@ -354,7 +407,7 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets } = await loadWorkbook(source, options)
+	const { zip, context, sheets, themeXml } = await loadWorkbook(source, options)
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = []
@@ -383,7 +436,7 @@ export async function openXlsx(
 		}
 	}
 
-	return new Workbook(infos, byName)
+	return new Workbook(infos, byName, themeXml)
 }
 
 /**
