@@ -70,9 +70,10 @@ Status: ☐ not started · ◐ in progress · ☑ done
 | **0.2** | Reader hardening | Constant-memory streaming; styles→date detection; merged cells, hyperlinks, comments | ☐ |
 | **0.3** | Writer MVP | Write values, types, sheets; round-trip fidelity tests | ☐ |
 | **0.4** | Styles | Read + write fonts, fills, borders, alignment, number formats | ☐ |
-| **0.5** | Streaming writer + native lane | Constant-memory writer; optional napi-rs/WASM calamine read fast-path | ☐ |
-| **0.6–0.7** | More formats | `.xlsb`, `.ods`, legacy `.xls` (BIFF8) read | ☐ |
-| **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point) | ☐ |
+| **0.5** | Fidelity + streaming writer | Comments write, formula text, theme fidelity; constant-memory writer; benchmark harness | ☐ |
+| **0.6** | Images + native lane | drawingML pictures; optional napi-rs/WASM calamine read fast-path | ☐ |
+| **0.7** | More formats | `.xlsb`, `.ods`, legacy `.xls` (BIFF8) read | ☐ |
+| **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point; text fidelity ships in 0.5) | ☐ |
 | **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus | ☐ |
 | **1.0** | Stable | Frozen API, full `.xlsx` round-trip fidelity, docs site, published benchmarks | ☐ |
 

@@ -584,21 +584,201 @@ example, PUBLISHING note.
 
 ---
 
-## M5+ — Later milestones (outline; expanded when reached)
+## M5 — Fidelity + streaming writer (v0.5)
 
-- **M5 — Streaming writer + native lane (v0.5):** constant-memory writer; comments write (VML
-  legacy drawing); theme1.xml parse + resolved-rgb color helper; images; an
-  **optional** `@openjsxl/native` napi-rs binding to the Rust `calamine` reader (and a WASM
-  build) behind the F-layer interface, selected via `optionalDependencies` with pure-TS
-  fallback.
-- **M6–M7 — More formats (v0.6–0.7):** `.xlsb` (binary) read; `.ods` read; legacy `.xls`
+**Theme.** Close the remaining `.xlsx` fidelity gaps the bridge still documents (comments,
+formulas-as-text, custom themes) and ship the constant-memory writer — then make the "fast"
+claim measurable. **Re-scope vs the original outline (owner-approved with this section):**
+formula TEXT preservation is pulled forward from M8 (evaluation stays M8) and a benchmark
+harness is pulled forward from 1.0, because both close competitive gaps documented in the
+0.4 analysis; **images and the `@openjsxl/native` napi-rs/WASM lane move to M6** — images
+need drawingML (a milestone of their own bundled with formats work), and the native lane
+should follow, not precede, published pure-TS benchmarks.
+
+**Standing gates for every M5 feature** (see CLAUDE.md for the full contract): biome by
+exit code + tsc + vitest green; byte-identity for input not using the new feature;
+the corpus property test extended to any newly-carried state; openpyxl cross-validation
+both directions; adversarial review (finders + refuting verifiers) with confirmed findings
+fixed and pinned before the commit is proposed.
+
+**Dependency order for hand-off:** F5.2 → F5.3 → F5.4 build on the buffered writer's
+existing emission helpers and are independent of each other after F5.2's per-sheet-rels
+refactor; F5.1 (streaming) lands AFTER them so it reuses one final set of helpers; F5.5
+(benchmarks) needs F5.1 for the streaming numbers. Suggested order: F5.2, F5.3, F5.4,
+F5.1, F5.5 — one feature per session, each proceed-gated.
+
+### F5.2 — Comments write (legacy VML) + bridge carry ☐
+**Context.** The reader parses legacy comments (`xl/commentsN.xml`: authors + rich-text
+runs concatenated to plain text) since F2.3; the bridge documents dropping them. Excel only
+SHOWS a comment if the workbook also carries the legacy **VML drawing** part with a shape
+per comment — a comments part alone reads back through openpyxl but renders nothing in
+Excel (this is why openpyxl emits both).
+**Scope (in).** `SheetInput.comments?: readonly Comment[]` (`{ref, author?, text}` — the
+reader's exact shape). Emission per sheet with comments: `xl/commentsN.xml` (deduped,
+ordered authors table + `<commentList>`), `xl/drawings/vmlDrawingN.vml` (one
+`<v:shape>` per comment, hidden by default, anchored beside its cell — copy openpyxl's
+anchor arithmetic), the worksheet element `<legacyDrawing r:id/>` (schema position: after
+`hyperlinks`/`pageMargins` block — verify against CT_Worksheet sequence), rels entries for
+both parts, and content types (`Default` extension `vml` + per-part comments `Override`).
+**Scope (out).** Threaded (modern) comments — separate parts, deferred; documented. Rich
+text runs — plain text only, matching the reader.
+**Design decisions (made).**
+- The per-sheet rels part is no longer hyperlinks-only: refactor `WorksheetResult` to
+  return a list of rel entries (type + target + mode) so hyperlinks (F4.6), comments, and
+  vmlDrawing allocate non-colliding `rId`s from one counter. This refactor is the reason
+  F5.2 lands first in M5.
+- Validation mirrors F4.6 hyperlinks: canonical single-cell `ref` (no ranges), single-read
+  properties, unknown-key rejection, `isXmlSafe` on author/text, author optional.
+- Author dedup: authors table is first-occurrence-ordered unique authors; a comment with
+  no author points at a shared `""` author entry (matches openpyxl).
+- VML is written from one minified template with per-shape substitution; byte-determinism
+  as everywhere.
+**Tasks**
+- [ ] Per-sheet rels refactor (hyperlinks keep their bytes when no comments present — the
+      F4.6 tests must not change).
+- [ ] comments + VML emission, validation, content types; `Worksheet` re-reads its own
+      output verbatim (`comments` accessor).
+- [ ] Bridge carries `comments`; corpus snapshot gains `comments`; drop-list shrinks to
+      formulas + error cells.
+- [ ] Fixture: openpyxl-authored comments file already exists in the vendored corpus —
+      confirm coverage; add one if the corpus lacks an author-less comment.
+- [ ] openpyxl reads our comments (author + text) warnings-as-errors; adversarial review.
+**Acceptance.** A written comment is visible in Excel/LibreOffice on hover (openpyxl
+proxy-verified: both `comment.text` and `comment.author` match); round-trip lossless.
+
+### F5.3 — Theme fidelity: parse, resolve, carry ☐
+**Context.** Colors are kept RAW (`{theme, tint?}` never resolved) — correct for
+round-trip, but consumers can't get an RGB without their own theme parser, and the bridge
+re-renders custom-theme files against the standard Office theme (documented flattening).
+**Scope (in).** (a) `ooxml/theme.ts`: parse `theme1.xml`'s `<a:clrScheme>` into the
+12-slot color table — **including the OOXML quirk that theme indexes 0/1 are
+lt1/dk1-swapped relative to document order and that dk1/lt1 are usually
+`<a:sysClr>` (windowText/window) with a `lastClr` fallback**. (b)
+`Workbook.resolveColor(color: Color): string | undefined` — applies the MS tint algorithm
+(HSL-luminance transform, not linear RGB) and returns 8-digit ARGB; `undefined` for
+`{auto}` or when no theme part exists. Raw model unchanged. (c) The bridge carries the
+SOURCE theme part verbatim: `WorkbookInput.themeXml?: string` (opaque, trusted, must be
+`isXmlSafe`-clean and non-empty); when present the writer emits it instead of
+`DEFAULT_THEME_XML` — removing the custom-theme flattening from the drop list.
+**Design decisions (made).** Resolution is a METHOD on Workbook (needs the theme), not on
+the style objects (they stay plain data). Tint rounds exactly as Excel does (round to
+integer RGB after the Lum transform) — validate against openpyxl's `theme` handling on a
+real custom-theme fixture, cell by cell.
+**Tasks**
+- [ ] theme parser + resolveColor + tests (sysClr, srgbClr, tint± cases, index swap).
+- [ ] bridge/writer theme carry + byte-identical theme part round-trip test.
+- [ ] custom-theme real-producer fixture (LibreOffice or Excel authored) + provenance.
+- [ ] README: resolved-color example; adversarial review.
+**Acceptance.** `resolveColor` matches openpyxl's resolution on every themed cell of the
+fixture; a custom-theme file round-trips with its theme byte-identical.
+
+### F5.4 — Formula text: read → bridge → write (no evaluation) ☐
+**Context.** Formulas are the largest remaining fidelity gap: the reader keeps only the
+cached value; SheetJS/ExcelJS/openpyxl all preserve formula text. Evaluation stays M8 —
+this feature is text fidelity only.
+**Scope (in).** Reader: `Worksheet.formula(ref): string | undefined` — a lazy dedicated
+scan (the `parseCellStyles` idiom) over `<f>` elements. Plain formulas verbatim. **Shared
+formulas** (`t="shared"`, master carries text + `ref`, dependents carry only `si`):
+dependents return the TRANSLATED text — relative A1 tokens shifted by the row/col delta
+from the master, `$`-absolute parts pinned (a pure-string translator over the existing
+a1.ts primitives; openpyxl's `Translator` is the reference behavior). **Array formulas**
+(`t="array"`): text verbatim; the reader also exposes nothing extra (the ref lives in the
+write model below). Writer: the object cell form gains `formula?: string` (+ optional
+cached `value`); emits `<c r s?><f>…</f><v>cached</v></c>`; array masters emit
+`<f t="array" ref="…">`. An error-typed cached value writes `t="e"` — so error cells WITH
+a formula stop flattening to text. Validation: `isXmlSafe`, non-empty, ≤ 8192 chars
+(Excel's formula ceiling — a shared bound in ooxml), no leading `=` (stored form).
+**Scope (out).** Evaluation (M8); data-table formulas (`t="dataTable"`) degrade to
+cached-value-only, documented; defined-name resolution.
+**Design decisions (made).** `Cell` stays a value union — formula is an orthogonal, lazy
+accessor, exactly like `style(ref)`. The bridge attaches `formula` whenever
+`formula(ref)` resolves; cached value always written so non-recalculating consumers still
+see data. The shared-formula translator is its own module with exhaustive unit tests
+(absolute/relative/mixed refs, ranges, cross-sheet refs untouched, quoted sheet names,
+strings containing ref-lookalikes NOT translated — tokenize, don't regex-replace blindly).
+**Tasks**
+- [ ] `<f>` scan + shared-formula translator + array handling; reader tests incl. a
+      real-producer shared-formula fixture.
+- [ ] writer emission + validation; date1904 interplay checked (none expected — text).
+- [ ] bridge carry; corpus snapshot gains formulas; drop-list shrinks to bare error cells
+      (no formula) + documented degradations only.
+- [ ] openpyxl agreement: `data_only=False` reads our formulas verbatim; Excel recalc
+      sanity via openpyxl round-trip; adversarial review (translator is the hot spot).
+**Acceptance.** basic.xlsx's cached formula (`E1 = B1*2`) round-trips as a live formula;
+the corpus property holds with formulas in the snapshot.
+
+### F5.1 — Constant-memory streaming writer ☐
+**Context.** `writeXlsx` buffers every part, then zips (`writeZip(parts)`); fine to ~1M
+cells, wrong for export jobs. The reader has streamed since F2.2 — this is the writer
+mirror. Lands after F5.2–F5.4 so it reuses the final emission helpers.
+**Scope (in).** `streamXlsx(workbook, options?): ReadableStream<Uint8Array>` where each
+sheet's `rows` may be `Iterable | AsyncIterable` of row arrays (`CellInput[]`). Zip layer
+gains a streaming path: local headers with **bit-3 data descriptors** (CRC + sizes
+computed incrementally, written after each entry), central directory buffered (tiny) and
+emitted at the end. Part order: worksheets stream first (styles intern as rows flow),
+then styles/theme, workbook.xml, rels, `[Content_Types].xml` (order inside a zip is
+irrelevant to OPC — everything resolves through rels).
+**Scope (out).** Streaming READ of inputs other than rows (geometry/metadata stay
+upfront values); re-entrant/parallel sheet streams (sheets serialize in order).
+**Design decisions (made).**
+- Streamed sheets omit `<dimension>` (optional per schema; bounds unknowable upfront) —
+  documented, and the buffered writer's bytes are untouched (its own golden pins hold).
+- Geometry (cols/sheetViews) precedes sheetData → written from the upfront sheet fields;
+  mergeCells/hyperlinks/comments follow sheetData → validated upfront, emitted after the
+  last row. Same validation code paths as buffered — no second validator.
+- Backpressure: rows are pulled only when the consumer pulls (ReadableStream `pull`), so
+  an async row source (DB cursor) is never outpaced.
+- Determinism holds (no timestamps; fixed DOS date as in `writeZip`). Byte-identity with
+  the BUFFERED writer is NOT a goal (descriptor layout differs by design) — equivalence
+  is asserted through the reader: same input → identical reader snapshot.
+**Tasks**
+- [ ] zip streaming entries + incremental CRC; unit tests against `openZip` and system
+      `unzip -t`.
+- [ ] worksheet row-stream serializer reusing `renderCell`/metadata emitters; API + types
+      + facade export.
+- [ ] equivalence property: buffered vs streamed → identical reader snapshots across the
+      corpus-shaped inputs; memory harness script (500k rows, RSS bounded) in
+      `scripts/` (not vitest).
+- [ ] docs + example (streaming a DB-cursor-shaped async source); adversarial review.
+**Acceptance.** 500k-row export completes with flat memory; openpyxl + Excel open the
+streamed file; openXlsx snapshot equals the buffered writer's for identical input.
+
+### F5.5 — Benchmark harness + published numbers ☐
+**Context.** "Fast" is currently an architectural claim (0.4 competitive analysis). The
+1.0 gate needs published benchmarks; the harness comes now so every later feature can be
+measured against a baseline.
+**Scope (in).** A private `packages/bench` workspace (dev-only; competitor libs as
+devDependencies THERE — the zero-dep principle applies to published packages only):
+generated workloads (10k / 100k / 1M cells; strings-heavy, numbers-heavy, styled), read
+and write, wall-time + peak heap, N iterations with warmup, machine-info stamp. Compare:
+openjsxl (buffered + streamed), `exceljs@4.4.0`, `xlsx@0.18.5` (the npm-installable
+SheetJS), and out-of-band reference numbers for python `openpyxl`/`python-calamine` from
+a companion script. Output: a reproducible `docs/benchmarks.md` table (`pnpm bench`).
+**Scope (out).** CI-run benchmarks (noise); micro-benchmarks of internals.
+**Tasks**
+- [ ] harness + workload generator (reuses `@openjsxl/fixtures` builder); runner with
+      warmup/median; markdown reporter.
+- [ ] first published `docs/benchmarks.md` + README link with date + hardware note.
+**Acceptance.** `pnpm bench` reproduces the table end-to-end on a clean checkout; README
+claims match the published numbers (no unmeasured "fast" claims anywhere in docs).
+
+---
+
+## M6+ — Later milestones (outline; expanded when reached)
+
+- **M6 — Images + native lane (v0.6):** picture read (drawingML anchors → `{ref, bytes,
+  mime}`) and basic image write; the **optional** `@openjsxl/native` napi-rs binding to
+  the Rust `calamine` reader (and a WASM build) behind the zip/xml interface, selected via
+  `optionalDependencies` with the pure-TS path as universal fallback — justified (or not)
+  by the F5.5 numbers.
+- **M7 — More formats (v0.7):** `.xlsb` (binary) read; `.ods` read; legacy `.xls`
   (BIFF8) read.
-- **M8 — Formulas (v0.8):** opt-in formula parser + evaluator for common functions, behind
-  a separate entry point so the core stays lean.
+- **M8 — Formula evaluation (v0.8):** opt-in parser + evaluator for common functions,
+  behind a separate entry point so the core stays lean (text fidelity landed in F5.4).
 - **M9 — Breadth + hardening (v0.9):** tables, data validation, conditional formatting;
-  fuzzing, expanded corpus, perf benchmarks.
-- **1.0:** frozen API, full round-trip fidelity, documentation site, published benchmarks vs
-  SheetJS/ExcelJS/openpyxl/calamine.
+  fuzzing, expanded corpus.
+- **1.0:** frozen API, full round-trip fidelity, documentation site, benchmarks kept
+  current (harness from F5.5).
 
 ---
 
