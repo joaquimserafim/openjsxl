@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.4.0` (already set) — skip this step. For a later
+For the current release the version is `0.5.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -103,6 +103,13 @@ git push -f origin v<version>
   metadata (merged ranges, hyperlinks, sheet visibility). Round-trip now also carries styles,
   geometry, merges, hyperlinks, and visibility — the drop-list is comments, formulas, and error
   cells. Additive reader API: `Worksheet.style/columns/rowProperties/freeze/state`.
+- **`0.5.0`** — fidelity + streaming: comments write (with the legacy VML part Excel needs to
+  show them), formula text read/translate/write (shared formulas come back per-cell translated;
+  cached values kept), custom-theme carry (the theme part round-trips byte-identical) and
+  `Workbook.resolveColor` (`{theme, tint}` → ARGB), and `streamXlsx` — a constant-memory
+  streaming writer fed by sync/async row iterables. The round-trip drop-list is down to bare
+  error cells. Additive reader API: `Worksheet.formula(ref)`, `Workbook.resolveColor`/`themeXml`.
+  Published, reproducible benchmarks land in `docs/benchmarks.md` (`pnpm bench`).
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
