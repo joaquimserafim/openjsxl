@@ -11,6 +11,9 @@ coverage/
 # Local working status notes (not tracked)
 progress.md
 
+# Local competitive-analysis snapshot (not tracked, never published)
+COMPETITIVE-ANALYSIS.md
+
 # Local-only test fixtures (e.g. differently-licensed real .xlsx files): usable for local
 # verification, never committed or published. The README is tracked so the dir documents itself.
 packages/fixtures/local/*

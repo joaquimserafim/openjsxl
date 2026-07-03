@@ -202,9 +202,11 @@ tolerated non-canonical cell ref spelling (e.g. lowercase `a1`) re-emits canonic
 ## Why
 
 JavaScript has no Excel library that is, all at once, maintained, permissively licensed,
-published on npm, ESM/TypeScript-first, dependency-free, and fast. SheetJS is frozen on a
-vulnerable npm build behind a CDN and a paid tier; ExcelJS is effectively unmaintained.
-openjsxl aims for that empty square — taking the speed lessons of Python's
+published on npm, ESM/TypeScript-first, dependency-free, and fast. SheetJS's public **npm**
+release is frozen on a 2022 build that predates its own security fix — current releases ship
+only from a vendor CDN, and styled write is a paid tier; ExcelJS is MIT and full-featured but
+effectively unmaintained (no release since 2023, hundreds of open issues). openjsxl aims for
+that empty square — taking the speed lessons of Python's
 [`python-calamine`](https://pypi.org/project/python-calamine/) and growing toward the
 capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
