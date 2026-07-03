@@ -37,9 +37,11 @@ const METHOD_DEFLATE = 8;
 const VERSION = 20;
 
 // u32 size/offset fields must stay strictly below the ZIP64 sentinel; the u16 entry count strictly
-// below its own. Hitting either forces ZIP64, which we don't emit.
+// below its own. Hitting either forces ZIP64, which we don't emit. MAX_ENTRIES is the largest
+// WRITABLE count: 0xffff itself is the sentinel — an EOCD carrying it sends conforming readers
+// hunting for a ZIP64 record that doesn't exist.
 const U32_CEILING = 0xffffffff;
-const MAX_ENTRIES = 0xffff;
+export const MAX_ENTRIES = 0xfffe;
 
 // Fixed DOS date (1980-01-01) and time (00:00) for deterministic output — mirrors the fixtures
 // builder so both produce reproducible archives.
@@ -79,7 +81,7 @@ export interface ZipInput {
  * a name ending in `/` (which the reader treats as a directory placeholder and drops).
  */
 export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array> {
-	if (entries.length >= MAX_ENTRIES) {
+	if (entries.length > MAX_ENTRIES) {
 		throw new XlsxError(
 			"unsupported",
 			`too many zip entries (${entries.length}); would require ZIP64, which is not supported`,

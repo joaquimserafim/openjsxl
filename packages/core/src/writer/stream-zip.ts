@@ -24,7 +24,9 @@ const VERSION = 20;
 // the compressed data in a descriptor record. This is what lets us write the header before we know them.
 const FLAG_DATA_DESCRIPTOR = 0x0008;
 const U32_CEILING = 0xffffffff;
-const MAX_ENTRIES = 0xffff;
+// Largest WRITABLE entry count — 0xffff itself is the ZIP64 sentinel in the u16 EOCD field
+// (readers would go looking for a ZIP64 record we never write). Same cap as the buffered writer.
+export const MAX_ENTRIES = 0xfffe;
 const DOS_TIME = 0;
 const DOS_DATE = 0x0021;
 

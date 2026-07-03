@@ -848,6 +848,7 @@ function renderStreamRow(
 	styles: StyleRegistry,
 ): string {
 	const attrs = rowAttrs.get(rowNum) ?? "";
+	rowAttrs.delete(rowNum); // consumed — whatever remains becomes a trailing property-only row
 	if (cells === undefined) return attrs !== "" ? `<row r="${rowNum}"${attrs}/>` : "";
 	if (!Array.isArray(cells)) {
 		throw new XlsxError(
@@ -900,6 +901,13 @@ async function* streamRowChunks(
 			yield encoder.encode(buf);
 			buf = "";
 		}
+	}
+	// Row properties addressed past the last streamed row still exist in the file, as cell-less
+	// <row> elements — exactly what the buffered writer emits for its leftover rowAttrs. They are
+	// all beyond the streamed positions (each streamed row consumed its own entry), so appending
+	// them sorted keeps the rows ascending; the map is upfront input, so memory stays constant.
+	for (const [r, attrs] of [...rowAttrs].sort((a, b) => a[0] - b[0])) {
+		buf += `<row r="${r}"${attrs}/>`;
 	}
 	if (buf !== "") yield encoder.encode(buf);
 	yield encoder.encode(footer);

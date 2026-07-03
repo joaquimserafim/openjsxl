@@ -102,7 +102,8 @@ const INPUTS: { name: string; input: WorkbookInput; opts?: { date1904?: boolean 
 					name: "G",
 					rows: [["a"], [], [null, "b"]],
 					columns: [{ min: 1, max: 1, width: 20 }],
-					rowProperties: { 1: { height: 30 } },
+					// Row 7 is PAST the last data row — a trailing property-only <row/> both writers emit.
+					rowProperties: { 1: { height: 30 }, 7: { height: 44, hidden: true } },
 					freeze: { rows: 1, cols: 1 },
 				},
 			],
@@ -185,6 +186,32 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		while (yielded === 0) await reader.read();
 		await reader.cancel(); // must tear down: run the source's finally + release the compressor
 		expect(closed).toBe(true);
+	});
+
+	it("emits rowProperties past the last streamed row (M5-analysis regression: silent drop)", async () => {
+		// The stream ends at row 1, but rows 5 and 9 carry height/hidden. The buffered writer flushes
+		// them as trailing property-only <row/> elements; the streamed writer must too — same input,
+		// same metadata out.
+		const input = {
+			sheets: [
+				{
+					name: "S",
+					rows: [["a"]],
+					rowProperties: {
+						1: { height: 30 },
+						9: { height: 12 },
+						5: { height: 44, hidden: true },
+					},
+				},
+			],
+		};
+		const buffered = await openXlsx(await writeXlsx(input));
+		const streamed = await openXlsx(await drain(streamXlsx(input)));
+		expect([...streamed.sheet("S").rowProperties]).toEqual([
+			...buffered.sheet("S").rowProperties,
+		]);
+		expect(streamed.sheet("S").rowProperties.get(5)).toEqual({ height: 44, hidden: true });
+		expect(streamed.sheet("S").rowProperties.get(9)).toEqual({ height: 12 });
 	});
 
 	it("emits the VALIDATED sheet name, not one a getter flips to afterwards (review regression: TOCTOU)", async () => {

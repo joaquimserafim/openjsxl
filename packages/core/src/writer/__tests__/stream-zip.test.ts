@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openZip } from "../../zip";
-import { type StreamPart, streamZip } from "../stream-zip";
+import { MAX_ENTRIES as STREAM_MAX_ENTRIES, type StreamPart, streamZip } from "../stream-zip";
+import { MAX_ENTRIES as BUFFERED_MAX_ENTRIES } from "../zip";
 
 // F5.1 — the streaming zip layer. Its data-descriptor archive must read back through openZip exactly
 // like a buffered one; CRC correctness (which openZip trusts rather than verifies) is checked out of
@@ -30,6 +31,14 @@ async function* parts(list: StreamPart[]): AsyncGenerator<StreamPart> {
 }
 
 describe("streamZip", () => {
+	it("caps entries below the ZIP64 sentinel, same bound in both writers (M5-analysis regression)", () => {
+		// A 65 536-part archive is too slow to build in a unit test, so pin the shared constant: the
+		// u16 EOCD entry count 0xffff is the ZIP64 sentinel — writing exactly 65 535 entries would
+		// send conforming readers hunting for a ZIP64 record that doesn't exist. Max writable: 0xfffe.
+		expect(STREAM_MAX_ENTRIES).toBe(0xfffe);
+		expect(BUFFERED_MAX_ENTRIES).toBe(0xfffe);
+	});
+
 	it("round-trips buffered, sync-iterable, and async-iterable parts through openZip", async () => {
 		const rows = Array.from({ length: 2000 }, (_, i) => `<row r="${i + 1}">data ${i}</row>`);
 		async function* asyncChunks(): AsyncGenerator<Uint8Array> {
