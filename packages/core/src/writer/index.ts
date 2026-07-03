@@ -2,16 +2,20 @@
 // The container primitives (writeZip, crc32, deflateRaw) stay internal; writeXlsx is the public
 // surface, re-exported from the package index.
 
-export { crc32 } from "./crc32"
-export { deflateRaw } from "./deflate"
-export { workbookToInput } from "./from-workbook"
+export { crc32 } from "./crc32";
+export { deflateRaw } from "./deflate";
+export { workbookToInput } from "./from-workbook";
+export { streamXlsx } from "./stream";
 export type {
 	CellInput,
 	CellValue,
 	SheetInput,
+	StreamRows,
+	StreamSheetInput,
+	StreamWorkbookInput,
 	StyledCell,
 	WorkbookInput,
 	WriteOptions,
-} from "./types"
-export { writeXlsx } from "./workbook"
-export { writeZip, type ZipInput } from "./zip"
+} from "./types";
+export { writeXlsx } from "./workbook";
+export { writeZip, type ZipInput } from "./zip";

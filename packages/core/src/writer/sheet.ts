@@ -1,4 +1,4 @@
-import { XlsxError } from "../errors"
+import { XlsxError } from "../errors";
 import {
 	type CellRef,
 	formatRef,
@@ -7,13 +7,15 @@ import {
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
 	parseRef,
-} from "../ooxml/a1"
-import { dateToSerial } from "../ooxml/dates"
-import { MAX_FORMULA_LEN } from "../ooxml/formula"
-import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types"
-import type { StyleRegistry } from "./styles"
-import type { CellInput, CellValue, SheetInput, StyledCell } from "./types"
-import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml"
+} from "../ooxml/a1";
+import { dateToSerial } from "../ooxml/dates";
+import { MAX_FORMULA_LEN } from "../ooxml/formula";
+import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types";
+import type { StyleRegistry } from "./styles";
+import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
+import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml";
+
+const encoder = new TextEncoder();
 
 // Serialize one sheet's rows into worksheet XML (`xl/worksheets/sheetN.xml`). The element order the
 // schema requires here is <dimension> then <sheetData>; within <sheetData>, rows ascend by index and
@@ -24,15 +26,15 @@ import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml"
 // BLANK cell ({ value: null, style }) is real: it emits a valueless `<c r s/>` and counts toward
 // the dimension, which is how a border or fill lands on an empty cell.
 
-const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 // A finite JS number as it appears in <v>. String() gives the shortest decimal that parses back to
 // the same double via the reader's Number() — so the value round-trips exactly. Non-finite values
 // (NaN, ±Infinity) have no .xlsx representation and are rejected before this.
 function numberToXml(n: number): string {
-	return String(n)
+	return String(n);
 }
 
 // Split a CellInput into its value, (optional) style, and (optional) formula. Discrimination is
@@ -45,37 +47,37 @@ function splitInput(
 	row: number,
 	input: CellInput,
 ): {
-	readonly value: CellValue
-	readonly styled: StyledCell | undefined
-	readonly formula: unknown
+	readonly value: CellValue;
+	readonly styled: StyledCell | undefined;
+	readonly formula: unknown;
 } {
 	if (input === null || input === undefined) {
-		return { value: input, styled: undefined, formula: undefined }
+		return { value: input, styled: undefined, formula: undefined };
 	}
 	if (typeof input !== "object" || input instanceof Date) {
-		return { value: input, styled: undefined, formula: undefined }
+		return { value: input, styled: undefined, formula: undefined };
 	}
-	const ref = formatRef({ col, row })
+	const ref = formatRef({ col, row });
 	if (Array.isArray(input)) {
-		throw new XlsxError("invalid-input", `cell ${ref}: an array is not a cell value`)
+		throw new XlsxError("invalid-input", `cell ${ref}: an array is not a cell value`);
 	}
-	const record = input as unknown as Record<string, unknown>
+	const record = input as unknown as Record<string, unknown>;
 	for (const key of Object.keys(record)) {
 		if (key !== "value" && key !== "style" && key !== "formula") {
 			throw new XlsxError(
 				"invalid-input",
 				`cell ${ref}: a cell object allows only "value", "style", and "formula" (got "${key}")`,
-			)
+			);
 		}
 	}
-	const hasFormula = "formula" in record
+	const hasFormula = "formula" in record;
 	if (!hasFormula && !("value" in record)) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: an object cell must be { value, style? } or carry a formula`,
-		)
+		);
 	}
-	const value = record.value
+	const value = record.value;
 	// The inner value must be a plain CellValue — a nested { value } or any other object (except
 	// Date) has no meaning and would silently mis-serialize.
 	if (
@@ -84,13 +86,13 @@ function splitInput(
 		typeof value === "object" &&
 		!(value instanceof Date)
 	) {
-		throw new XlsxError("invalid-input", `cell ${ref}: a cell's value cannot be an object`)
+		throw new XlsxError("invalid-input", `cell ${ref}: a cell's value cannot be an object`);
 	}
 	return {
 		value: value as CellValue,
 		styled: input as StyledCell,
 		formula: hasFormula ? record.formula : undefined,
-	}
+	};
 }
 
 // Render a single cell, or `undefined` for one that produces no output (an empty value with no
@@ -104,29 +106,29 @@ function renderCell(
 	date1904: boolean,
 	styles: StyleRegistry,
 ): string | undefined {
-	const { value, styled, formula } = splitInput(col, row, input)
-	const ref = formatRef({ col, row })
+	const { value, styled, formula } = splitInput(col, row, input);
+	const ref = formatRef({ col, row });
 
 	// Resolve the xf index. Bare non-date values never touch the registry (zero overhead on the
 	// unstyled path); a Date always does (it needs the date number format).
-	let xf = 0
+	let xf = 0;
 	if (value instanceof Date) {
-		xf = styles.xfIndexFor(styled?.style, true, ref)
+		xf = styles.xfIndexFor(styled?.style, true, ref);
 	} else if (styled?.style !== undefined) {
-		xf = styles.xfIndexFor(styled.style, false, ref)
+		xf = styles.xfIndexFor(styled.style, false, ref);
 	}
-	const sAttr = xf === 0 ? "" : ` s="${xf}"`
+	const sAttr = xf === 0 ? "" : ` s="${xf}"`;
 
 	// A formula cell (F5.4) emits `<c s?><f>…</f><v>cached</v></c>`: the formula plus its optional
 	// cached result. The result determines the cell type exactly like a bare value, except a string
 	// result uses `t="str"` (a formula string) rather than an inline string.
 	if (formula !== undefined) {
-		return renderFormulaCell(ref, sAttr, formula, value, date1904)
+		return renderFormulaCell(ref, sAttr, formula, value, date1904);
 	}
 
 	if (value === null || value === undefined) {
 		// A styled blank emits a valueless cell; an unstyled (or default-styled) empty is omitted.
-		return xf === 0 ? undefined : `<c r="${ref}"${sAttr}/>`
+		return xf === 0 ? undefined : `<c r="${ref}"${sAttr}/>`;
 	}
 	if (typeof value === "string") {
 		// A forbidden control character or lone surrogate would make the part not well-formed (or be
@@ -135,27 +137,27 @@ function renderCell(
 			throw new XlsxError(
 				"invalid-input",
 				`cell ${ref}: string contains a character not allowed in XML (a control character or lone surrogate)`,
-			)
+			);
 		}
-		return `<c r="${ref}"${sAttr} t="inlineStr"><is><t${preserveAttr(value)}>${escapeText(value)}</t></is></c>`
+		return `<c r="${ref}"${sAttr} t="inlineStr"><is><t${preserveAttr(value)}>${escapeText(value)}</t></is></c>`;
 	}
 	if (typeof value === "boolean") {
-		return `<c r="${ref}"${sAttr} t="b"><v>${value ? 1 : 0}</v></c>`
+		return `<c r="${ref}"${sAttr} t="b"><v>${value ? 1 : 0}</v></c>`;
 	}
 	if (typeof value === "number") {
 		if (!Number.isFinite(value)) {
-			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`)
+			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`);
 		}
-		return `<c r="${ref}"${sAttr}><v>${numberToXml(value)}</v></c>`
+		return `<c r="${ref}"${sAttr}><v>${numberToXml(value)}</v></c>`;
 	}
 	if (value instanceof Date) {
-		const serial = dateToSerial(value, date1904)
+		const serial = dateToSerial(value, date1904);
 		if (!Number.isFinite(serial)) {
-			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`)
+			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`);
 		}
-		return `<c r="${ref}"${sAttr}><v>${numberToXml(serial)}</v></c>`
+		return `<c r="${ref}"${sAttr}><v>${numberToXml(serial)}</v></c>`;
 	}
-	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`)
+	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`);
 }
 
 // The cached result of a formula, as a `t` attribute + `<v>` element (empty pair when there is no
@@ -166,30 +168,30 @@ function cachedValueXml(
 	value: CellValue,
 	date1904: boolean,
 ): { readonly tAttr: string; readonly vXml: string } {
-	if (value === null || value === undefined) return { tAttr: "", vXml: "" }
+	if (value === null || value === undefined) return { tAttr: "", vXml: "" };
 	if (typeof value === "string") {
 		if (!isXmlSafe(value)) {
 			throw new XlsxError(
 				"invalid-input",
 				`cell ${ref}: cached string contains a character not allowed in XML (a control character or lone surrogate)`,
-			)
+			);
 		}
-		return { tAttr: ' t="str"', vXml: `<v>${escapeText(value)}</v>` }
+		return { tAttr: ' t="str"', vXml: `<v>${escapeText(value)}</v>` };
 	}
-	if (typeof value === "boolean") return { tAttr: ' t="b"', vXml: `<v>${value ? 1 : 0}</v>` }
+	if (typeof value === "boolean") return { tAttr: ' t="b"', vXml: `<v>${value ? 1 : 0}</v>` };
 	if (typeof value === "number") {
 		if (!Number.isFinite(value)) {
-			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`)
+			throw new XlsxError("invalid-input", `cell ${ref}: ${value} is not a finite number`);
 		}
-		return { tAttr: "", vXml: `<v>${numberToXml(value)}</v>` }
+		return { tAttr: "", vXml: `<v>${numberToXml(value)}</v>` };
 	}
 	if (value instanceof Date) {
-		const serial = dateToSerial(value, date1904)
+		const serial = dateToSerial(value, date1904);
 		if (!Number.isFinite(serial))
-			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`)
-		return { tAttr: "", vXml: `<v>${numberToXml(serial)}</v>` }
+			throw new XlsxError("invalid-input", `cell ${ref}: invalid Date`);
+		return { tAttr: "", vXml: `<v>${numberToXml(serial)}</v>` };
 	}
-	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cached value type`)
+	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cached value type`);
 }
 
 // Render a formula cell. `formula` is the caller's value read once (TOCTOU): it must be a non-empty,
@@ -202,31 +204,31 @@ function renderFormulaCell(
 	date1904: boolean,
 ): string {
 	if (typeof formula !== "string") {
-		throw new XlsxError("invalid-input", `cell ${ref}: formula must be a string`)
+		throw new XlsxError("invalid-input", `cell ${ref}: formula must be a string`);
 	}
 	if (formula.length === 0) {
-		throw new XlsxError("invalid-input", `cell ${ref}: formula must not be empty`)
+		throw new XlsxError("invalid-input", `cell ${ref}: formula must not be empty`);
 	}
 	if (formula.length > MAX_FORMULA_LEN) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: formula exceeds Excel's ${MAX_FORMULA_LEN}-character limit`,
-		)
+		);
 	}
 	if (formula.startsWith("=")) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: formula must be in stored form, without a leading "="`,
-		)
+		);
 	}
 	if (!isXmlSafe(formula)) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: formula contains a character not allowed in XML (a control character or lone surrogate)`,
-		)
+		);
 	}
-	const cached = cachedValueXml(ref, value, date1904)
-	return `<c r="${ref}"${sAttr}${cached.tAttr}><f>${escapeText(formula)}</f>${cached.vXml}</c>`
+	const cached = cachedValueXml(ref, value, date1904);
+	return `<c r="${ref}"${sAttr}${cached.tAttr}><f>${escapeText(formula)}</f>${cached.vXml}</c>`;
 }
 
 // ── Sheet geometry (F4.5): validation + emission ───────────────────────────────────────────────
@@ -235,13 +237,13 @@ function renderFormulaCell(
 // bridge's geometry always writes.
 
 function sheetInvalid(sheetName: string, message: string): never {
-	throw new XlsxError("invalid-input", `sheet "${sheetName}": ${message}`)
+	throw new XlsxError("invalid-input", `sheet "${sheetName}": ${message}`);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-	if (typeof value !== "object" || value === null) return false
-	const proto = Object.getPrototypeOf(value)
-	return proto === null || proto === Object.prototype
+	if (typeof value !== "object" || value === null) return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === null || proto === Object.prototype;
 }
 
 function checkKeys(
@@ -252,22 +254,22 @@ function checkKeys(
 ): void {
 	for (const key of Object.keys(obj)) {
 		if (!allowed.includes(key))
-			sheetInvalid(sheetName, `${what} has an unknown property "${key}"`)
+			sheetInvalid(sheetName, `${what} has an unknown property "${key}"`);
 	}
 }
 
 // <cols> — one <col> per entry that survives normalization ({hidden: false} alone melts away).
 function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined): string {
-	if (columns === undefined) return ""
-	if (!Array.isArray(columns)) sheetInvalid(sheetName, "columns must be an array")
-	const entries: string[] = []
+	if (columns === undefined) return "";
+	if (!Array.isArray(columns)) sheetInvalid(sheetName, "columns must be an array");
+	const entries: string[] = [];
 	for (let i = 0; i < columns.length; i++) {
-		const raw = columns[i] as unknown
-		const what = `columns[${i}]`
-		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkKeys(sheetName, what, raw, ["min", "max", "width", "hidden"])
-		const min = raw.min
-		const max = raw.max
+		const raw = columns[i] as unknown;
+		const what = `columns[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, ["min", "max", "width", "hidden"]);
+		const min = raw.min;
+		const max = raw.max;
 		if (
 			typeof min !== "number" ||
 			!Number.isInteger(min) ||
@@ -280,10 +282,10 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 			sheetInvalid(
 				sheetName,
 				`${what} needs integer 1-based min ≤ max within Excel's ${MAX_COL} columns`,
-			)
+			);
 		}
-		let attrs = ` min="${min}" max="${max}"`
-		const width = raw.width
+		let attrs = ` min="${min}" max="${max}"`;
+		const width = raw.width;
 		if (width !== undefined) {
 			if (
 				typeof width !== "number" ||
@@ -291,19 +293,19 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 				width <= 0 ||
 				width > MAX_COL_WIDTH
 			) {
-				sheetInvalid(sheetName, `${what}.width must be a number in (0, ${MAX_COL_WIDTH}]`)
+				sheetInvalid(sheetName, `${what}.width must be a number in (0, ${MAX_COL_WIDTH}]`);
 			}
 			// customWidth marks the width as user-set — Excel ignores a bare width without it.
-			attrs += ` width="${String(width)}" customWidth="1"`
+			attrs += ` width="${String(width)}" customWidth="1"`;
 		}
-		const hidden = raw.hidden
+		const hidden = raw.hidden;
 		if (hidden !== undefined && typeof hidden !== "boolean") {
-			sheetInvalid(sheetName, `${what}.hidden must be a boolean`)
+			sheetInvalid(sheetName, `${what}.hidden must be a boolean`);
 		}
-		if (hidden === true) attrs += ' hidden="1"'
-		if (width !== undefined || hidden === true) entries.push(`<col${attrs}/>`)
+		if (hidden === true) attrs += ' hidden="1"';
+		if (width !== undefined || hidden === true) entries.push(`<col${attrs}/>`);
 	}
-	return entries.length > 0 ? `<cols>${entries.join("")}</cols>` : ""
+	return entries.length > 0 ? `<cols>${entries.join("")}</cols>` : "";
 }
 
 // Per-row `ht`/`hidden` attributes, keyed by 1-based row number. Rows whose properties all
@@ -312,23 +314,23 @@ function rowAttrsMap(
 	sheetName: string,
 	rowProperties: Readonly<Record<number, RowProps>> | undefined,
 ): Map<number, string> {
-	const out = new Map<number, string>()
-	if (rowProperties === undefined) return out
-	if (!isPlainRecord(rowProperties)) sheetInvalid(sheetName, "rowProperties must be an object")
+	const out = new Map<number, string>();
+	if (rowProperties === undefined) return out;
+	if (!isPlainRecord(rowProperties)) sheetInvalid(sheetName, "rowProperties must be an object");
 	for (const key of Object.keys(rowProperties)) {
-		const rowNum = Number(key)
+		const rowNum = Number(key);
 		if (!Number.isInteger(rowNum) || rowNum < 1 || rowNum > MAX_ROW) {
 			sheetInvalid(
 				sheetName,
 				`rowProperties key "${key}" is not a row number within Excel's grid`,
-			)
+			);
 		}
-		const raw = (rowProperties as Record<string, unknown>)[key]
-		const what = `rowProperties[${key}]`
-		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkKeys(sheetName, what, raw, ["height", "hidden"])
-		let attrs = ""
-		const height = raw.height
+		const raw = (rowProperties as Record<string, unknown>)[key];
+		const what = `rowProperties[${key}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, ["height", "hidden"]);
+		let attrs = "";
+		const height = raw.height;
 		if (height !== undefined) {
 			if (
 				typeof height !== "number" ||
@@ -336,46 +338,49 @@ function rowAttrsMap(
 				height <= 0 ||
 				height > MAX_ROW_HEIGHT
 			) {
-				sheetInvalid(sheetName, `${what}.height must be a number in (0, ${MAX_ROW_HEIGHT}]`)
+				sheetInvalid(
+					sheetName,
+					`${what}.height must be a number in (0, ${MAX_ROW_HEIGHT}]`,
+				);
 			}
 			// customHeight marks the height as user-set, mirroring customWidth on columns.
-			attrs += ` ht="${String(height)}" customHeight="1"`
+			attrs += ` ht="${String(height)}" customHeight="1"`;
 		}
-		const hidden = raw.hidden
+		const hidden = raw.hidden;
 		if (hidden !== undefined && typeof hidden !== "boolean") {
-			sheetInvalid(sheetName, `${what}.hidden must be a boolean`)
+			sheetInvalid(sheetName, `${what}.hidden must be a boolean`);
 		}
-		if (hidden === true) attrs += ' hidden="1"'
-		if (attrs !== "") out.set(rowNum, attrs)
+		if (hidden === true) attrs += ' hidden="1"';
+		if (attrs !== "") out.set(rowNum, attrs);
 	}
-	return out
+	return out;
 }
 
 // <sheetViews> with a frozen <pane>. For state="frozen", xSplit/ySplit are whole column/row
 // counts; topLeftCell is the first scrollable cell and activePane the quadrant the cursor lives
 // in — Excel expects all three to be consistent.
 function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): string {
-	if (freeze === undefined) return ""
-	if (!isPlainRecord(freeze)) sheetInvalid(sheetName, "freeze must be an object")
-	checkKeys(sheetName, "freeze", freeze, ["rows", "cols"])
+	if (freeze === undefined) return "";
+	if (!isPlainRecord(freeze)) sheetInvalid(sheetName, "freeze must be an object");
+	checkKeys(sheetName, "freeze", freeze, ["rows", "cols"]);
 	const validate = (value: unknown, what: string, limit: number): number => {
-		if (value === undefined) return 0
+		if (value === undefined) return 0;
 		if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value >= limit) {
-			sheetInvalid(sheetName, `freeze.${what} must be an integer in [0, ${limit})`)
+			sheetInvalid(sheetName, `freeze.${what} must be an integer in [0, ${limit})`);
 		}
-		return value
-	}
-	const rows = validate(freeze.rows, "rows", MAX_ROW)
-	const cols = validate(freeze.cols, "cols", MAX_COL)
-	if (rows === 0 && cols === 0) return "" // freezing nothing is no freeze
-	const splits = (cols > 0 ? ` xSplit="${cols}"` : "") + (rows > 0 ? ` ySplit="${rows}"` : "")
-	const topLeft = formatRef({ col: cols + 1, row: rows + 1 })
-	const activePane = rows > 0 && cols > 0 ? "bottomRight" : rows > 0 ? "bottomLeft" : "topRight"
+		return value;
+	};
+	const rows = validate(freeze.rows, "rows", MAX_ROW);
+	const cols = validate(freeze.cols, "cols", MAX_COL);
+	if (rows === 0 && cols === 0) return ""; // freezing nothing is no freeze
+	const splits = (cols > 0 ? ` xSplit="${cols}"` : "") + (rows > 0 ? ` ySplit="${rows}"` : "");
+	const topLeft = formatRef({ col: cols + 1, row: rows + 1 });
+	const activePane = rows > 0 && cols > 0 ? "bottomRight" : rows > 0 ? "bottomLeft" : "topRight";
 	return (
 		'<sheetViews><sheetView workbookViewId="0">' +
 		`<pane${splits} topLeftCell="${topLeft}" activePane="${activePane}" state="frozen"/>` +
 		"</sheetView></sheetViews>"
-	)
+	);
 }
 
 // ── Structural metadata (F4.6): merges + hyperlinks — validation + emission ────────────────────
@@ -385,22 +390,22 @@ function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): strin
 // Strictly canonical A1: uppercase letters, no leading zeros — the form every real producer
 // writes and the only form we emit (parseRef itself would tolerate lowercase). Three letters cap
 // the column at ZZZ (18,278), so columnToIndex can't overflow; the grid bound is checked after.
-const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/
+const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/;
 
 function parseCanonicalRef(ref: string): CellRef | undefined {
-	if (!CANONICAL_CELL.test(ref)) return undefined
-	const parsed = parseRef(ref)
-	return parsed.col <= MAX_COL && parsed.row <= MAX_ROW ? parsed : undefined
+	if (!CANONICAL_CELL.test(ref)) return undefined;
+	const parsed = parseRef(ref);
+	return parsed.col <= MAX_COL && parsed.row <= MAX_ROW ? parsed : undefined;
 }
 
-const shortened = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s)
+const shortened = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s);
 
 interface MergeRect {
-	readonly ref: string
-	readonly c1: number
-	readonly r1: number
-	readonly c2: number
-	readonly r2: number
+	readonly ref: string;
+	readonly c1: number;
+	readonly r1: number;
+	readonly c2: number;
+	readonly r2: number;
 }
 
 // <mergeCells> — Excel repair-prompts on malformed, single-cell, and overlapping merges, so all
@@ -410,52 +415,55 @@ interface MergeRect {
 // on adversarial bridge input: actives that DON'T overlap are column-disjoint, so the active list
 // can never exceed MAX_COL entries — no O(n²) blow-up from a crafted file with a million merges.
 function mergeCellsXml(sheetName: string, merges: readonly string[] | undefined): string {
-	if (merges === undefined) return ""
-	if (!Array.isArray(merges)) sheetInvalid(sheetName, "merges must be an array")
-	const rects: MergeRect[] = []
+	if (merges === undefined) return "";
+	if (!Array.isArray(merges)) sheetInvalid(sheetName, "merges must be an array");
+	const rects: MergeRect[] = [];
 	for (let i = 0; i < merges.length; i++) {
-		const ref = merges[i] as unknown
-		const what = `merges[${i}]`
-		if (typeof ref !== "string") sheetInvalid(sheetName, `${what} must be a string`)
-		const colon = ref.indexOf(":")
-		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon))
-		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1))
+		const ref = merges[i] as unknown;
+		const what = `merges[${i}]`;
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what} must be a string`);
+		const colon = ref.indexOf(":");
+		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon));
+		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1));
 		if (from === undefined || to === undefined) {
 			sheetInvalid(
 				sheetName,
 				`${what} "${shortened(ref)}" is not a canonical A1 range like "A1:B2" within Excel's grid`,
-			)
+			);
 		}
 		if (to.col < from.col || to.row < from.row) {
-			sheetInvalid(sheetName, `${what} "${shortened(ref)}" must run top-left to bottom-right`)
+			sheetInvalid(
+				sheetName,
+				`${what} "${shortened(ref)}" must run top-left to bottom-right`,
+			);
 		}
 		if (to.col === from.col && to.row === from.row) {
-			sheetInvalid(sheetName, `${what} "${shortened(ref)}" merges a single cell`)
+			sheetInvalid(sheetName, `${what} "${shortened(ref)}" merges a single cell`);
 		}
-		rects.push({ ref, c1: from.col, r1: from.row, c2: to.col, r2: to.row })
+		rects.push({ ref, c1: from.col, r1: from.row, c2: to.col, r2: to.row });
 	}
-	if (rects.length === 0) return ""
-	const sorted = [...rects].sort((a, b) => a.r1 - b.r1)
-	const active: MergeRect[] = []
+	if (rects.length === 0) return "";
+	const sorted = [...rects].sort((a, b) => a.r1 - b.r1);
+	const active: MergeRect[] = [];
 	for (const rect of sorted) {
-		let kept = 0
+		let kept = 0;
 		for (const a of active) {
-			if (a.r2 < rect.r1) continue // fully above the current range — can never overlap again
-			active[kept++] = a
+			if (a.r2 < rect.r1) continue; // fully above the current range — can never overlap again
+			active[kept++] = a;
 			if (a.c1 <= rect.c2 && rect.c1 <= a.c2) {
 				sheetInvalid(
 					sheetName,
 					`merges "${a.ref}" and "${rect.ref}" overlap — Excel repairs overlapping merges`,
-				)
+				);
 			}
 		}
-		active.length = kept
-		active.push(rect)
+		active.length = kept;
+		active.push(rect);
 	}
 	// Emission preserves input order (document order round-trips through the reader verbatim).
 	return `<mergeCells count="${rects.length}">${rects
 		.map((r) => `<mergeCell ref="${r.ref}"/>`)
-		.join("")}</mergeCells>`
+		.join("")}</mergeCells>`;
 }
 
 // <hyperlinks> — each link covers a cell or range and needs somewhere to go: an external target
@@ -468,70 +476,70 @@ function hyperlinksXml(
 	sheetName: string,
 	hyperlinks: readonly Hyperlink[] | undefined,
 ): { readonly xml: string; readonly targets: readonly string[] } {
-	if (hyperlinks === undefined) return { xml: "", targets: [] }
-	if (!Array.isArray(hyperlinks)) sheetInvalid(sheetName, "hyperlinks must be an array")
-	const targets: string[] = []
-	const entries: string[] = []
+	if (hyperlinks === undefined) return { xml: "", targets: [] };
+	if (!Array.isArray(hyperlinks)) sheetInvalid(sheetName, "hyperlinks must be an array");
+	const targets: string[] = [];
+	const entries: string[] = [];
 	for (let i = 0; i < hyperlinks.length; i++) {
-		const raw = hyperlinks[i] as unknown
-		const what = `hyperlinks[${i}]`
-		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkKeys(sheetName, what, raw, ["ref", "target", "location", "tooltip", "display"])
-		const ref = raw.ref
-		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`)
-		const colon = ref.indexOf(":")
-		const from = parseCanonicalRef(colon === -1 ? ref : ref.slice(0, colon))
-		const to = colon === -1 ? from : parseCanonicalRef(ref.slice(colon + 1))
+		const raw = hyperlinks[i] as unknown;
+		const what = `hyperlinks[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, ["ref", "target", "location", "tooltip", "display"]);
+		const ref = raw.ref;
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
+		const colon = ref.indexOf(":");
+		const from = parseCanonicalRef(colon === -1 ? ref : ref.slice(0, colon));
+		const to = colon === -1 ? from : parseCanonicalRef(ref.slice(colon + 1));
 		if (from === undefined || to === undefined) {
 			sheetInvalid(
 				sheetName,
 				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell or range within Excel's grid`,
-			)
+			);
 		}
 		if (to.col < from.col || to.row < from.row) {
 			sheetInvalid(
 				sheetName,
 				`${what}.ref "${shortened(ref)}" must run top-left to bottom-right`,
-			)
+			);
 		}
 		// One optional string property, read exactly once (TOCTOU) and gated for XML safety.
 		const str = (key: string, value: unknown): string | undefined => {
-			if (value === undefined) return undefined
+			if (value === undefined) return undefined;
 			if (typeof value !== "string")
-				sheetInvalid(sheetName, `${what}.${key} must be a string`)
+				sheetInvalid(sheetName, `${what}.${key} must be a string`);
 			if (!isXmlSafe(value)) {
 				sheetInvalid(
 					sheetName,
 					`${what}.${key} contains a character not allowed in XML (a control character or lone surrogate)`,
-				)
+				);
 			}
-			return value
-		}
-		const rawTarget = str("target", raw.target)
-		const rawLocation = str("location", raw.location)
+			return value;
+		};
+		const rawTarget = str("target", raw.target);
+		const rawLocation = str("location", raw.location);
 		// An empty destination is no destination — the reader drops location="" the same way.
-		const target = rawTarget === "" ? undefined : rawTarget
-		const location = rawLocation === "" ? undefined : rawLocation
+		const target = rawTarget === "" ? undefined : rawTarget;
+		const location = rawLocation === "" ? undefined : rawLocation;
 		if (target === undefined && location === undefined) {
 			sheetInvalid(
 				sheetName,
 				`${what} needs a target (external) and/or a location (in-workbook)`,
-			)
+			);
 		}
-		const tooltip = str("tooltip", raw.tooltip)
-		const display = str("display", raw.display)
-		let attrs = ` ref="${ref}"`
+		const tooltip = str("tooltip", raw.tooltip);
+		const display = str("display", raw.display);
+		let attrs = ` ref="${ref}"`;
 		if (target !== undefined) {
-			targets.push(target)
-			attrs += ` r:id="rId${targets.length}"`
+			targets.push(target);
+			attrs += ` r:id="rId${targets.length}"`;
 		}
-		if (location !== undefined) attrs += ` location="${escapeAttr(location)}"`
-		if (tooltip !== undefined) attrs += ` tooltip="${escapeAttr(tooltip)}"`
-		if (display !== undefined) attrs += ` display="${escapeAttr(display)}"`
-		entries.push(`<hyperlink${attrs}/>`)
+		if (location !== undefined) attrs += ` location="${escapeAttr(location)}"`;
+		if (tooltip !== undefined) attrs += ` tooltip="${escapeAttr(tooltip)}"`;
+		if (display !== undefined) attrs += ` display="${escapeAttr(display)}"`;
+		entries.push(`<hyperlink${attrs}/>`);
 	}
-	if (entries.length === 0) return { xml: "", targets: [] }
-	return { xml: `<hyperlinks>${entries.join("")}</hyperlinks>`, targets }
+	if (entries.length === 0) return { xml: "", targets: [] };
+	return { xml: `<hyperlinks>${entries.join("")}</hyperlinks>`, targets };
 }
 
 // ── Comments (F5.2): xl/commentsN.xml + legacy VML drawing — validation + emission ─────────────
@@ -551,8 +559,8 @@ const VML_HEAD =
 	'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">' +
 	'<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
 	'<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">' +
-	'<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>'
-const VML_TAIL = "</xml>"
+	'<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>';
+const VML_TAIL = "</xml>";
 
 // One hidden note shape. `index` gives a unique shape id (Excel's ids start at _x0000_s1025) and a
 // z-index; `row0`/`col0` are the 0-based cell coordinates. openpyxl emits no explicit <x:Anchor> —
@@ -567,12 +575,12 @@ function vmlShape(index: number, row0: number, col0: number): string {
 		'<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
 		'<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:AutoFill>False</x:AutoFill>' +
 		`<x:Row>${row0}</x:Row><x:Column>${col0}</x:Column></x:ClientData></v:shape>`
-	)
+	);
 }
 
 interface CommentsParts {
-	readonly commentsXml: string
-	readonly vmlXml: string
+	readonly commentsXml: string;
+	readonly vmlXml: string;
 }
 
 // Validate the comments and build both parts, or `undefined` when the sheet has none.
@@ -580,98 +588,98 @@ function commentsParts(
 	sheetName: string,
 	comments: readonly Comment[] | undefined,
 ): CommentsParts | undefined {
-	if (comments === undefined) return undefined
-	if (!Array.isArray(comments)) sheetInvalid(sheetName, "comments must be an array")
-	if (comments.length === 0) return undefined
-	const authors: string[] = []
-	const authorIndex = new Map<string, number>()
+	if (comments === undefined) return undefined;
+	if (!Array.isArray(comments)) sheetInvalid(sheetName, "comments must be an array");
+	if (comments.length === 0) return undefined;
+	const authors: string[] = [];
+	const authorIndex = new Map<string, number>();
 	const items: {
-		readonly ref: string
-		readonly authorId: number
-		readonly text: string
-		readonly row: number
-		readonly col: number
-	}[] = []
+		readonly ref: string;
+		readonly authorId: number;
+		readonly text: string;
+		readonly row: number;
+		readonly col: number;
+	}[] = [];
 	for (let i = 0; i < comments.length; i++) {
-		const raw = comments[i] as unknown
-		const what = `comments[${i}]`
-		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`)
-		checkKeys(sheetName, what, raw, ["ref", "author", "text"])
+		const raw = comments[i] as unknown;
+		const what = `comments[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, ["ref", "author", "text"]);
 		// A comment anchors to ONE cell — a range has no meaning (Excel writes a single-cell ref).
-		const ref = raw.ref
-		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`)
-		const cell = parseCanonicalRef(ref)
+		const ref = raw.ref;
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
+		const cell = parseCanonicalRef(ref);
 		if (cell === undefined) {
 			sheetInvalid(
 				sheetName,
 				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell within Excel's grid`,
-			)
+			);
 		}
 		// text is required (the reader always yields one, possibly empty) and must be XML-safe.
-		const text = raw.text
-		if (typeof text !== "string") sheetInvalid(sheetName, `${what}.text must be a string`)
+		const text = raw.text;
+		if (typeof text !== "string") sheetInvalid(sheetName, `${what}.text must be a string`);
 		if (!isXmlSafe(text)) {
 			sheetInvalid(
 				sheetName,
 				`${what}.text contains a character not allowed in XML (a control character or lone surrogate)`,
-			)
+			);
 		}
 		// author is optional; an absent author shares the single empty-string author entry.
-		const rawAuthor = raw.author
-		let key: string
-		if (rawAuthor === undefined) key = ""
+		const rawAuthor = raw.author;
+		let key: string;
+		if (rawAuthor === undefined) key = "";
 		else {
 			if (typeof rawAuthor !== "string")
-				sheetInvalid(sheetName, `${what}.author must be a string`)
+				sheetInvalid(sheetName, `${what}.author must be a string`);
 			if (!isXmlSafe(rawAuthor)) {
 				sheetInvalid(
 					sheetName,
 					`${what}.author contains a character not allowed in XML (a control character or lone surrogate)`,
-				)
+				);
 			}
-			key = rawAuthor
+			key = rawAuthor;
 		}
-		let id = authorIndex.get(key)
+		let id = authorIndex.get(key);
 		if (id === undefined) {
-			id = authors.length
-			authors.push(key)
-			authorIndex.set(key, id)
+			id = authors.length;
+			authors.push(key);
+			authorIndex.set(key, id);
 		}
-		items.push({ ref, authorId: id, text, row: cell.row, col: cell.col })
+		items.push({ ref, authorId: id, text, row: cell.row, col: cell.col });
 	}
-	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join("")
+	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join("");
 	const listXml = items
 		.map(
 			(c) =>
 				`<comment ref="${c.ref}" authorId="${c.authorId}" shapeId="0"><text><t${preserveAttr(c.text)}>${escapeText(c.text)}</t></text></comment>`,
 		)
-		.join("")
-	const commentsXml = `${XML_DECL}\n<comments xmlns="${NS_MAIN}"><authors>${authorsXml}</authors><commentList>${listXml}</commentList></comments>`
-	const vmlXml = `${VML_HEAD}${items.map((c, j) => vmlShape(j, c.row - 1, c.col - 1)).join("")}${VML_TAIL}`
-	return { commentsXml, vmlXml }
+		.join("");
+	const commentsXml = `${XML_DECL}\n<comments xmlns="${NS_MAIN}"><authors>${authorsXml}</authors><commentList>${listXml}</commentList></comments>`;
+	const vmlXml = `${VML_HEAD}${items.map((c, j) => vmlShape(j, c.row - 1, c.col - 1)).join("")}${VML_TAIL}`;
+	return { commentsXml, vmlXml };
 }
 
 /** A single-sourced sheet relationship — one <Relationship> line in the sheet's rels part. */
 export interface SheetRel {
 	/** Full relationship type URI (e.g. `${NS_REL}/comments`). */
-	readonly type: string
+	readonly type: string;
 	/** The Target value: an external URL, or an internal part path relative to the worksheet. */
-	readonly target: string
+	readonly target: string;
 	/** TargetMode="External" — set for hyperlink URLs, clear for internal parts. */
-	readonly external: boolean
+	readonly external: boolean;
 }
 
 export interface WorksheetResult {
-	readonly xml: string
+	readonly xml: string;
 	/**
 	 * The sheet's relationships in rId order (rId = index + 1) — non-empty means it needs a rels
 	 * part. Hyperlinks come first so a hyperlinks-only sheet keeps its exact pre-F5.2 rels bytes.
 	 */
-	readonly rels: readonly SheetRel[]
+	readonly rels: readonly SheetRel[];
 	/** `xl/commentsN.xml` content — present iff the sheet has comments (paired with {@link vmlXml}). */
-	readonly commentsXml?: string
+	readonly commentsXml?: string;
 	/** `xl/drawings/vmlDrawingN.vml` content — the legacy drawing that makes comments render. */
-	readonly vmlXml?: string
+	readonly vmlXml?: string;
 }
 
 /**
@@ -685,76 +693,76 @@ export function worksheetXml(
 	date1904: boolean,
 	styles: StyleRegistry,
 ): WorksheetResult {
-	const rows = sheet.rows
+	const rows = sheet.rows;
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
 	// column/row/freeze/merge/hyperlink/comment spec must surface before any cell work.
-	const cols = colsXml(sheet.name, sheet.columns)
-	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties)
-	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze)
-	const mergeCells = mergeCellsXml(sheet.name, sheet.merges)
-	const links = hyperlinksXml(sheet.name, sheet.hyperlinks)
-	const comments = commentsParts(sheet.name, sheet.comments)
+	const cols = colsXml(sheet.name, sheet.columns);
+	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
+	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
+	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
+	const comments = commentsParts(sheet.name, sheet.comments);
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
-	let minRow = 0
-	let maxRow = 0
-	let minCol = 0
-	let maxCol = 0
+	let minRow = 0;
+	let maxRow = 0;
+	let minCol = 0;
+	let maxCol = 0;
 	// (rowNum, xml) pairs: cell rows arrive in ascending order; property-only rows are merged in
 	// afterwards, then the whole set is sorted so <sheetData> stays ascending.
-	const rowXmls: [number, string][] = []
+	const rowXmls: [number, string][] = [];
 
 	// A workbook can't outgrow Excel's grid: refs past XFD1048576 make Excel refuse the file, and
 	// (mechanically) `rows.length` drives this loop — an absurd length would spin for hours.
 	if (rows.length > MAX_ROW) {
-		throw new XlsxError("invalid-input", `a sheet cannot have more than ${MAX_ROW} rows`)
+		throw new XlsxError("invalid-input", `a sheet cannot have more than ${MAX_ROW} rows`);
 	}
 
 	for (let r = 0; r < rows.length; r++) {
-		const cells = rows[r]
+		const cells = rows[r];
 		// A missing row (array hole / undefined) is an empty row — skip it. Anything else that isn't
 		// an array (a string, a number, null, an object) would otherwise be iterated as if it were a
 		// row: a string "abc" would explode into three character cells. Reject it instead of silently
 		// mangling the data — this also turns a null row into a clean error rather than a TypeError.
-		if (cells === undefined) continue
+		if (cells === undefined) continue;
 		if (!Array.isArray(cells)) {
 			throw new XlsxError(
 				"invalid-input",
 				`sheet row ${r + 1}: a row must be an array of cell values`,
-			)
+			);
 		}
-		if (cells.length === 0) continue
+		if (cells.length === 0) continue;
 		if (cells.length > MAX_COL) {
 			throw new XlsxError(
 				"invalid-input",
 				`sheet row ${r + 1}: a row cannot have more than ${MAX_COL} cells`,
-			)
+			);
 		}
-		const rowNum = r + 1
-		const cellXmls: string[] = []
+		const rowNum = r + 1;
+		const cellXmls: string[] = [];
 		for (let c = 0; c < cells.length; c++) {
-			const colNum = c + 1
-			const rendered = renderCell(colNum, rowNum, cells[c], date1904, styles)
-			if (rendered === undefined) continue
-			if (minRow === 0 || rowNum < minRow) minRow = rowNum
-			if (rowNum > maxRow) maxRow = rowNum
-			if (minCol === 0 || colNum < minCol) minCol = colNum
-			if (colNum > maxCol) maxCol = colNum
-			cellXmls.push(rendered)
+			const colNum = c + 1;
+			const rendered = renderCell(colNum, rowNum, cells[c], date1904, styles);
+			if (rendered === undefined) continue;
+			if (minRow === 0 || rowNum < minRow) minRow = rowNum;
+			if (rowNum > maxRow) maxRow = rowNum;
+			if (minCol === 0 || colNum < minCol) minCol = colNum;
+			if (colNum > maxCol) maxCol = colNum;
+			cellXmls.push(rendered);
 		}
 		if (cellXmls.length > 0) {
-			const attrs = rowAttrs.get(rowNum) ?? ""
-			rowAttrs.delete(rowNum) // consumed — whatever remains becomes a property-only row
-			rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}>${cellXmls.join("")}</row>`])
+			const attrs = rowAttrs.get(rowNum) ?? "";
+			rowAttrs.delete(rowNum); // consumed — whatever remains becomes a property-only row
+			rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}>${cellXmls.join("")}</row>`]);
 		}
 	}
 
 	// Rows that carry height/hidden but no cells still exist in the file, as cell-less <row>
 	// elements. They do not extend the dimension (Excel's dimension covers content, not geometry).
 	for (const [rowNum, attrs] of rowAttrs) {
-		rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}/>`])
+		rowXmls.push([rowNum, `<row r="${rowNum}"${attrs}/>`]);
 	}
-	rowXmls.sort((a, b) => a[0] - b[0])
+	rowXmls.sort((a, b) => a[0] - b[0]);
 
 	// Bounding box of the populated cells, in A1 notation. An entirely empty sheet is "A1" (Excel's
 	// convention); a single cell collapses to that one ref rather than a degenerate "X:X" range.
@@ -763,7 +771,7 @@ export function worksheetXml(
 			? "A1"
 			: minRow === maxRow && minCol === maxCol
 				? formatRef({ col: minCol, row: minRow })
-				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`
+				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
 
 	// One rId counter for the sheet's relationships part. Hyperlink targets come FIRST (rId1..rIdN,
 	// matching the r:ids hyperlinksXml already emitted), so a hyperlinks-only sheet keeps its exact
@@ -772,8 +780,8 @@ export function worksheetXml(
 		type: `${NS_REL}/hyperlink`,
 		target,
 		external: true,
-	}))
-	let legacyDrawing = ""
+	}));
+	let legacyDrawing = "";
 	if (comments !== undefined) {
 		// The comments part is located by rel TYPE (no r:id in the sheet body); the vmlDrawing IS
 		// referenced by <legacyDrawing r:id>. Targets are relative to the worksheet's own directory.
@@ -781,18 +789,18 @@ export function worksheetXml(
 			type: `${NS_REL}/comments`,
 			target: `../comments${sheetIndex + 1}.xml`,
 			external: false,
-		})
+		});
 		rels.push({
 			type: `${NS_REL}/vmlDrawing`,
 			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
 			external: false,
-		})
-		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>` // the vmlDrawing rel, just pushed
+		});
+		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`; // the vmlDrawing rel, just pushed
 	}
 
 	// xmlns:r is declared whenever the body references an rId — a hyperlink and/or the legacyDrawing.
 	// A sheet using neither keeps the exact pre-F4.6 root element.
-	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : ""
+	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
 	// hyperlinks, legacyDrawing (CT_Worksheet sequence — legacyDrawing follows the hyperlinks/
@@ -800,7 +808,7 @@ export function worksheetXml(
 	// of them emits the exact pre-F4.5/F4.6/F5.2 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
-		.join("")}</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`
+		.join("")}</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`;
 	// Comment parts are present as a pair or absent entirely — spread them only when the sheet has
 	// comments so the optional properties stay truly absent (exactOptionalPropertyTypes).
 	return {
@@ -809,5 +817,149 @@ export function worksheetXml(
 		...(comments !== undefined
 			? { commentsXml: comments.commentsXml, vmlXml: comments.vmlXml }
 			: {}),
+	};
+}
+
+// ── Streaming worksheet (F5.1) ─────────────────────────────────────────────────────────────────
+// The constant-memory sibling of worksheetXml: geometry and metadata are computed upfront (the same
+// helpers/validators), the header and footer are strings, and only the rows flow — each rendered
+// through renderCell and interning styles as it passes. A streamed sheet OMITS <dimension> (its
+// bounding box is unknowable before the rows arrive; the element is optional and Excel/openpyxl
+// recompute it). Everything else — element order, style interning, metadata — matches the buffered
+// writer, so the two produce reader-equivalent output.
+
+/** A streamed worksheet: its XML as a chunk generator, plus the upfront-known rels/comment parts. */
+export interface StreamedWorksheet {
+	readonly chunks: AsyncGenerator<Uint8Array>;
+	readonly rels: readonly SheetRel[];
+	readonly commentsXml?: string;
+	readonly vmlXml?: string;
+}
+
+// Render one streamed row. Its number is the 1-based position in the stream. Mirrors the buffered
+// per-row logic: an empty row with no properties emits nothing; a property-only row emits `<row r/>`;
+// otherwise `<row r>cells</row>`. Interns styles into the shared registry as it renders.
+function renderStreamRow(
+	sheetName: string,
+	rowNum: number,
+	cells: readonly CellInput[] | undefined,
+	rowAttrs: Map<number, string>,
+	date1904: boolean,
+	styles: StyleRegistry,
+): string {
+	const attrs = rowAttrs.get(rowNum) ?? "";
+	if (cells === undefined) return attrs !== "" ? `<row r="${rowNum}"${attrs}/>` : "";
+	if (!Array.isArray(cells)) {
+		throw new XlsxError(
+			"invalid-input",
+			`sheet "${sheetName}" row ${rowNum}: a row must be an array of cell values`,
+		);
 	}
+	if (cells.length > MAX_COL) {
+		throw new XlsxError(
+			"invalid-input",
+			`sheet "${sheetName}" row ${rowNum}: a row cannot have more than ${MAX_COL} cells`,
+		);
+	}
+	const cellXmls: string[] = [];
+	for (let c = 0; c < cells.length; c++) {
+		const rendered = renderCell(c + 1, rowNum, cells[c], date1904, styles);
+		if (rendered !== undefined) cellXmls.push(rendered);
+	}
+	if (cellXmls.length === 0) return attrs !== "" ? `<row r="${rowNum}"${attrs}/>` : "";
+	return `<row r="${rowNum}"${attrs}>${cellXmls.join("")}</row>`;
+}
+
+// Roughly this many bytes of row XML accumulate before a chunk is flushed — batching keeps the
+// compressor fed with substantial writes instead of one tiny write per row.
+const ROW_CHUNK_BYTES = 65536;
+
+async function* streamRowChunks(
+	sheetName: string,
+	rows: StreamSheetInput["rows"],
+	header: string,
+	footer: string,
+	rowAttrs: Map<number, string>,
+	date1904: boolean,
+	styles: StyleRegistry,
+): AsyncGenerator<Uint8Array> {
+	yield encoder.encode(header);
+	let rowNum = 0;
+	let buf = "";
+	// `for await` iterates both a sync iterable (an array) and an async one (a DB cursor).
+	for await (const cells of rows) {
+		rowNum++;
+		if (rowNum > MAX_ROW) {
+			throw new XlsxError(
+				"invalid-input",
+				`sheet "${sheetName}": a sheet cannot have more than ${MAX_ROW} rows`,
+			);
+		}
+		buf += renderStreamRow(sheetName, rowNum, cells, rowAttrs, date1904, styles);
+		if (buf.length >= ROW_CHUNK_BYTES) {
+			yield encoder.encode(buf);
+			buf = "";
+		}
+	}
+	if (buf !== "") yield encoder.encode(buf);
+	yield encoder.encode(footer);
+}
+
+/**
+ * Prepare a streamed worksheet: validate geometry/metadata and build the header/footer + rel/comment
+ * parts upfront, returning a chunk generator that streams the rows on demand. Styles intern into the
+ * shared registry as the generator is consumed, so styles.xml must be emitted only after it drains.
+ */
+export function streamWorksheet(
+	sheet: StreamSheetInput,
+	sheetIndex: number,
+	date1904: boolean,
+	styles: StyleRegistry,
+): StreamedWorksheet {
+	const cols = colsXml(sheet.name, sheet.columns);
+	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
+	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
+	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
+	const comments = commentsParts(sheet.name, sheet.comments);
+
+	const rels: SheetRel[] = links.targets.map((target) => ({
+		type: `${NS_REL}/hyperlink`,
+		target,
+		external: true,
+	}));
+	let legacyDrawing = "";
+	if (comments !== undefined) {
+		rels.push({
+			type: `${NS_REL}/comments`,
+			target: `../comments${sheetIndex + 1}.xml`,
+			external: false,
+		});
+		rels.push({
+			type: `${NS_REL}/vmlDrawing`,
+			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
+			external: false,
+		});
+		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`;
+	}
+	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
+
+	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
+	const footer = `</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`;
+	const chunks = streamRowChunks(
+		sheet.name,
+		sheet.rows,
+		header,
+		footer,
+		rowAttrs,
+		date1904,
+		styles,
+	);
+	return {
+		chunks,
+		rels,
+		...(comments !== undefined
+			? { commentsXml: comments.commentsXml, vmlXml: comments.vmlXml }
+			: {}),
+	};
 }

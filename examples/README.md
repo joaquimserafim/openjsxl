@@ -26,6 +26,7 @@ node examples/04-metadata.mjs        # number formats, merges, links, comments, 
 node examples/05-error-handling.mjs  # typed XlsxError on bad input
 node examples/06-write.mjs           # write .xlsx + read → modify → write
 node examples/07-styles-and-layout.mjs # styled cells, widths, freeze, merges, links (0.4)
+node examples/08-streaming-write.mjs # constant-memory write from an async row source (0.5)
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.
