@@ -160,19 +160,29 @@ export function parseDrawing(xml: string): DrawingImage[] {
 				// Keep only cell-anchored pictures with a resolvable blip; skip absoluteAnchor, any
 				// anchor whose object isn't a picture (no <xdr:pic>/<a:blip>), and grouped pictures
 				// (which carry the group's anchor, not their own).
+				//
+				// The anchor ELEMENT names its shape: a twoCellAnchor is positioned by <to>, a
+				// oneCellAnchor by a fixed <ext>. Take only the field the kind calls for — so a
+				// malformed anchor carrying BOTH (e.g. a stray <ext> before a two-cell <pic>)
+				// re-emits as exactly one, and the reader keeps its promise that every image it
+				// returns is valid writer input (the writer requires exactly one of to/ext). If the
+				// field the kind needs is absent, the picture can't be placed — drop it, the same
+				// degradation as a missing blip or media part.
+				const anchorTo = kind === "twoCellAnchor" ? to : undefined;
+				const anchorExt = kind === "oneCellAnchor" ? ext : undefined;
 				if (
-					kind !== "absoluteAnchor" &&
 					hasPic &&
 					!hasGroup &&
 					embed &&
-					from !== undefined
+					from !== undefined &&
+					(anchorTo === undefined) !== (anchorExt === undefined)
 				) {
 					images.push({
 						embed,
 						...(picName !== undefined && picName !== "" ? { name: picName } : {}),
 						from: finish(from),
-						...(to !== undefined ? { to: finish(to) } : {}),
-						...(ext !== undefined ? { ext } : {}),
+						...(anchorTo !== undefined ? { to: finish(anchorTo) } : {}),
+						...(anchorExt !== undefined ? { ext: anchorExt } : {}),
 						...(editAs !== undefined ? { editAs } : {}),
 					});
 				}

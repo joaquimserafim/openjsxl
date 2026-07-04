@@ -8,6 +8,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetImage,
 	SheetState,
 } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
@@ -22,7 +23,13 @@ import type { CellInput, SheetInput, WorkbookInput } from "./types";
 // documented, not silently mangled:
 //   - error cells (no formula) → written as their literal text (e.g. "#DIV/0!"), so they become strings
 //   (column widths, row heights, hidden flags, frozen panes — F4.5 — merges, hyperlinks, sheet
-//   visibility — F4.6 — cell comments — F5.2 — and formula TEXT — F5.4 — DO carry across)
+//   visibility — F4.6 — cell comments — F5.2 — formula TEXT — F5.4 — and anchored PICTURES — F6.4 —
+//   DO carry across)
+//   Picture degradations (documented; the reader already skips these on read, so they never reach
+//   the bridge): absolute-anchored pictures and non-picture drawing objects (shapes, charts) are
+//   dropped at read. A picture whose media type is outside the writer's allowlist (anything but
+//   image/png, image/jpeg, image/gif) makes the subsequent writeXlsx throw a TYPED invalid-input —
+//   the whole rewrite refuses rather than silently dropping the picture.
 //   Formula degradations (documented, values stay exact): a SHARED-formula dependent carries its
 //   TRANSLATED text (not the shared grouping); an ARRAY formula carries the master's text as a plain
 //   formula (the spilled cells keep their cached values); a `dataTable` formula carries no text (its
@@ -132,6 +139,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			hyperlinks?: readonly Hyperlink[];
 			state?: SheetState;
 			comments?: readonly Comment[];
+			images?: readonly SheetImage[];
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -146,6 +154,11 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		if (info.state !== "visible") sheet.state = info.state;
 		const comments = worksheet.comments;
 		if (comments.length > 0) sheet.comments = comments;
+		// Pictures (F6.4). `images()` is async (media needs decompression) and degrading — it returns
+		// only cell-anchored pictures with resolvable bytes, so what it hands back is exactly a valid
+		// writer input. Attach only when non-empty: an imageless workbook keeps the byte-identity path.
+		const images = await worksheet.images();
+		if (images.length > 0) sheet.images = images;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

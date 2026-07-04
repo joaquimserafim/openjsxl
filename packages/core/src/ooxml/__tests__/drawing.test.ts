@@ -112,6 +112,37 @@ describe("parseDrawing", () => {
 		expect(parseDrawing(two)[0]?.ext).toBeUndefined(); // a two-cell anchor must carry no ext
 	});
 
+	// Milestone review (F6.4) regression: the anchor ELEMENT names its shape — a oneCellAnchor is
+	// positioned by <ext>, a twoCellAnchor by <to>. The parser must return EXACTLY ONE of the two,
+	// matching what the writer accepts, so a malformed anchor can't produce a record the writer then
+	// rejects (which would nuke a whole read→write rewrite). Keep the field the kind calls for.
+	it("normalizes a malformed anchor to exactly one of to/ext (kind is authoritative)", () => {
+		// A oneCellAnchor whose required <ext> is missing can't be placed — drop it (degrade).
+		const noExt = wsDr(
+			`<oneCellAnchor><from><col>0</col><row>0</row></from>${pic(1, "noext", "rId1")}</oneCellAnchor>`,
+		);
+		expect(parseDrawing(noExt)).toEqual([]);
+
+		// A twoCellAnchor carrying a stray <ext> before its <pic> keeps its <to> and drops the ext —
+		// it's a valid two-cell picture, so recover it rather than reject the whole file.
+		const strayExt = wsDr(
+			`<twoCellAnchor><from><col>0</col><row>0</row></from><to><col>2</col><row>2</row></to>` +
+				`<ext cx="55" cy="55"/>${pic(1, "two", "rId1")}</twoCellAnchor>`,
+		);
+		const two = parseDrawing(strayExt);
+		expect(two[0]?.to).toEqual({ col: 3, row: 3, colOff: 0, rowOff: 0 });
+		expect(two[0]?.ext).toBeUndefined();
+
+		// A oneCellAnchor carrying BOTH a <to> and an <ext> keeps the ext (its kind) and drops the to.
+		const both = wsDr(
+			`<oneCellAnchor><from><col>0</col><row>0</row></from><to><col>2</col><row>2</row></to>` +
+				`<ext cx="77" cy="77"/>${pic(1, "one", "rId1")}</oneCellAnchor>`,
+		);
+		const one = parseDrawing(both);
+		expect(one[0]?.ext).toEqual({ cx: 77, cy: 77 });
+		expect(one[0]?.to).toBeUndefined();
+	});
+
 	// Review regression: a picture nested in a <grpSp> carries the group's anchor, not its own —
 	// skip it (and never let the group's cNvPr name leak onto a picture).
 	it("skips a picture nested inside a group shape (grpSp)", () => {

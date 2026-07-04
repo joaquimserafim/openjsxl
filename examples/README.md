@@ -28,6 +28,7 @@ node examples/06-write.mjs           # write .xlsx + read → modify → write
 node examples/07-styles-and-layout.mjs # styled cells, widths, freeze, merges, links (0.4)
 node examples/08-streaming-write.mjs # constant-memory write from an async row source (0.5)
 node examples/09-comments-formulas-theme.mjs # comments, live formulas, resolveColor (0.5)
+node examples/10-images.mjs          # anchored pictures: write, read back, round-trip (0.6)
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.

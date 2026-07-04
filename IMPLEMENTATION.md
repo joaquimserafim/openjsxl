@@ -1051,22 +1051,52 @@ Everything else checked sound (name/editAs escaping, EMU validation, TOCTOU, cro
 false-merge, schema order, hostile scale). **Note (deviation, owner-notified):** deterministic hash
 dedup instead of the scoped pure byte-compare, for adversarial-input safety.
 
-### F6.4 — Bridge carry + corpus + example ☐
+### F6.4 — Bridge carry + corpus + example ☑
 **Scope (in).** `workbookToInput` carries `sheet.images` per sheet (absent when none —
 byte-identity path preserved); the corpus property snapshot gains images (anchor + mime +
 a bytes digest, not raw bytes); example `10-images.mjs` (write a logo'd report, read it
 back, round-trip it); fidelity docs updated in the README **at 0.6 release prep** (not
 here) — the drop-list line becomes "error cells; absolute-anchored/non-picture drawings".
 **Tasks**
-- [ ] Bridge attachment + corpus snapshot extension (every fixture with pictures
+- [x] Bridge attachment + corpus snapshot extension (every fixture with pictures
       round-trips losslessly or fails typed).
-- [ ] Example 10 + examples README/package.json wiring; all examples green.
-- [ ] Full-milestone adversarial review round (cross-feature, the M5-analysis style) +
+- [x] Example 10 + examples README/package.json wiring; all examples green.
+- [x] Full-milestone adversarial review round (cross-feature, the M5-analysis style) +
       fixes pinned. Release prep (README fidelity table + examples) then 0.6 bump ONLY at
-      the owner's explicit request.
+      the owner's explicit request. *(release prep + bump deferred to owner request)*
 **Acceptance.** read → bridge → write → read gives identical images across the corpus;
 the M6 drop-list documents exactly: error cells, absolute-anchored pics, non-picture
 drawing objects, picture effects.
+
+**Landed.** `workbookToInput` (from-workbook.ts) now `await`s `worksheet.images()` per
+sheet and attaches `images` only when non-empty — an imageless workbook keeps the exact
+pre-F6.3 WorkbookInput and the exact same bytes (the emitters are untouched). The corpus
+property snapshot (bridge-styles.test.ts) gains `images` compared by anchor + mime + name
++ a content **digest** (length + FNV-1a, never raw bytes), so `openpyxl-images.xlsx` (jpeg
++ png) and `images-edge.xlsx` (shared-media + degrade paths) now round-trip through the
+snapshot (2 images each). New example `10-images.mjs` (self-contained real PNG; write →
+`images()` → bridge round-trip) + examples `package.json`/README wiring; all 10 examples
+green vs built dist. **Full-milestone adversarial review (3 lenses: round-trip/bridge,
+hostile-input, spec/algorithm): 1 CONFIRMED defect fixed + pinned** — a malformed drawing
+part could make `parseDrawing` return an anchor with NEITHER `to`/`ext` (one-cell missing
+its `<ext>`) or BOTH (stray `<ext>` on a two-cell), which the writer's "exactly one of"
+rule then rejects, throwing typed and nuking the WHOLE read→write rewrite (and falsifying
+the reader's own "returns valid writer input" contract). Fixed at the reader: the anchor
+ELEMENT names its shape, so `parseDrawing` keeps only the field the kind calls for
+(twoCellAnchor→`to`, oneCellAnchor→`ext`), recovering a stray-field picture and dropping
+one whose kind-required field is absent — the same degradation as a missing blip/media
+part. Everything else checked sound (cross-sheet drawing/media numbering by sheet index vs
+workbook-level media dedup; images+comments+hyperlinks coexisting with correct rIds and
+`drawing` before `legacyDrawing`; buffered == streamed; `editAs` orthogonality carried
+losslessly; exotic-mime images fail TYPED not bare — same shared-bounds "reject" path as
+oversized EMU/off-grid cells). Gate: biome 0 / tsc 0 / **495 tests** (+1 drawing shape
+regression, +2 bridge picture round-trip) / imageless byte-identity (emitters untouched;
+pinned by the corpus unstyled + new imageless tests) / openpyxl reads our bridge-rewrite
+AND a fresh write warnings-as-errors clean (2 images each). **Open design note (owner's
+call, deferred):** the reader recognizes 10 media types but the writer's allowlist is
+png/jpeg/gif — a real file with a bmp/tiff/webp/emf/wmf image round-trips as a TYPED
+refusal (spec-compliant) rather than carrying; widen the writer (single-source the
+mime↔ext map) or drop-and-document exotic images at 0.6 prep.
 
 ---
 

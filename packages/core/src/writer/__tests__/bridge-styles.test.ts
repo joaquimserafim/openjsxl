@@ -12,6 +12,18 @@ import { writeXlsx } from "../workbook";
 // and an UNSTYLED workbook still rewrites to byte-identical archives. The openpyxl-authored
 // fixture is the acid test: real-producer styles, theme+tint colors, custom number formats.
 
+// Pictures are compared by anchor + mime + name + a content DIGEST, never the raw bytes: a real
+// image is megabytes, and the digest (length + FNV-1a) proves the exact bytes survived without
+// bloating the snapshot. Distinct bytes hash apart; identical bytes (deduped media) hash the same.
+function imageDigest(bytes: Uint8Array): string {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < bytes.length; i++) {
+		h ^= bytes[i] as number;
+		h = Math.imul(h, 0x01000193);
+	}
+	return `${bytes.length}:${(h >>> 0).toString(16)}`;
+}
+
 async function styleSnapshot(wb: Workbook) {
 	const out: Record<string, Record<string, unknown>> = {};
 	for (const info of wb.sheets) {
@@ -42,6 +54,13 @@ async function styleSnapshot(wb: Workbook) {
 			state: info.state,
 			// Comments (F5.2) round-trip too — ref, resolved author, and plain text.
 			comments: sheet.comments,
+			// Pictures (F6.4): anchor + mime + name + a content digest (not raw bytes).
+			images: (await sheet.images()).map((img) => ({
+				anchor: img.anchor,
+				mime: img.mime,
+				name: img.name,
+				digest: imageDigest(img.bytes),
+			})),
 		};
 	}
 	return out;
@@ -106,6 +125,46 @@ describe("bridge — styles round-trip", () => {
 			const second = await rewrite(await openXlsx(first));
 			expect(Array.from(second)).toEqual(Array.from(first));
 		}
+	});
+});
+
+describe("bridge — pictures round-trip (F6.4)", () => {
+	it("carries anchored pictures across read → bridge → write", async () => {
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+		const jpg = new Uint8Array([0xff, 0xd8, 0xff, 9, 9]);
+		const first = await writeXlsx({
+			sheets: [
+				{
+					name: "Pics",
+					rows: [["hi"]],
+					images: [
+						{
+							anchor: { from: { col: 2, row: 3 }, ext: { cx: 100, cy: 200 } },
+							bytes: png,
+							mime: "image/png",
+							name: "Logo",
+						},
+						{
+							anchor: { from: { col: 4, row: 4 }, to: { col: 6, row: 8 } },
+							bytes: jpg,
+							mime: "image/jpeg",
+						},
+					],
+				},
+			],
+		});
+		const before = await openXlsx(first);
+		const after = await openXlsx(await rewrite(before));
+		// The reader shape IS the writer input, so the pictures deep-equal across the round trip.
+		expect(await after.sheet("Pics").images()).toEqual(await before.sheet("Pics").images());
+		expect((await after.sheet("Pics").images()).length).toBe(2);
+	});
+
+	it("leaves an imageless workbook on the byte-identity path (images key never attached)", async () => {
+		const first = await writeXlsx({ sheets: [{ name: "S", rows: [["a", 1, true]] }] });
+		const input = await workbookToInput(await openXlsx(first));
+		expect(input.sheets.every((s) => !("images" in s))).toBe(true);
+		expect(Array.from(await writeXlsx(input))).toEqual(Array.from(first));
 	});
 });
 
