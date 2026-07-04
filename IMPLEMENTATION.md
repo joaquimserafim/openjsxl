@@ -922,7 +922,7 @@ stay ordered hyperlink/comments/vmlDrawing) / **byte-identity 10/10** vs the pre
 (`369f36f`) incl. every side-part path / streamed side-parts read back + openpyxl warnings-as-errors
 clean. Adversarial review (1 focused agent): NO issues (5 checks). Pure refactor, zero behavior change.
 
-### F6.2 — Picture read: `Worksheet.images` ☐
+### F6.2 — Picture read: `Worksheet.images` ☑
 **Context.** In `.xlsx`, pictures hang off the worksheet's `<drawing r:id>` →
 `xl/drawings/drawingN.xml` (spreadsheetDrawing `xdr:` namespace) → `xdr:oneCellAnchor` /
 `xdr:twoCellAnchor` each containing `xdr:pic` → `xdr:blipFill` → `a:blip r:embed` → the
@@ -953,19 +953,40 @@ effects/crop (`srcRect`, filters) — dropped, documented.
 - Mime degraded from the extension when content-types has no entry; unknown extension ⇒
   `application/octet-stream` (reader tolerant; the WRITER's allowlist is the strict side).
 **Tasks**
-- [ ] `ooxml/drawing.ts` — parse drawingN.xml anchors + pics via the tokenizer (never a
+- [x] `ooxml/drawing.ts` — parse drawingN.xml anchors + pics via the tokenizer (never a
       DOM); resolve blip r:embed through the drawing's rels.
-- [ ] `Worksheet.images` lazy accessor + media caching; export `SheetImage`/`ImageAnchor`/
+- [x] `Worksheet.images` lazy accessor + media caching; export `SheetImage`/`ImageAnchor`/
       `AnchorPoint` types from the core index.
-- [ ] Fixtures: `openpyxl-images.xlsx` (openpyxl + Pillow in the scratchpad venv: one
+- [x] Fixtures: `openpyxl-images.xlsx` (openpyxl + Pillow in the scratchpad venv: one
       oneCellAnchor PNG, one twoCellAnchor JPEG, two pics sharing one media part) with
       provenance per data/README.md; a hand-built fixture for the degrade cases
       (absoluteAnchor, missing media part) via the fixtures builder.
-- [ ] Tests: exact byte round-out (digest vs the source image), anchors (1-based fencepost
+- [x] Tests: exact byte round-out (digest vs the source image), anchors (1-based fencepost
       pinned), mime, shared-media caching, every degrade case; openpyxl agreement on
       anchor cells + image bytes.
 **Acceptance.** Fixture images read back with byte-identical content and correct anchors;
 degrades never throw; suite green.
+**Landed (uncommitted, awaiting owner approval).** `ooxml/drawing.ts` `parseDrawing` (pure SAX
+parse: one/twoCellAnchor pictures → `{embed, name?, from, to?, ext?, editAs?}`; 0-based→1-based;
+skips absoluteAnchor, non-pic anchors, and grpSp-grouped pictures) + `mimeForMediaPath`. Reader:
+`Worksheet.images(): Promise<readonly SheetImage[]>` — **an async method, not the scoped sync
+getter** (deviation, owner-notified): image bytes need async decompression, and eagerly reading all
+media at open would break the reader's "a sheet you never touch costs a decompression, not a parse"
+principle. It is lazy (resolves on first call via a per-sheet thunk built in openXlsx, cached) and
+matches the existing async `rows()`; the shared `SheetImage` TYPE is still identical to the writer
+input. `loadSheetImages` resolves `/drawing` rel → drawing part → parseDrawing → drawing rels →
+media (read once per part, shared buffer); every miss degrades to skip, never throws. Types
+`SheetImage`/`ImageAnchor`/`AnchorPoint` exported. Fixtures: real `openpyxl-images.xlsx`
+(openpyxl 3.1.5 + Pillow: twoCellAnchor JPEG + oneCellAnchor PNG) validates the parser on genuine
+drawingML (unprefixed anchors, package-absolute media targets); crafted `images-edge.xlsx`
+(packParts, now binary-capable) covers shared-media + every degrade path. Gate: biome 0 / tsc 0 /
+**473 tests** (+15) / openpyxl independent-reader cross-check agrees on bytes (SHA) + anchors /
+byte-identity N/A (reader-only). **Adversarial review (2 lenses): 1 CONFIRMED defect fixed + pinned**
+— a picture's `spPr/a:xfrm/a:ext` (emitted by real Excel/LibreOffice) overwrote the anchor's own
+`<ext>` (mis-sizing one-cell pics; injecting a model-violating `ext` onto two-cell anchors) → the
+`ext` branch now captures only the anchor-level ext (before `<pic>`, with cx); the grpSp observation
+was also fixed (grouped pics skipped, `cNvPr` name gated to the pic). Hostile-input lens: no throw/
+hang/superlinear (1M anchors ~1.4s linear; no path traversal; all degrades skip).
 
 ### F6.3 — Picture write (both writers) ☐
 **Context.** The writer mirror: `SheetInput.images?: readonly SheetImage[]` — the reader's

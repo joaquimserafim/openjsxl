@@ -18,6 +18,7 @@ export type { Row } from "./reader/worksheet";
 // Style model (F4.1) — shared by the reader (`Worksheet.style(ref)`) and, from F4.2, the writer.
 export type {
 	Alignment,
+	AnchorPoint,
 	BorderEdge,
 	BorderLineStyle,
 	BorderStyle,
@@ -32,8 +33,10 @@ export type {
 	FreezePane,
 	HorizontalAlignment,
 	Hyperlink,
+	ImageAnchor,
 	PatternType,
 	RowProps,
+	SheetImage,
 	SheetInfo,
 	SheetState,
 	UnderlineStyle,

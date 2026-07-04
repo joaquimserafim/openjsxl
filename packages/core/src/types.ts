@@ -87,6 +87,48 @@ export interface FreezePane {
 	readonly cols?: number;
 }
 
+// ── Images (M6) ──────────────────────────────────────────────────────────────────────────────
+// One shared model: what `Worksheet.images()` returns IS what the writer accepts (F6.3). Anchors
+// are kept RAW like colors — cell col/row plus EMU offsets/extents verbatim, never converted to
+// pixels (914 400 EMU/inch; ≈9 525 EMU/px @96 dpi) — because only the raw form round-trips exactly.
+
+/** A drawing anchor point: a 1-based cell plus an EMU offset into that cell (0 at the cell edge). */
+export interface AnchorPoint {
+	/** 1-based column of the anchored cell (OOXML stores it 0-based; converted on read). */
+	readonly col: number;
+	/** 1-based row of the anchored cell. */
+	readonly row: number;
+	/** Horizontal offset into the cell, in EMU. Defaults to 0 when omitted. */
+	readonly colOff?: number;
+	/** Vertical offset into the cell, in EMU. */
+	readonly rowOff?: number;
+}
+
+/**
+ * How a picture is anchored. A `to` point (and no `ext`) is a two-cell anchor — the picture spans
+ * `from`→`to` and resizes with the cells. An `ext` (and no `to`) is a one-cell anchor — pinned at
+ * `from` with a fixed EMU size `{cx, cy}`. `editAs` is the producer's move/size behaviour when
+ * present. Absolute-anchored pictures are not modelled (skipped on read).
+ */
+export interface ImageAnchor {
+	readonly from: AnchorPoint;
+	readonly to?: AnchorPoint;
+	readonly ext?: { readonly cx: number; readonly cy: number };
+	readonly editAs?: "twoCell" | "oneCell" | "absolute";
+}
+
+/**
+ * A picture on a worksheet. `bytes` is the raw, undecoded image payload; `mime` is its media type
+ * (`image/png`, `image/jpeg`, `image/gif`, …). `name` is the producer's picture name when present.
+ * Pictures sharing one media part share one `bytes` buffer on read.
+ */
+export interface SheetImage {
+	readonly anchor: ImageAnchor;
+	readonly bytes: Uint8Array;
+	readonly mime: string;
+	readonly name?: string;
+}
+
 // ── Styles (M4) ────────────────────────────────────────────────────────────────────────────────
 // One shared style model: what `Worksheet.style(ref)` returns IS what the writer accepts, so the
 // read→modify→write bridge carries styles as a structural pass-through.

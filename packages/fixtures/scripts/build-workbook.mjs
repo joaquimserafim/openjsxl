@@ -437,9 +437,10 @@ export function buildWorkbook(spec) {
 
 /**
  * Pack arbitrary parts into a STORED .xlsx-shaped ZIP, without any workbook wiring. For crafting
- * deliberately-broken packages in tests (a missing or malformed part); use buildWorkbook for
- * valid workbooks. Each part is `{ name, xml }`.
+ * deliberately-broken or otherwise hand-built packages in tests (a missing/malformed part, or a
+ * drawing + binary media). Each part is `{ name, xml }` for a text part or `{ name, data }` with a
+ * Uint8Array for a binary one (e.g. image media).
  */
 export function packParts(parts) {
-	return zipStore(parts.map((p) => ({ name: p.name, data: encoder.encode(p.xml) })));
+	return zipStore(parts.map((p) => ({ name: p.name, data: p.data ?? encoder.encode(p.xml) })));
 }

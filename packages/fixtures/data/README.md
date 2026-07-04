@@ -31,6 +31,13 @@ so they are safe to commit and diff.
   column ref (far past Excel's `XFD` limit) followed by a cell with no `r`. Regression for a
   bare-throw the reader must not leak: the overflowing ref must be rejected and the reader fall
   back to positional addressing, not crash. (F2.4e.)
+- **`images-edge.xlsx`** — a hand-crafted drawing exercising the picture-read edge/degrade paths
+  openpyxl won't produce (F6.2): two pictures whose blips reference the **same** media part (must
+  share one `bytes` buffer), plus four that must be **skipped** — an `absoluteAnchor` picture, a
+  non-picture shape anchor, a picture whose media part is absent, and one whose `r:embed` isn't in
+  the drawing rels. Media bytes are opaque placeholders (`"openjsxl-shared-media-bytes"`), since the
+  reader never decodes them and derives mime from the extension. `reader/__tests__/images.test.ts`
+  asserts the two survivors, the shared buffer, and that the rest read normally.
 
 ## Real-producer fixtures
 
@@ -86,6 +93,14 @@ git-ignored [`../local/`](../local) directory and are never committed.
   full, so the shared grouping is a post-process edit (a real Excel/LibreOffice shared-formula file
   would be a welcome upgrade). `reader/__tests__/formula-read.test.ts` pins the translated dependents
   (`B2`→`A2*2`, `B3`→`A3*2`) and `writer/__tests__/formula-write.test.ts` round-trips them.
+
+- **`openpyxl-images.xlsx`** — authored by **openpyxl 3.1.5 + Pillow** to exercise picture read
+  (F6.2): a `Pics` sheet with a `twoCellAnchor` JPEG spanning `D4:F8` (`editAs="oneCell"`) and a
+  `oneCellAnchor` PNG pinned at `B2` with EMU offsets + a fixed extent, in two separate media parts.
+  Validates `parseDrawing` against genuine drawingML — unprefixed anchor elements, `a:`/`r:` only on
+  the blip, and **package-absolute** media targets (`/xl/media/image1.png`). Real Pillow-generated
+  PNG/JPEG bytes; `reader/__tests__/images.test.ts` pins their SHA-256 (byte round-out), the 1-based
+  anchors, and the mime.
 
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).

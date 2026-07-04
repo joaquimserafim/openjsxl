@@ -1,6 +1,8 @@
 import { XlsxError } from "../errors";
 import {
 	type DecodeContext,
+	mimeForMediaPath,
+	parseDrawing,
 	parseRels,
 	parseSharedStrings,
 	parseStyles,
@@ -21,6 +23,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetImage,
 	SheetInfo,
 	SheetState,
 } from "../types";
@@ -56,6 +59,9 @@ const REL_SHARED_STRINGS = "/sharedStrings";
 const REL_STYLES = "/styles";
 const REL_COMMENTS = "/comments";
 const REL_THEME = "/theme";
+// The drawingML rel; note this does NOT match "/vmlDrawing" (the char before "drawing" there is a
+// letter, not the "/"), so the legacy comment drawing is never mistaken for a picture drawing.
+const REL_DRAWING = "/drawing";
 
 function directoryOf(path: string): string {
 	const slash = path.lastIndexOf("/");
@@ -76,6 +82,65 @@ async function readText(zip: ZipArchive, path: string): Promise<string> {
 	return decoder.decode(await zip.read(path));
 }
 
+/**
+ * Resolve a sheet's pictures (F6.2): worksheet rels → drawingML part(s) → parse anchors → the
+ * drawing's OWN rels → media parts → bytes. Every hop degrades to "skip this picture" rather than
+ * throw — a missing drawing/rels/media part, an unresolvable or external r:embed, or an
+ * absolute-anchored picture (dropped by the parser) — so a partial or odd drawing never breaks a
+ * read. Media is read once per part and shared, so two pictures on one media file share one buffer.
+ */
+async function loadSheetImages(
+	zip: ZipArchive,
+	sheetPath: string,
+	sheetRels: Map<string, Relationship> | undefined,
+): Promise<readonly SheetImage[]> {
+	if (sheetRels === undefined) return [];
+	const drawingRels = [...sheetRels.values()].filter(
+		(r) => r.type.endsWith(REL_DRAWING) && r.targetMode !== "External",
+	);
+	if (drawingRels.length === 0) return [];
+
+	const sheetDir = directoryOf(sheetPath);
+	const images: SheetImage[] = [];
+	for (const drawingRel of drawingRels) {
+		const drawingPath = resolveTarget(sheetDir, drawingRel.target);
+		if (!zip.has(drawingPath)) continue;
+		const anchors = parseDrawing(decoder.decode(await zip.read(drawingPath)));
+		if (anchors.length === 0) continue;
+
+		// The drawing's rels map each picture's r:embed to its media part.
+		const embedRelsPath = relsPathFor(drawingPath);
+		if (!zip.has(embedRelsPath)) continue;
+		const embedRels = parseRels(decoder.decode(await zip.read(embedRelsPath)));
+		const drawingDir = directoryOf(drawingPath);
+		const mediaCache = new Map<string, Uint8Array>();
+
+		for (const anchor of anchors) {
+			const rel = embedRels.get(anchor.embed);
+			if (rel === undefined || rel.targetMode === "External") continue;
+			const mediaPath = resolveTarget(drawingDir, rel.target);
+			if (!zip.has(mediaPath)) continue;
+			let bytes = mediaCache.get(mediaPath);
+			if (bytes === undefined) {
+				bytes = await zip.read(mediaPath);
+				mediaCache.set(mediaPath, bytes);
+			}
+			images.push({
+				anchor: {
+					from: anchor.from,
+					...(anchor.to !== undefined ? { to: anchor.to } : {}),
+					...(anchor.ext !== undefined ? { ext: anchor.ext } : {}),
+					...(anchor.editAs !== undefined ? { editAs: anchor.editAs } : {}),
+				},
+				bytes,
+				mime: mimeForMediaPath(mediaPath),
+				...(anchor.name !== undefined ? { name: anchor.name } : {}),
+			});
+		}
+	}
+	return images;
+}
+
 export class Worksheet {
 	/** Sheet name as shown on Excel's tab. */
 	readonly name: string;
@@ -84,6 +149,11 @@ export class Worksheet {
 	readonly #context: DecodeContext;
 	readonly #rels: Map<string, Relationship> | undefined;
 	readonly #commentsXml: string | undefined;
+	// Lazy picture loader (F6.2): reading media bytes needs async decompression, so images are
+	// resolved on first `images()` call, not at open — a sheet whose pictures you never touch costs
+	// nothing. The promise is cached so concurrent calls share one resolution.
+	readonly #loadImages: (() => Promise<readonly SheetImage[]>) | undefined;
+	#imagesPromise: Promise<readonly SheetImage[]> | undefined;
 
 	#cells: Map<string, Cell> | undefined;
 	#merged: readonly string[] | undefined;
@@ -104,6 +174,7 @@ export class Worksheet {
 		context: DecodeContext,
 		rels?: Map<string, Relationship>,
 		commentsXml?: string,
+		loadImages?: () => Promise<readonly SheetImage[]>,
 	) {
 		this.name = info.name;
 		this.#info = info;
@@ -111,6 +182,7 @@ export class Worksheet {
 		this.#context = context;
 		this.#rels = rels;
 		this.#commentsXml = commentsXml;
+		this.#loadImages = loadImages;
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
@@ -236,6 +308,23 @@ export class Worksheet {
 			this.#freezeRead = true;
 		}
 		return this.#freeze;
+	}
+
+	/**
+	 * The pictures anchored on this sheet, in document order (F6.2). Unlike the other accessors this
+	 * is an async method: image bytes need decompression, so they are read lazily on first call and
+	 * the result cached. Each {@link SheetImage} carries its raw `bytes`, `mime`, `anchor`, and
+	 * optional `name`; pictures sharing one media part share one `bytes` buffer. Empty when the sheet
+	 * has no drawing. Only cell-anchored pictures are returned — absolute-anchored pictures and
+	 * non-picture drawing objects (shapes, charts) are skipped, as is any picture whose media can't
+	 * be resolved.
+	 */
+	images(): Promise<readonly SheetImage[]> {
+		if (this.#imagesPromise === undefined) {
+			this.#imagesPromise =
+				this.#loadImages === undefined ? Promise.resolve([]) : this.#loadImages();
+		}
+		return this.#imagesPromise;
 	}
 
 	#cellStyleMap(): Map<string, number> {
@@ -446,7 +535,11 @@ export async function openXlsx(
 		infos.push(info);
 		// First definition wins if two sheets somehow share a name.
 		if (!byName.has(info.name)) {
-			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml));
+			// A lazy picture loader — captures the zip + this sheet's path/rels, invoked only on the
+			// first Worksheet.images() call so a sheet whose images you never read costs no media I/O.
+			const loadImages = (): Promise<readonly SheetImage[]> =>
+				loadSheetImages(zip, path, rels);
+			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml, loadImages));
 		}
 	}
 
