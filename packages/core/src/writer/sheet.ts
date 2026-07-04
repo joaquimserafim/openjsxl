@@ -10,7 +10,8 @@ import {
 } from "../ooxml/a1";
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types";
+import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps, SheetImage } from "../types";
+import { MEDIA_MIME_TO_EXT, type MediaRegistry } from "./images";
 import type { StyleRegistry } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
 import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml";
@@ -659,6 +660,171 @@ function commentsParts(
 	return { commentsXml, vmlXml };
 }
 
+// ── Pictures (F6.3) ────────────────────────────────────────────────────────────────────────────
+const NS_XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
+// The XML schema stores EMU as a signed 32-bit int; offsets/extents must fit in 0..2^31-1.
+const MAX_EMU = 0x7fffffff;
+
+/** The drawing part + its rels part for one sheet's pictures. */
+interface DrawingParts {
+	readonly drawingXml: string;
+	readonly drawingRelsXml: string;
+}
+
+// Check one size/offset number (measured in EMUs, Excel's tiny drawing unit). It must be a whole
+// number from 0 up to the limit; if it's missing we treat it as 0, anything else is rejected.
+function emuValue(sheetName: string, what: string, raw: unknown): number {
+	if (raw === undefined) return 0;
+	if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > MAX_EMU) {
+		sheetInvalid(sheetName, `${what} must be an integer EMU in 0..${MAX_EMU}`);
+	}
+	return raw;
+}
+
+// A checked corner of a picture: which cell it sits at (1-based column/row) and how far into that
+// cell it starts (the offsets).
+interface Point {
+	readonly col: number;
+	readonly row: number;
+	readonly colOff: number;
+	readonly rowOff: number;
+}
+
+// Check one corner the caller gave us: the cell must be inside the sheet's grid and the offsets must
+// be valid sizes. Throws a clear error naming the bad field, otherwise returns the clean values.
+function validatePoint(sheetName: string, what: string, raw: unknown): Point {
+	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+	checkKeys(sheetName, what, raw, ["col", "row", "colOff", "rowOff"]);
+	const col = raw.col;
+	const row = raw.row;
+	if (typeof col !== "number" || !Number.isInteger(col) || col < 1 || col > MAX_COL) {
+		sheetInvalid(sheetName, `${what}.col must be an integer column in 1..${MAX_COL}`);
+	}
+	if (typeof row !== "number" || !Number.isInteger(row) || row < 1 || row > MAX_ROW) {
+		sheetInvalid(sheetName, `${what}.row must be an integer row in 1..${MAX_ROW}`);
+	}
+	return {
+		col,
+		row,
+		colOff: emuValue(sheetName, `${what}.colOff`, raw.colOff),
+		rowOff: emuValue(sheetName, `${what}.rowOff`, raw.rowOff),
+	};
+}
+
+// Write one corner as XML. Our numbers count columns/rows from 1, but the file counts from 0, so we
+// subtract one here.
+function pointXml(tag: string, p: Point): string {
+	return `<xdr:${tag}><xdr:col>${p.col - 1}</xdr:col><xdr:colOff>${p.colOff}</xdr:colOff><xdr:row>${p.row - 1}</xdr:row><xdr:rowOff>${p.rowOff}</xdr:rowOff></xdr:${tag}>`;
+}
+
+/**
+ * Turn a sheet's pictures into the two XML pieces the file needs: the drawing (where each picture
+ * sits) and its relationships (which image file each picture points to). Along the way it checks
+ * every picture and stashes its bytes in the shared media store so duplicates are written once.
+ * Returns nothing when the sheet has no pictures. Anything invalid throws an error that names the
+ * sheet and the picture's position; each field the caller gave is read exactly once.
+ */
+function imageParts(
+	sheetName: string,
+	images: readonly SheetImage[] | undefined,
+	media: MediaRegistry,
+): DrawingParts | undefined {
+	if (images === undefined) return undefined;
+	if (!Array.isArray(images)) sheetInvalid(sheetName, "images must be an array");
+	if (images.length === 0) return undefined;
+
+	const anchors: string[] = [];
+	const rels: string[] = [];
+	for (let i = 0; i < images.length; i++) {
+		const raw = images[i] as unknown;
+		const what = `images[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, ["anchor", "bytes", "mime", "name"]);
+
+		// bytes — read the reference ONCE (a getter must not swap the buffer between here and packing).
+		const bytes = raw.bytes;
+		if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+			sheetInvalid(sheetName, `${what}.bytes must be a non-empty Uint8Array`);
+		}
+		// mime — allowlist only; the extension is derived from the mime, never sniffed from the data.
+		// Use hasOwn, not a bare lookup: a bare `map[mime]` walks the prototype chain, so a mime like
+		// "constructor" or "toString" would resolve to an inherited value and slip past the gate.
+		const mime = raw.mime;
+		const ext =
+			typeof mime === "string" && Object.hasOwn(MEDIA_MIME_TO_EXT, mime)
+				? MEDIA_MIME_TO_EXT[mime]
+				: undefined;
+		if (ext === undefined) {
+			sheetInvalid(sheetName, `${what}.mime must be one of image/png, image/jpeg, image/gif`);
+		}
+		// name — optional; defaults to a deterministic "Image N".
+		const rawName = raw.name;
+		if (rawName !== undefined && (typeof rawName !== "string" || !isXmlSafe(rawName))) {
+			sheetInvalid(sheetName, `${what}.name must be an XML-safe string`);
+		}
+		const name = rawName ?? `Image ${i + 1}`;
+
+		// anchor — exactly one of `to` (two-cell) or `ext` (one-cell).
+		const anchor = raw.anchor;
+		if (!isPlainRecord(anchor)) sheetInvalid(sheetName, `${what}.anchor must be an object`);
+		checkKeys(sheetName, `${what}.anchor`, anchor, ["from", "to", "ext", "editAs"]);
+		const from = validatePoint(sheetName, `${what}.anchor.from`, anchor.from);
+		// Read `to`/`ext` ONCE each (single-read TOCTOU): a getter must not present one shape to the
+		// XOR check and another to emission.
+		const rawTo = anchor.to;
+		const rawExt = anchor.ext;
+		const hasTo = rawTo !== undefined;
+		const hasExt = rawExt !== undefined;
+		if (hasTo === hasExt) {
+			sheetInvalid(
+				sheetName,
+				`${what}.anchor must have exactly one of "to" (two-cell) or "ext" (one-cell)`,
+			);
+		}
+		const editAs = anchor.editAs;
+		if (
+			editAs !== undefined &&
+			editAs !== "twoCell" &&
+			editAs !== "oneCell" &&
+			editAs !== "absolute"
+		) {
+			sheetInvalid(sheetName, `${what}.anchor.editAs must be twoCell, oneCell, or absolute`);
+		}
+
+		const rid = `rId${i + 1}`;
+		const mediaNumber = media.intern(bytes, ext);
+		rels.push(
+			`<Relationship Id="${rid}" Type="${NS_REL}/image" Target="../media/image${mediaNumber}.${ext}"/>`,
+		);
+		const pic =
+			`<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${i + 1}" name="${escapeAttr(name)}"/><xdr:cNvPicPr/></xdr:nvPicPr>` +
+			`<xdr:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+			`<xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>`;
+		if (hasTo) {
+			const to = validatePoint(sheetName, `${what}.anchor.to`, rawTo);
+			const editAsAttr = editAs !== undefined ? ` editAs="${editAs}"` : "";
+			anchors.push(
+				`<xdr:twoCellAnchor${editAsAttr}>${pointXml("from", from)}${pointXml("to", to)}${pic}<xdr:clientData/></xdr:twoCellAnchor>`,
+			);
+		} else {
+			if (!isPlainRecord(rawExt))
+				sheetInvalid(sheetName, `${what}.anchor.ext must be an object`);
+			checkKeys(sheetName, `${what}.anchor.ext`, rawExt, ["cx", "cy"]);
+			const cx = emuValue(sheetName, `${what}.anchor.ext.cx`, rawExt.cx);
+			const cy = emuValue(sheetName, `${what}.anchor.ext.cy`, rawExt.cy);
+			anchors.push(
+				`<xdr:oneCellAnchor>${pointXml("from", from)}<xdr:ext cx="${cx}" cy="${cy}"/>${pic}<xdr:clientData/></xdr:oneCellAnchor>`,
+			);
+		}
+	}
+
+	const drawingXml = `${XML_DECL}\n<xdr:wsDr xmlns:xdr="${NS_XDR}" xmlns:a="${NS_A}" xmlns:r="${NS_REL}">${anchors.join("")}</xdr:wsDr>`;
+	const drawingRelsXml = `${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${rels.join("")}</Relationships>`;
+	return { drawingXml, drawingRelsXml };
+}
+
 /** A single-sourced sheet relationship — one <Relationship> line in the sheet's rels part. */
 export interface SheetRel {
 	/** Full relationship type URI (e.g. `${NS_REL}/comments`). */
@@ -686,6 +852,10 @@ export interface SheetSideParts {
 	readonly commentsXml?: string;
 	/** `xl/drawings/vmlDrawingN.vml` content — the legacy drawing that makes comments render. */
 	readonly vmlXml?: string;
+	/** `xl/drawings/drawingN.xml` content — present iff the sheet has pictures (F6.3). */
+	readonly drawingXml?: string;
+	/** `xl/drawings/_rels/drawingN.xml.rels` — the picture blip → media relationships. */
+	readonly drawingRelsXml?: string;
 }
 
 export interface WorksheetResult extends SheetSideParts {
@@ -703,12 +873,24 @@ function sheetRelPlumbing(
 	sheetIndex: number,
 	hyperlinkTargets: readonly string[],
 	hasComments: boolean,
-): { rels: SheetRel[]; legacyDrawing: string; nsR: string } {
+	hasDrawing: boolean,
+): { rels: SheetRel[]; drawing: string; legacyDrawing: string; nsR: string } {
 	const rels: SheetRel[] = hyperlinkTargets.map((target) => ({
 		type: `${NS_REL}/hyperlink`,
 		target,
 		external: true,
 	}));
+	// The drawingML part (F6.3) is referenced by <drawing r:id>, which sits before <legacyDrawing> in
+	// the CT_Worksheet sequence — so it takes its rId before the comments/VML pair.
+	let drawing = "";
+	if (hasDrawing) {
+		rels.push({
+			type: `${NS_REL}/drawing`,
+			target: `../drawings/drawing${sheetIndex + 1}.xml`,
+			external: false,
+		});
+		drawing = `<drawing r:id="rId${rels.length}"/>`;
+	}
 	let legacyDrawing = "";
 	if (hasComments) {
 		// The comments part is located by rel TYPE (no r:id in the sheet body); the vmlDrawing IS
@@ -725,10 +907,13 @@ function sheetRelPlumbing(
 		});
 		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`; // the vmlDrawing rel, just pushed
 	}
-	// xmlns:r is declared whenever the body references an rId — a hyperlink and/or the legacyDrawing.
-	// A sheet using neither keeps the exact pre-F4.6 root element.
-	const nsR = hyperlinkTargets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
-	return { rels, legacyDrawing, nsR };
+	// xmlns:r is declared whenever the body references an rId — a hyperlink, drawing, or legacyDrawing.
+	// A sheet using none keeps the exact pre-F4.6 root element.
+	const nsR =
+		hyperlinkTargets.length > 0 || drawing !== "" || legacyDrawing !== ""
+			? ` xmlns:r="${NS_REL}"`
+			: "";
+	return { rels, drawing, legacyDrawing, nsR };
 }
 
 /**
@@ -741,16 +926,18 @@ export function worksheetXml(
 	sheetIndex: number,
 	date1904: boolean,
 	styles: StyleRegistry,
+	media: MediaRegistry,
 ): WorksheetResult {
 	const rows = sheet.rows;
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
-	// column/row/freeze/merge/hyperlink/comment spec must surface before any cell work.
+	// column/row/freeze/merge/hyperlink/comment/image spec must surface before any cell work.
 	const cols = colsXml(sheet.name, sheet.columns);
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
+	const pictures = imageParts(sheet.name, sheet.images, media);
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
 	let minRow = 0;
@@ -823,26 +1010,30 @@ export function worksheetXml(
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
 
 	// Relationships + the body plumbing that references them (shared with the streaming writer).
-	const { rels, legacyDrawing, nsR } = sheetRelPlumbing(
+	const { rels, drawing, legacyDrawing, nsR } = sheetRelPlumbing(
 		sheetIndex,
 		links.targets,
 		comments !== undefined,
+		pictures !== undefined,
 	);
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
-	// hyperlinks, legacyDrawing (CT_Worksheet sequence — legacyDrawing follows the hyperlinks/
-	// pageMargins block). Every optional block is an empty string when unused, so a sheet using none
-	// of them emits the exact pre-F4.5/F4.6/F5.2 bytes.
+	// hyperlinks, drawing, legacyDrawing (CT_Worksheet sequence — drawing precedes legacyDrawing).
+	// Every optional block is an empty string when unused, so a sheet using none of them emits the
+	// exact pre-F4.5/F4.6/F5.2 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
-		.join("")}</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`;
-	// Comment parts are present as a pair or absent entirely — spread them only when the sheet has
-	// comments so the optional properties stay truly absent (exactOptionalPropertyTypes).
+		.join("")}</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}</worksheet>`;
+	// Comment/drawing side parts are spread only when present so the optional properties stay truly
+	// absent (exactOptionalPropertyTypes).
 	return {
 		xml,
 		rels,
 		...(comments !== undefined
 			? { commentsXml: comments.commentsXml, vmlXml: comments.vmlXml }
+			: {}),
+		...(pictures !== undefined
+			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
 	};
 }
@@ -947,6 +1138,7 @@ export function streamWorksheet(
 	sheetIndex: number,
 	date1904: boolean,
 	styles: StyleRegistry,
+	media: MediaRegistry,
 ): StreamedWorksheet {
 	const cols = colsXml(sheet.name, sheet.columns);
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
@@ -954,17 +1146,19 @@ export function streamWorksheet(
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
+	const pictures = imageParts(sheet.name, sheet.images, media);
 
 	// Relationships + the body plumbing that references them — the SAME builder the buffered writer
-	// uses, so the two can't drift on rel order, rId allocation, or the legacyDrawing/xmlns:r refs.
-	const { rels, legacyDrawing, nsR } = sheetRelPlumbing(
+	// uses, so the two can't drift on rel order, rId allocation, or the drawing/legacyDrawing refs.
+	const { rels, drawing, legacyDrawing, nsR } = sheetRelPlumbing(
 		sheetIndex,
 		links.targets,
 		comments !== undefined,
+		pictures !== undefined,
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`;
+	const footer = `</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,
@@ -979,6 +1173,9 @@ export function streamWorksheet(
 		rels,
 		...(comments !== undefined
 			? { commentsXml: comments.commentsXml, vmlXml: comments.vmlXml }
+			: {}),
+		...(pictures !== undefined
+			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
 	};
 }

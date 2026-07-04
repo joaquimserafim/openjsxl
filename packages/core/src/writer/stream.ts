@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors";
+import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
@@ -55,18 +56,21 @@ async function* buildStreamParts(
 	// Read the caller's optional carried theme ONCE (single-read TOCTOU, matching writeXlsx).
 	const carriedTheme = workbook.themeXml;
 	const styles = createStyleRegistry();
+	const media = createMediaRegistry();
 
 	// Prepare every sheet upfront — this validates geometry/metadata and builds each header/footer +
-	// rel/comment parts — while the rows stay lazy inside each `chunks` generator.
-	const prepared = sheets.map((sheet, i) => streamWorksheet(sheet, i, date1904, styles));
+	// rel/comment/drawing parts (interning any image bytes into `media`) — while the rows stay lazy
+	// inside each `chunks` generator. So `media` is fully populated before any byte streams.
+	const prepared = sheets.map((sheet, i) => streamWorksheet(sheet, i, date1904, styles, media));
 
-	// Which sheets carry comments — derived upfront from the prepared results (all sheets are prepared
-	// before any byte streams), so the content-type map at the end knows without tracking it mid-loop.
+	// Which sheets carry comments / drawings — derived upfront from the prepared results, so the
+	// content-type map at the end knows without tracking it mid-loop.
 	const commentSheets = prepared.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
+	const drawingSheets = prepared.flatMap((w, i) => (w.drawingXml !== undefined ? [i] : []));
 
-	// Worksheets stream first, each followed by its own side parts (rels/comments/VML) — names owned by
-	// sheetSideParts, shared with the buffered writer. streamZip consumes each part fully before the
-	// next, so after this loop every sheet's rows have rendered and the style registry is complete.
+	// Worksheets stream first, each followed by its own side parts (rels/comments/VML/drawing) — names
+	// owned by sheetSideParts, shared with the buffered writer. streamZip consumes each part fully
+	// before the next, so after this loop every sheet's rows have rendered and the registry is complete.
 	for (let i = 0; i < prepared.length; i++) {
 		const w = prepared[i] as (typeof prepared)[number];
 		yield { name: `xl/worksheets/sheet${i + 1}.xml`, data: w.chunks };
@@ -74,6 +78,8 @@ async function* buildStreamParts(
 			yield { name: part.name, data: encode(part.xml) };
 		}
 	}
+	// Workbook-level media parts (binary, already deduped during preparation).
+	for (const part of media.parts()) yield { name: part.name, data: part.data };
 
 	// Now the registry is final, so the style/theme parts and the content-type map are known.
 	const needStyles = styles.needed();
@@ -87,7 +93,16 @@ async function* buildStreamParts(
 	};
 	yield {
 		name: "[Content_Types].xml",
-		data: encode(contentTypesXml(sheets.length, needStyles, needTheme, commentSheets)),
+		data: encode(
+			contentTypesXml(
+				sheets.length,
+				needStyles,
+				needTheme,
+				commentSheets,
+				drawingSheets,
+				media.extensions(),
+			),
+		),
 	};
 	yield { name: "_rels/.rels", data: encode(packageRelsXml()) };
 }

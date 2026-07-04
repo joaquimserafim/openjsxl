@@ -40,16 +40,16 @@ interface MutablePoint {
 	rowOff: number;
 }
 
-// Parse an OOXML integer, tolerating junk: a non-integer or absent value reads as 0. `Math.trunc`
-// drops any fractional part a malformed producer might write; there is no unbounded work here.
+// Read a whole number from XML text. Anything missing or not a number becomes 0, so a broken file
+// can't crash us.
 function toInt(s: string | undefined): number {
 	if (s === undefined) return 0;
 	const n = Number(s);
 	return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
-// The blip's relationship id is conventionally `r:embed`, but the `r` prefix is only bound by
-// convention (the tokenizer does no namespace resolution) — fall back to any `*:embed` attribute.
+// Find which relationship id points at this picture's image file. It's usually written `r:embed`,
+// but the `r:` prefix isn't guaranteed, so also accept any attribute ending in `embed`.
 function blipEmbed(attrs: Readonly<Record<string, string>>): string | undefined {
 	if (attrs["r:embed"] !== undefined) return attrs["r:embed"];
 	for (const key of Object.keys(attrs)) {
@@ -199,7 +199,10 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
 	wmf: "image/x-wmf",
 };
 
-/** The image media type for a media part path, from its extension; `application/octet-stream` if unknown. */
+/**
+ * Guess an image's type from its filename ending — `image1.png` → `image/png`. An unknown ending
+ * falls back to the generic `application/octet-stream`.
+ */
 export function mimeForMediaPath(path: string): string {
 	const dot = path.lastIndexOf(".");
 	const ext = dot === -1 ? "" : path.slice(dot + 1).toLowerCase();

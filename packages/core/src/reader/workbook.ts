@@ -83,11 +83,11 @@ async function readText(zip: ZipArchive, path: string): Promise<string> {
 }
 
 /**
- * Resolve a sheet's pictures (F6.2): worksheet rels → drawingML part(s) → parse anchors → the
- * drawing's OWN rels → media parts → bytes. Every hop degrades to "skip this picture" rather than
- * throw — a missing drawing/rels/media part, an unresolvable or external r:embed, or an
- * absolute-anchored picture (dropped by the parser) — so a partial or odd drawing never breaks a
- * read. Media is read once per part and shared, so two pictures on one media file share one buffer.
+ * Collect a sheet's pictures (F6.2). It follows the chain the file uses: the sheet points to a
+ * drawing, the drawing lists the pictures, and each picture points to an image file — this reads
+ * that image data. Anything broken or missing along the way (no drawing, no image, an odd anchor)
+ * just skips that one picture instead of failing. Each image file is read only once, so two pictures
+ * using the same file share the same bytes.
  */
 async function loadSheetImages(
 	zip: ZipArchive,
@@ -311,13 +311,12 @@ export class Worksheet {
 	}
 
 	/**
-	 * The pictures anchored on this sheet, in document order (F6.2). Unlike the other accessors this
-	 * is an async method: image bytes need decompression, so they are read lazily on first call and
-	 * the result cached. Each {@link SheetImage} carries its raw `bytes`, `mime`, `anchor`, and
-	 * optional `name`; pictures sharing one media part share one `bytes` buffer. Empty when the sheet
-	 * has no drawing. Only cell-anchored pictures are returned — absolute-anchored pictures and
-	 * non-picture drawing objects (shapes, charts) are skipped, as is any picture whose media can't
-	 * be resolved.
+	 * The pictures on this sheet, in order (F6.2). This one is an async method (not a plain property)
+	 * because reading image data means unzipping it — so the work is done the first time you call it,
+	 * and remembered after. Each {@link SheetImage} has the raw `bytes`, its `mime` type, where it
+	 * sits (`anchor`), and an optional `name`; pictures using the same image file share one `bytes`
+	 * buffer. Empty when the sheet has no pictures. Shapes, charts, and free-floating (absolute)
+	 * pictures aren't included, and a picture whose image file is missing is skipped.
 	 */
 	images(): Promise<readonly SheetImage[]> {
 		if (this.#imagesPromise === undefined) {

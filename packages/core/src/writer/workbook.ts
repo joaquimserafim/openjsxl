@@ -1,5 +1,6 @@
 import { XlsxError } from "../errors";
 import type { SheetState } from "../types";
+import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
@@ -71,13 +72,18 @@ export async function writeXlsx(
 	// interning every style into one shared registry. What the registry saw decides whether
 	// styles.xml (any non-default format) and theme1.xml (any theme color) are emitted at all.
 	const styles = createStyleRegistry();
-	const worksheets = sheets.map((sheet, i) => worksheetXml(sheet, i, date1904, styles));
+	// Pictures (F6.3) intern their bytes into one workbook-level media registry as sheets render, so
+	// identical images are written as a single shared media part.
+	const media = createMediaRegistry();
+	const worksheets = sheets.map((sheet, i) => worksheetXml(sheet, i, date1904, styles, media));
 	const needStyles = styles.needed();
 	const needTheme = styles.usesTheme();
 
-	// Comments (F5.2) each ride on a legacy VML drawing part; a workbook with any comment gains the
-	// `vml` Default content type (derived inside contentTypesXml) and every comments part an Override.
+	// Comments (F5.2) ride on a legacy VML drawing part; images (F6.3) on a drawingML part. The `vml`
+	// Default / image Defaults + drawing Overrides are emitted only when those parts exist — all
+	// derived inside contentTypesXml, so an imageless/commentless workbook stays byte-identical.
 	const commentSheets = worksheets.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
+	const drawingSheets = worksheets.flatMap((w, i) => (w.drawingXml !== undefined ? [i] : []));
 
 	const parts: ZipInput[] = [];
 	const add = (name: string, xml: string): void => {
@@ -86,7 +92,14 @@ export async function writeXlsx(
 
 	add(
 		"[Content_Types].xml",
-		contentTypesXml(sheets.length, needStyles, needTheme, commentSheets),
+		contentTypesXml(
+			sheets.length,
+			needStyles,
+			needTheme,
+			commentSheets,
+			drawingSheets,
+			media.extensions(),
+		),
 	);
 	add("_rels/.rels", packageRelsXml());
 	add("xl/workbook.xml", workbookXml(names, states, date1904));
@@ -94,11 +107,13 @@ export async function writeXlsx(
 	if (needStyles) add("xl/styles.xml", styles.stylesXml());
 	if (needTheme) add("xl/theme/theme1.xml", themeToEmit(carriedTheme));
 
-	// The worksheet body, then its side parts (rels/comments/VML) — names owned by sheetSideParts.
+	// The worksheet body, then its side parts (rels/comments/VML/drawing) — names owned by sheetSideParts.
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml);
 		for (const part of sheetSideParts(i, w)) add(part.name, part.xml);
 	});
+	// Workbook-level media parts (binary, already deduped) — appended after the sheet parts.
+	for (const part of media.parts()) parts.push({ name: part.name, data: part.data });
 
 	return writeZip(parts);
 }

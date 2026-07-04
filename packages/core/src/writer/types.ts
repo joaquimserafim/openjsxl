@@ -10,6 +10,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetImage,
 	SheetState,
 } from "../types";
 
@@ -87,6 +88,13 @@ export interface SheetInput {
 	 * legacy VML drawing, which the writer emits automatically for every commented sheet.
 	 */
 	readonly comments?: readonly Comment[];
+	/**
+	 * Pictures anchored on this sheet (F6.3) — the same records `Worksheet.images()` returns. Each
+	 * needs an `anchor` (a one-cell `{from, ext}` or two-cell `{from, to}` cell anchor), the raw
+	 * image `bytes`, and a `mime` (`image/png` | `image/jpeg` | `image/gif`); `name` is optional.
+	 * Identical bytes are written once as a shared media part; EMU offsets/extents are used verbatim.
+	 */
+	readonly images?: readonly SheetImage[];
 }
 
 export interface WorkbookInput {
@@ -129,6 +137,8 @@ export interface StreamSheetInput {
 	readonly hyperlinks?: readonly Hyperlink[];
 	readonly state?: SheetState;
 	readonly comments?: readonly Comment[];
+	/** Pictures anchored on this sheet (F6.3) — see {@link SheetInput.images}. */
+	readonly images?: readonly SheetImage[];
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */

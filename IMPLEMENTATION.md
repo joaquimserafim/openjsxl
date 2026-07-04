@@ -988,7 +988,7 @@ byte-identity N/A (reader-only). **Adversarial review (2 lenses): 1 CONFIRMED de
 was also fixed (grouped pics skipped, `cNvPr` name gated to the pic). Hostile-input lens: no throw/
 hang/superlinear (1M anchors ~1.4s linear; no path traversal; all degrades skip).
 
-### F6.3 — Picture write (both writers) ☐
+### F6.3 — Picture write (both writers) ☑
 **Context.** The writer mirror: `SheetInput.images?: readonly SheetImage[]` — the reader's
 exact shape (one shared model, no writer flavor).
 **Scope (in).** Per sheet with images: `xl/drawings/drawingN.xml` (+ its rels part) and the
@@ -1018,16 +1018,38 @@ image themselves); absoluteAnchor write.
   `xdr:pic` gets the minimal required children (nvPicPr with a deterministic id/name,
   blipFill, spPr with a bare prstGeom) — copy openpyxl's emission as the reference shape.
 **Tasks**
-- [ ] Shared model types finalized; validation module; media registry (dedup + numbering).
-- [ ] drawingN.xml emission + drawing rels + worksheet element + content types, wired
+- [x] Shared model types finalized; validation module; media registry (dedup + numbering).
+- [x] drawingN.xml emission + drawing rels + worksheet element + content types, wired
       through the F6.1 shared per-sheet builder for BOTH writers.
-- [ ] Tests: write→read deep-equal (bytes byte-identical, anchors exact); byte-identity for
+- [x] Tests: write→read deep-equal (bytes byte-identical, anchors exact); byte-identity for
       imageless input; streamed == buffered reader snapshot with images; validation
       rejections (each rule); dedup (same bytes twice ⇒ one media part; almost-equal ⇒
       two); TOCTOU flip-getter pins.
-- [ ] `unzip -t` + openpyxl reads OUR images (bytes + anchors) warnings-as-errors.
+- [x] `unzip -t` + openpyxl reads OUR images (bytes + anchors) warnings-as-errors.
 **Acceptance.** Excel/LibreOffice (openpyxl proxy) shows the written picture at the right
 cell; round-trip lossless; imageless output byte-identical.
+**Landed (uncommitted, awaiting owner approval).** `SheetInput.images?: readonly SheetImage[]` (the
+F6.2 reader shape — one shared model). New `writer/images.ts` `createMediaRegistry` (workbook-level
+media dedup, deterministic FNV-1a content hash keyed by `(bytes, ext)` with byte-compare on
+collision — deviates from the scope's "byte-compare, no hashing" to avoid **O(n²) on bridge-fed
+attacker-controlled image counts**, a CLAUDE.md invariant). `imageParts` (sheet.ts) validates each
+picture (mime allowlist png/jpeg/gif via **Object.hasOwn**; non-empty Uint8Array bytes single-read;
+exactly one of `to`/`ext`; grid bounds; EMU 0..2³¹−1; isPlainRecord+unknown-key at every level; TOCTOU
+single-read incl. bytes + to/ext) and builds `drawingN.xml` + its rels. `sheetRelPlumbing` emits the
+`<drawing r:id>` element **before** `<legacyDrawing>` (CT_Worksheet order); `sheetSideParts` emits the
+drawing + drawing-rels parts; `contentTypesXml` adds drawing Overrides + media Defaults (empty when
+no images). Both writers create ONE media registry and emit `xl/media/imageK.<ext>` workbook-level.
+`packParts` gained binary support (unrelated fixtures helper). Gate: biome 0 / tsc 0 / **492 tests**
+(+19 image-write) / **byte-identity 10/10** imageless vs pre-F6.3 worktree / write→read round-trip
+(bytes byte-identical, anchors exact) / dedup (3 pics→2 parts; cross-mime→2 parts) / streamed ==
+buffered / `unzip -t` + openpyxl reads our output warnings-as-errors. **Adversarial review (2 lenses):
+2 CONFIRMED defects fixed + pinned** — (1) mime allowlist bypass via `Object.prototype` keys
+(`mime:"constructor"` → garbage media part + `ContentType="undefined"`) → gated on `Object.hasOwn`;
+(2) dedup key ignored the extension, so identical bytes as png+jpeg wrote one part and the second
+picture's rel pointed at a nonexistent file (silent image loss) → dedup identity now includes `ext`.
+Everything else checked sound (name/editAs escaping, EMU validation, TOCTOU, cross-sheet dedup, FNV
+false-merge, schema order, hostile scale). **Note (deviation, owner-notified):** deterministic hash
+dedup instead of the scoped pure byte-compare, for adversarial-input safety.
 
 ### F6.4 — Bridge carry + corpus + example ☐
 **Scope (in).** `workbookToInput` carries `sheet.images` per sheet (absent when none —

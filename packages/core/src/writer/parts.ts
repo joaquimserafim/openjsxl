@@ -97,16 +97,27 @@ export function validateSheetMeta(sheets: unknown): {
 	return { states, names };
 }
 
+// The content type for each media extension the picture writer may emit (F6.3).
+const MEDIA_EXT_TO_MIME: Readonly<Record<string, string>> = {
+	png: "image/png",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+};
+
 /**
  * `[Content_Types].xml` — one Override per part not covered by the rels/xml defaults. The `vml`
- * Default is emitted iff any sheet has comments, derived here from `commentSheets` so no caller can
- * pass a flag inconsistent with the actual comment parts.
+ * Default is emitted iff any sheet has comments, and image `Default`s + drawing `Override`s iff any
+ * sheet has pictures — all derived from the actual `commentSheets`/`drawingSheets`/`mediaExtensions`
+ * so no caller can pass a flag inconsistent with the parts really written. When there are no comments
+ * and no images the output is byte-identical to the pre-F6.3 map.
  */
 export function contentTypesXml(
 	sheetCount: number,
 	needStyles: boolean,
 	needTheme: boolean,
 	commentSheets: readonly number[],
+	drawingSheets: readonly number[] = [],
+	mediaExtensions: readonly string[] = [],
 ): string {
 	const needVml = commentSheets.length > 0;
 	const overrides = [
@@ -128,11 +139,18 @@ export function contentTypesXml(
 			(i) =>
 				`<Override PartName="/xl/comments${i + 1}.xml" ContentType="${CT_BASE}.comments+xml"/>`,
 		),
+		...drawingSheets.map(
+			(i) =>
+				`<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
+		),
 	].join("");
 	const vmlDefault = needVml
 		? '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>'
 		: "";
-	return `${XML_DECL}\n<Types xmlns="${NS_CT}"><Default Extension="rels" ContentType="${CT_RELS}"/><Default Extension="xml" ContentType="application/xml"/>${vmlDefault}${overrides}</Types>`;
+	const mediaDefaults = mediaExtensions
+		.map((ext) => `<Default Extension="${ext}" ContentType="${MEDIA_EXT_TO_MIME[ext]}"/>`)
+		.join("");
+	return `${XML_DECL}\n<Types xmlns="${NS_CT}"><Default Extension="rels" ContentType="${CT_RELS}"/><Default Extension="xml" ContentType="application/xml"/>${vmlDefault}${mediaDefaults}${overrides}</Types>`;
 }
 
 /** `_rels/.rels` — the package's single relationship: officeDocument → the workbook. */
@@ -230,6 +248,15 @@ export function sheetSideParts(
 	}
 	if (side.vmlXml !== undefined) {
 		parts.push({ name: `xl/drawings/vmlDrawing${n}.vml`, xml: side.vmlXml });
+	}
+	if (side.drawingXml !== undefined) {
+		parts.push({ name: `xl/drawings/drawing${n}.xml`, xml: side.drawingXml });
+	}
+	if (side.drawingRelsXml !== undefined) {
+		parts.push({
+			name: `xl/drawings/_rels/drawing${n}.xml.rels`,
+			xml: side.drawingRelsXml,
+		});
 	}
 	return parts;
 }
