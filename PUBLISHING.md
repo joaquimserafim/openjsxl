@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.5.1` (already set) — skip this step. For a later
+For the current release the version is `0.6.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -115,6 +115,14 @@ git push -f origin v<version>
   property-only `<row/>` elements exactly like `writeXlsx`), and the zip entry cap is 65 534 in
   both writers so the EOCD count can never carry `0xffff`, the ZIP64 sentinel. Benchmarks
   re-measured on the fixed build (no regression). No API change.
+- **`0.6.0`** — images: anchored-picture read (async `Worksheet.images()` — raw bytes, media
+  type, cell + EMU anchor, name), picture write on both writers (`images` on a sheet; identical
+  bytes dedupe into one media part workbook-wide), and bridge carry — pictures round-trip
+  byte-exact for the full read set (png, jpeg, gif, bmp, tiff, webp, emf, wmf). The tolerant
+  reader clamps out-of-range anchor values into writable bounds, so one malformed picture can't
+  make a file un-rewritable. Additive API: `Worksheet.images()`, `SheetInput.images`,
+  `SheetImage`/`ImageAnchor`/`AnchorPoint` types. Round-trip drop-list: bare error cells;
+  absolute-anchored and non-picture drawings (skipped on read); picture effects.
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
