@@ -63,15 +63,18 @@ not asked for.
 
 Status: ☐ not started · ◐ in progress · ☑ done
 
+**Shipped:** everything through **0.6 (Images)** is done and live on npm (`openjsxl` +
+`@openjsxl/core` at `0.6.0`, published 2026-07-04). **Next up: 0.7 — more formats.**
+
 | Version | Theme | Outcome | Status |
 | --- | --- | --- | --- |
 | **M0** | Foundations | Compiling skeleton, fixtures, pure primitives (A1, dates) | ☑ |
-| **0.1** | Reader MVP | Read correctly-typed cells (string/number/date/bool) from a real `.xlsx` | ☐ |
-| **0.2** | Reader hardening | Constant-memory streaming; styles→date detection; merged cells, hyperlinks, comments | ☐ |
-| **0.3** | Writer MVP | Write values, types, sheets; round-trip fidelity tests | ☐ |
-| **0.4** | Styles | Read + write fonts, fills, borders, alignment, number formats | ☐ |
-| **0.5** | Fidelity + streaming writer | Comments write, formula text, theme fidelity; constant-memory writer; benchmark harness | ☐ |
-| **0.6** | Images | drawingML picture read + anchored write; native lane deferred (0.5 benchmarks: pure-TS within ~1.5× of native calamine) | ☐ |
+| **0.1** | Reader MVP | Read correctly-typed cells (string/number/date/bool) from a real `.xlsx` | ☑ |
+| **0.2** | Reader hardening | Constant-memory streaming; styles→date detection; merged cells, hyperlinks, comments | ☑ |
+| **0.3** | Writer MVP | Write values, types, sheets; round-trip fidelity tests | ☑ |
+| **0.4** | Styles | Read + write fonts, fills, borders, alignment, number formats | ☑ |
+| **0.5** | Fidelity + streaming writer | Comments write, formula text, theme fidelity; constant-memory writer; benchmark harness | ☑ |
+| **0.6** | Images | drawingML picture read + anchored write; native lane deferred (0.5 benchmarks: pure-TS within ~1.5× of native calamine) | ☑ |
 | **0.7** | More formats | `.xlsb`, `.ods`, legacy `.xls` (BIFF8) read | ☐ |
 | **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point; text fidelity ships in 0.5) | ☐ |
 | **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus | ☐ |
