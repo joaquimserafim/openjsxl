@@ -32,6 +32,8 @@ sheet.numberFormat('C1'); // "mm-dd-yy" | undefined
 sheet.formula('E1'); // "B1*2" | undefined — formula text (shared formulas come back translated)
 sheet.mergedCells; // ["A1:B1", …]
 sheet.freeze; // { rows?, cols? } | undefined — plus columns, rowProperties, comments, state, …
+await sheet.images(); // [{ anchor, bytes, mime, name? }, …] — anchored pictures (lazy; media
+// bytes decompress on first call, once per drawing part)
 wb.resolveColor({ theme: 4, tint: 0.4 }); // "FF96B4D8" — theme color → ARGB, per this file's theme
 
 // Constant-memory streaming for large sheets — one row at a time.
@@ -71,14 +73,17 @@ const updated = await writeXlsx(input);
 Cells can carry styles (`{ value, style }` — the same shape `style(ref)` returns) or formulas
 (`{ formula, value? }` — the cached value is what non-recalculating readers see), and sheets
 take `columns` (widths), `rowProperties` (heights), `freeze`, `merges`, `hyperlinks`,
-`comments` (written with the legacy VML part Excel needs to display them), and a visibility
-`state`. For huge exports, `streamXlsx` accepts the same input shape with each sheet's `rows` as
-any sync/async iterable and returns a `ReadableStream` — roughly constant memory at any row
-count. Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet name,
-non-finite number, invalid `Date`, XML-illegal characters, malformed or overlapping merges)
-throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossless for values, types,
-sheet names/order, styles, formulas, comments, custom themes, geometry, merges, hyperlinks, and
-visibility.
+`comments` (written with the legacy VML part Excel needs to display them), a visibility
+`state`, and `images` (the same `{ anchor, bytes, mime, name? }` records `images()` returns —
+png, jpeg, gif, bmp, tiff, webp, emf, wmf; identical bytes dedupe into one media part). For
+huge exports, `streamXlsx` accepts the same input shape with each sheet's `rows` as any
+sync/async iterable and returns a `ReadableStream` — roughly constant memory at any row count
+(constant in *rows*; embedded image bytes are held, by reference, until the media parts flush
+at stream end). Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet
+name, non-finite number, invalid `Date`, XML-illegal characters, malformed or overlapping
+merges) throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossless for values,
+types, sheet names/order, styles, formulas, comments, pictures, custom themes, geometry,
+merges, hyperlinks, and visibility.
 
 ## Exports
 
@@ -88,7 +93,8 @@ visibility.
   `StreamSheetInput`, `StreamRows`
 - **Errors:** `XlsxError`, `XlsxErrorCode`
 - **Types:** `Row`, `Cell`, `CellType`, `CellStyle` (+ font/fill/border/alignment/color parts),
-  `ColumnProps`, `RowProps`, `FreezePane`, `Comment`, `Hyperlink`, `SheetInfo`, `SheetState`, `CellRef`
+  `ColumnProps`, `RowProps`, `FreezePane`, `Comment`, `Hyperlink`, `SheetInfo`, `SheetState`,
+  `CellRef`, `SheetImage`, `ImageAnchor`, `AnchorPoint`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`,
   `dateToSerial`
 

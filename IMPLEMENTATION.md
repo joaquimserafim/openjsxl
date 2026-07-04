@@ -1098,6 +1098,27 @@ png/jpeg/gif — a real file with a bmp/tiff/webp/emf/wmf image round-trips as a
 refusal (spec-compliant) rather than carrying; widen the writer (single-source the
 mime↔ext map) or drop-and-document exotic images at 0.6 prep.
 
+### 0.6 release prep (owner-approved) ☑
+**Exotic-mime decision RESOLVED (owner picked: widen).** `MEDIA_MIME_TO_EXT` now covers the FULL
+read set — png, jpeg, gif + bmp, tiff, webp, emf, wmf — so reader and writer are symmetric and
+any real file with pictures round-trips; only a genuinely unknown type (the reader's
+`application/octet-stream` fallback) still refuses typed. The reader's derived map keeps `jpg`/
+`tif` as alternate SPELLINGS only; the writer's mime error message now enumerates from the map
+(can't go stale). +5 pinned `it.each` round-trips (part ext + content-type Default + re-read
+mime per type); the old "webp rejects" case became `image/avif` (genuinely unknown). **Docs
+(P4 + fidelity):** root README (status → New in 0.6, `images()` in the reader block, new
+"Pictures (0.6)" write section, fidelity table gains pictures row + absolute-anchor/non-picture
++ effects drop-entries, media renumber/ext-spelling flattening note, streamXlsx + benchmarks
+"constant in ROWS" image caveat); core README (images() usage, images in the writer paragraph +
+allowlist, stream caveat, SheetImage/ImageAnchor/AnchorPoint in exports); facade README (same
+three); `images()` JSDoc gains the per-sheet media-cache note. ROADMAP 0.6 row wording already
+accurate (ticks owner-managed, untouched). Gate: biome 0 / tsc 0 / **506 tests** /
+**byte-identity 12/12** vs pre-widening (`9395ee9`) — trio output provably unchanged / openpyxl
+warnings-as-errors clean on REAL Pillow-generated bmp+tiff+webp through our writer (emf/wmf not
+PIL-decodable — openpyxl drops any image PIL can't read, incl. valid ones; identical OPC path)
+/ `unzip -t` OK / all 10 examples green vs built dist. **Version bump NOT included** — separate
+explicit owner request per CLAUDE.md #4 (owner runs push / `pnpm -r publish` / tag).
+
 ### M6 analysis follow-up (post-milestone, owner-approved) ☑
 Post-milestone analysis (2 agents: scale+memory, debt+gaps; every finding re-verified
 empirically) → one fix set. **P1 shared-bounds parity:** `parseDrawing` now CLAMPS a

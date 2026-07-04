@@ -317,6 +317,11 @@ export class Worksheet {
 	 * sits (`anchor`), and an optional `name`; pictures using the same image file share one `bytes`
 	 * buffer. Empty when the sheet has no pictures. Shapes, charts, and free-floating (absolute)
 	 * pictures aren't included, and a picture whose image file is missing is skipped.
+	 *
+	 * Media is cached per SHEET, not per workbook: when several sheets show the same image, each
+	 * sheet's first `images()` call decompresses that image once more (sheets stay independent, and
+	 * a sheet whose pictures you never touch costs nothing). Rewriting through the bridge is
+	 * unaffected — the writer dedupes identical bytes back into one media part.
 	 */
 	images(): Promise<readonly SheetImage[]> {
 		if (this.#imagesPromise === undefined) {

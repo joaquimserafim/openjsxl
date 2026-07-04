@@ -10,11 +10,11 @@ A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaSc
 runtimes — Node, Deno, Bun, the browser, and edge.
 
 > Status: **reader + writer — pre-1.0.** Read typed cells, styles, number formats, formulas,
-> merged ranges, hyperlinks, and comments; stream large sheets in roughly constant memory; get
-> typed errors on malformed input. Write `.xlsx` from plain data with `writeXlsx`, and
-> read → modify → write with `workbookToInput`. **New in 0.5:** comments write (visible in
-> Excel), formula text round-trip, custom-theme carry + `resolveColor`, a constant-memory
-> streaming writer (`streamXlsx`), and [published benchmarks](./docs/benchmarks.md).
+> merged ranges, hyperlinks, comments, and pictures; stream large sheets in roughly constant
+> memory; get typed errors on malformed input. Write `.xlsx` from plain data with `writeXlsx`,
+> and read → modify → write with `workbookToInput`. **New in 0.6:** anchored pictures — read
+> them with `sheet.images()`, write them via `images` on a sheet, and they round-trip through
+> the bridge byte-exact (png, jpeg, gif, bmp, tiff, webp, emf, wmf).
 > Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
 > [implementation plan](./IMPLEMENTATION.md).
 
@@ -105,6 +105,10 @@ sheet.columns; // [{ min: 2, max: 3, width: 25.5, hidden? }, …] — column geo
 sheet.rowProperties; // Map<row, { height?, hidden? }>
 sheet.freeze; // { rows?, cols? } | undefined — the frozen pane
 sheet.state; // "visible" | "hidden" | "veryHidden" (sheet.visible is the boolean)
+
+await sheet.images(); // [{ anchor, bytes, mime, name? }, …] — anchored pictures; `bytes` is the
+// raw image payload, `anchor` the raw cell + EMU geometry. Async & lazy: media is only
+// decompressed on first call (once per drawing part — sheets sharing a logo each read it once)
 
 wb.resolveColor({ theme: 4, tint: 0.4 }); // "FF96B4D8" — a style color as 8-digit ARGB,
 // resolved against the workbook's own theme (colors stay raw {theme, tint} in the style model)
@@ -197,6 +201,39 @@ const stream = streamXlsx({ sheets: [{ name: 'Big', rows: millionRowCursor() }] 
 await stream.pipeTo(destination);
 ```
 
+The streaming writer's flat memory is **constant in rows** — row data is pulled and released as
+the output drains. Pictures are the exception: image bytes (passed by reference, never copied)
+are held until the media parts flush at the end of the stream.
+
+### Pictures (0.6)
+
+Sheets take `images` — the same `{ anchor, bytes, mime, name? }` records `sheet.images()`
+returns, so pictures pass straight through a round trip. The anchor is raw OOXML geometry: a
+1-based `from` cell plus sizes in EMU (≈ 9 525 EMU per pixel at 96 dpi). Pin a fixed-size logo
+with `ext`, or span cells with `to`:
+
+```ts
+const bytes = await writeXlsx({
+	sheets: [
+		{
+			name: 'Report',
+			rows: [['Q3 Sales']],
+			images: [
+				{
+					anchor: { from: { col: 4, row: 1 }, ext: { cx: 96 * 9525, cy: 96 * 9525 } },
+					bytes: logoBytes, // Uint8Array — written verbatim, never decoded
+					mime: 'image/png', // png, jpeg, gif, bmp, tiff, webp, emf, wmf
+					name: 'Logo',
+				},
+			],
+		},
+	],
+});
+```
+
+Identical image bytes are deduplicated into one media part workbook-wide, and a workbook
+without images emits no drawing machinery at all.
+
 ### Read → modify → write
 
 `workbookToInput` turns an open `Workbook` back into writer input, so you can round-trip a file:
@@ -212,17 +249,18 @@ await writeFile('out.xlsx', await writeXlsx(input));
 ```
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
-geometry, and structural metadata**:
+pictures, geometry, and structural metadata**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
 | string, number, boolean, `Date` values | error cells without a formula (written as their text) |
-| number formats — built-in & custom codes | |
-| fonts, fills, borders, alignment | |
+| number formats — built-in & custom codes | absolute-anchored pictures & non-picture drawings (shapes, charts) — skipped on read |
+| fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
 | colors: rgb, indexed, theme + tint (raw) | |
 | custom theme part (carried byte-identical) | |
 | formula text + cached value | |
 | comments (author + text, Excel-visible) | |
+| anchored pictures (bytes byte-exact, anchor, type, name) | |
 | empty cells (sparse), incl. styled blanks | |
 | column widths, row heights, hidden, freeze | |
 | merged ranges & hyperlinks | |
@@ -232,8 +270,9 @@ geometry, and structural metadata**:
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
 formulas re-emit as per-cell plain formulas (the same text Excel shows in each cell — data-table
-formulas keep only their cached value); and a tolerated non-canonical cell ref spelling (e.g.
-lowercase `a1`) re-emits canonically (`A1`).
+formulas keep only their cached value); a tolerated non-canonical cell ref spelling (e.g.
+lowercase `a1`) re-emits canonically (`A1`); and media parts renumber with alternate extension
+spellings normalized (`tif` → `tiff`, `jpg` → `jpeg` — the image bytes themselves are untouched).
 
 ## Why
 
@@ -257,7 +296,8 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 | **write** | **0.69 s · 395 MB** | 3.1 s · 1.5 GB | 2.2 s · 565 MB |
 
 Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~95 MB)** no matter
-the row count. The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write),
+the row count (flat in *rows* — embedded images, when present, stay resident until the stream
+ends). The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write),
 the methodology, and out-of-band **openpyxl** / **python-calamine** reference numbers are in
 [`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce it end-to-end with `pnpm bench`.
 _(Measured 2026-07-03; every "fast" in these docs traces back to this table.)_

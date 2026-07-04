@@ -183,6 +183,40 @@ describe("writeXlsx — picture write (F6.3)", () => {
 		expect(img?.bytes).toEqual(gif);
 	});
 
+	// 0.6: the write allowlist is the FULL read set — every media type the reader can report from
+	// a real file re-embeds, so a bmp/tiff/webp/emf/wmf logo no longer makes a whole file
+	// un-rewritable. Pin each type's whole chain: part extension, content-type Default, re-read mime.
+	it.each([
+		["image/bmp", "bmp"],
+		["image/tiff", "tiff"],
+		["image/webp", "webp"],
+		["image/x-emf", "emf"],
+		["image/x-wmf", "wmf"],
+	])("round-trips a %s image end-to-end (imageN.%s)", async (mime, extension) => {
+		const data = new Uint8Array([0x42, 0x4d, 1, 2, 3]); // opaque to the writer, never decoded
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "S",
+					rows: [[1]],
+					images: [
+						{
+							anchor: { from: { col: 1, row: 1 }, ext: { cx: 10, cy: 10 } },
+							bytes: data,
+							mime,
+						},
+					],
+				},
+			],
+		});
+		expect(entryNames(bytes)).toContain(`xl/media/image1.${extension}`);
+		const types = new TextDecoder().decode(await openZip(bytes).read("[Content_Types].xml"));
+		expect(types).toContain(`<Default Extension="${extension}" ContentType="${mime}"/>`);
+		const [img] = await (await openXlsx(bytes)).sheet("S").images();
+		expect(img?.mime).toBe(mime);
+		expect(img?.bytes).toEqual(data);
+	});
+
 	// M6-analysis coverage: a picture name full of XML-special characters is escaped on write
 	// (escapeAttr) and decoded on read — pin the whole trip, not just the machinery.
 	it("round-trips a picture name with XML-special characters", async () => {
@@ -259,12 +293,12 @@ describe("writeXlsx — picture write (F6.3)", () => {
 
 		it.each([
 			[
-				"a bad mime",
+				"an unknown mime",
 				[
 					{
 						anchor: { from: { col: 1, row: 1 }, ext: { cx: 1, cy: 1 } },
 						bytes: PNG(1),
-						mime: "image/webp",
+						mime: "image/avif", // not in the allowlist (no part extension to emit)
 					},
 				],
 				/image\/png/,

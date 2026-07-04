@@ -758,7 +758,11 @@ function imageParts(
 				? MEDIA_MIME_TO_EXT[mime]
 				: undefined;
 		if (ext === undefined) {
-			sheetInvalid(sheetName, `${what}.mime must be one of image/png, image/jpeg, image/gif`);
+			// Enumerate the allowlist from the map itself so this message can never go stale.
+			sheetInvalid(
+				sheetName,
+				`${what}.mime must be one of ${Object.keys(MEDIA_MIME_TO_EXT).join(", ")}`,
+			);
 		}
 		// name — optional; defaults to a deterministic "Image N".
 		const rawName = raw.name;

@@ -217,28 +217,30 @@ export function parseDrawing(xml: string): DrawingImage[] {
 
 /**
  * The image media types the WRITER accepts, mapped to the media-part extension it emits
- * (`xl/media/imageN.<ext>`). This is the write-side allowlist — the reader recognizes more types
- * (see below) and degrades the rest.
+ * (`xl/media/imageN.<ext>`). This is the FULL read set (0.6): every type the reader can report
+ * from a real file is writable, so any file with pictures round-trips — the writer never decodes
+ * the bytes, it only re-embeds what a producer embedded. Only a genuinely unknown type (the
+ * reader's `application/octet-stream` fallback) has no part name to emit and refuses typed.
  */
 export const MEDIA_MIME_TO_EXT: Readonly<Record<string, string>> = {
 	"image/png": "png",
 	"image/jpeg": "jpeg",
 	"image/gif": "gif",
+	"image/bmp": "bmp",
+	"image/tiff": "tiff",
+	"image/webp": "webp",
+	"image/x-emf": "emf",
+	"image/x-wmf": "wmf",
 };
 
-// Media type from a part's file extension — the read side. The writable trio is DERIVED from the
-// allowlist above (spelled identically by construction, so the mime the reader reports for a part
-// our writer emitted always re-passes the writer's gate); the extra entries are read-only types
-// real producers embed, which the reader reports faithfully.
+// Media type from a part's file extension — the read side, DERIVED from the allowlist above
+// (spelled identically by construction, so the mime the reader reports for an embedded image
+// always re-passes the writer's gate). The two extras are alternate SPELLINGS of derived types
+// that real producers use for part names, not additional types.
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
 	...Object.fromEntries(Object.entries(MEDIA_MIME_TO_EXT).map(([mime, ext]) => [ext, mime])),
 	jpg: "image/jpeg",
-	bmp: "image/bmp",
 	tif: "image/tiff",
-	tiff: "image/tiff",
-	webp: "image/webp",
-	emf: "image/x-emf",
-	wmf: "image/x-wmf",
 };
 
 /**
