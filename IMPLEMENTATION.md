@@ -886,7 +886,7 @@ F6.2 (read) → F6.3 (write) → F6.4 (bridge + corpus). One feature per session
 proceed-gated: "proceed" → implement → gates → adversarial review → report + commit
 message → WAIT for the owner's "commit".
 
-### F6.1 — Per-sheet part wiring dedup (pre-image refactor) ☐
+### F6.1 — Per-sheet part wiring dedup (pre-image refactor) ☑
 **Context.** The hyperlinks→comments→vmlDrawing rel block and the comment/VML part-path
 conventions are spelled independently in `worksheetXml` (writer/sheet.ts ~779–799),
 `streamWorksheet` (~926–944), the buffered part loop (writer/workbook.ts ~98–104), and the
@@ -903,12 +903,24 @@ stream-zip.ts) — separate, optional cleanup; do NOT bundle it here.
 full byte-identity recipe are the acceptance gate, not a nice-to-have. No new types on the
 public surface.
 **Tasks**
-- [ ] Extract the shared per-sheet parts/rels builder; both writers consume it; delete the
+- [x] Extract the shared per-sheet parts/rels builder; both writers consume it; delete the
       copies. `needVml` derived, parameter dropped.
-- [ ] Gates + byte-identity (full pin set + worktree recipe if in doubt) + adversarial
+- [x] Gates + byte-identity (full pin set + worktree recipe if in doubt) + adversarial
       review focused on emission-order/rId regressions.
 **Acceptance.** Identical bytes for every input in the pin set; suite green; the wiring
 exists in exactly one place.
+**Landed (committed `4485219`).** Found the dedup HALF-done: `sheetRelPlumbing` existed and
+`worksheetXml` used it, but `streamWorksheet` still inlined the rel block and the side-part NAMES
+were spelled in both part-loops. `streamWorksheet` now calls `sheetRelPlumbing`; new
+`sheetSideParts(sheetIndex, side)` in parts.ts owns the side-part OPC names
+(`_rels/sheetN.xml.rels`, `commentsN.xml`, `drawings/vmlDrawingN.vml`) in one place (rels→comments→
+vml order), consumed by both writers; `contentTypesXml` derives `needVml` from `commentSheets`
+(param dropped); streaming derives `commentSheets` upfront from `prepared`. **F6.3 image parts
+(drawingN.xml + drawing rels) extend `SheetSideParts` + `sheetSideParts` here.** Gate: biome 0 /
+tsc 0 / **458 tests** (+2 F6.1 guards: both writers emit the identical OPC part set; sheet1 rels
+stay ordered hyperlink/comments/vmlDrawing) / **byte-identity 10/10** vs the pre-F6.1 worktree
+(`369f36f`) incl. every side-part path / streamed side-parts read back + openpyxl warnings-as-errors
+clean. Adversarial review (1 focused agent): NO issues (5 checks). Pure refactor, zero behavior change.
 
 ### F6.2 — Picture read: `Worksheet.images` ☐
 **Context.** In `.xlsx`, pictures hang off the worksheet's `<drawing r:id>` →

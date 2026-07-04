@@ -1,6 +1,6 @@
 import { XlsxError } from "../errors";
 import type { SheetState } from "../types";
-import type { SheetRel } from "./sheet";
+import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
 import { escapeAttr, isXmlSafe } from "./xml";
 
@@ -97,14 +97,18 @@ export function validateSheetMeta(sheets: unknown): {
 	return { states, names };
 }
 
-/** `[Content_Types].xml` — one Override per part not covered by the rels/xml defaults. */
+/**
+ * `[Content_Types].xml` — one Override per part not covered by the rels/xml defaults. The `vml`
+ * Default is emitted iff any sheet has comments, derived here from `commentSheets` so no caller can
+ * pass a flag inconsistent with the actual comment parts.
+ */
 export function contentTypesXml(
 	sheetCount: number,
 	needStyles: boolean,
 	needTheme: boolean,
 	commentSheets: readonly number[],
-	needVml: boolean,
 ): string {
+	const needVml = commentSheets.length > 0;
 	const overrides = [
 		`<Override PartName="/xl/workbook.xml" ContentType="${CT_BASE}.sheet.main+xml"/>`,
 		...Array.from(
@@ -199,6 +203,35 @@ export function sheetRelsXml(rels: readonly SheetRel[]): string {
 		)
 		.join("");
 	return `${XML_DECL}\n<Relationships xmlns="${NS_PKG_REL}">${items}</Relationships>`;
+}
+
+/**
+ * The per-sheet SIDE parts — the rels part and the comments + VML drawing pair — as `(name, xml)`
+ * pairs, in the exact order both writers emit them (rels, then comments, then VML). This is the ONE
+ * place that owns these OPC part-name conventions, so the buffered and streaming writers can't drift
+ * on them (and the next per-sheet part family — drawings in M6 — has a single home to grow into).
+ * `sheetIndex` is 0-based; parts are numbered `sheetIndex + 1`. The worksheet BODY part is emitted by
+ * each writer itself (a string vs a chunk stream), so it stays out of here.
+ */
+export function sheetSideParts(
+	sheetIndex: number,
+	side: SheetSideParts,
+): { name: string; xml: string }[] {
+	const n = sheetIndex + 1;
+	const parts: { name: string; xml: string }[] = [];
+	if (side.rels.length > 0) {
+		parts.push({
+			name: `xl/worksheets/_rels/sheet${n}.xml.rels`,
+			xml: sheetRelsXml(side.rels),
+		});
+	}
+	if (side.commentsXml !== undefined) {
+		parts.push({ name: `xl/comments${n}.xml`, xml: side.commentsXml });
+	}
+	if (side.vmlXml !== undefined) {
+		parts.push({ name: `xl/drawings/vmlDrawing${n}.vml`, xml: side.vmlXml });
+	}
+	return parts;
 }
 
 /**

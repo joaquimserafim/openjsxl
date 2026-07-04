@@ -4,7 +4,7 @@ import {
 	contentTypesXml,
 	encode,
 	packageRelsXml,
-	sheetRelsXml,
+	sheetSideParts,
 	themeToEmit,
 	validateSheetMeta,
 	workbookRelsXml,
@@ -76,9 +76,8 @@ export async function writeXlsx(
 	const needTheme = styles.usesTheme();
 
 	// Comments (F5.2) each ride on a legacy VML drawing part; a workbook with any comment gains the
-	// `vml` Default content type, and every comments part gets an Override.
+	// `vml` Default content type (derived inside contentTypesXml) and every comments part an Override.
 	const commentSheets = worksheets.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
-	const needVml = commentSheets.length > 0;
 
 	const parts: ZipInput[] = [];
 	const add = (name: string, xml: string): void => {
@@ -87,7 +86,7 @@ export async function writeXlsx(
 
 	add(
 		"[Content_Types].xml",
-		contentTypesXml(sheets.length, needStyles, needTheme, commentSheets, needVml),
+		contentTypesXml(sheets.length, needStyles, needTheme, commentSheets),
 	);
 	add("_rels/.rels", packageRelsXml());
 	add("xl/workbook.xml", workbookXml(names, states, date1904));
@@ -95,12 +94,10 @@ export async function writeXlsx(
 	if (needStyles) add("xl/styles.xml", styles.stylesXml());
 	if (needTheme) add("xl/theme/theme1.xml", themeToEmit(carriedTheme));
 
+	// The worksheet body, then its side parts (rels/comments/VML) — names owned by sheetSideParts.
 	worksheets.forEach((w, i) => {
 		add(`xl/worksheets/sheet${i + 1}.xml`, w.xml);
-		if (w.rels.length > 0)
-			add(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, sheetRelsXml(w.rels));
-		if (w.commentsXml !== undefined) add(`xl/comments${i + 1}.xml`, w.commentsXml);
-		if (w.vmlXml !== undefined) add(`xl/drawings/vmlDrawing${i + 1}.vml`, w.vmlXml);
+		for (const part of sheetSideParts(i, w)) add(part.name, part.xml);
 	});
 
 	return writeZip(parts);

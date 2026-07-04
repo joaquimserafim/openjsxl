@@ -3,7 +3,7 @@ import {
 	contentTypesXml,
 	encode,
 	packageRelsXml,
-	sheetRelsXml,
+	sheetSideParts,
 	themeToEmit,
 	validateSheetMeta,
 	workbookRelsXml,
@@ -60,25 +60,18 @@ async function* buildStreamParts(
 	// rel/comment parts — while the rows stay lazy inside each `chunks` generator.
 	const prepared = sheets.map((sheet, i) => streamWorksheet(sheet, i, date1904, styles));
 
-	// Worksheets stream first, each followed by its own rels and comment/VML parts. streamZip consumes
-	// each part fully before the next, so after this loop every sheet's rows have been rendered and the
-	// style registry is complete.
-	const commentSheets: number[] = [];
+	// Which sheets carry comments — derived upfront from the prepared results (all sheets are prepared
+	// before any byte streams), so the content-type map at the end knows without tracking it mid-loop.
+	const commentSheets = prepared.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
+
+	// Worksheets stream first, each followed by its own side parts (rels/comments/VML) — names owned by
+	// sheetSideParts, shared with the buffered writer. streamZip consumes each part fully before the
+	// next, so after this loop every sheet's rows have rendered and the style registry is complete.
 	for (let i = 0; i < prepared.length; i++) {
 		const w = prepared[i] as (typeof prepared)[number];
 		yield { name: `xl/worksheets/sheet${i + 1}.xml`, data: w.chunks };
-		if (w.rels.length > 0) {
-			yield {
-				name: `xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
-				data: encode(sheetRelsXml(w.rels)),
-			};
-		}
-		if (w.commentsXml !== undefined) {
-			yield { name: `xl/comments${i + 1}.xml`, data: encode(w.commentsXml) };
-			commentSheets.push(i);
-		}
-		if (w.vmlXml !== undefined) {
-			yield { name: `xl/drawings/vmlDrawing${i + 1}.vml`, data: encode(w.vmlXml) };
+		for (const part of sheetSideParts(i, w)) {
+			yield { name: part.name, data: encode(part.xml) };
 		}
 	}
 
@@ -94,15 +87,7 @@ async function* buildStreamParts(
 	};
 	yield {
 		name: "[Content_Types].xml",
-		data: encode(
-			contentTypesXml(
-				sheets.length,
-				needStyles,
-				needTheme,
-				commentSheets,
-				commentSheets.length > 0,
-			),
-		),
+		data: encode(contentTypesXml(sheets.length, needStyles, needTheme, commentSheets)),
 	};
 	yield { name: "_rels/.rels", data: encode(packageRelsXml()) };
 }

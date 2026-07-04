@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openXlsx, type Workbook } from "../../reader/workbook";
+import { openZip } from "../../zip";
 import { streamXlsx } from "../stream";
 import type { WorkbookInput } from "../types";
 import { writeXlsx } from "../workbook";
@@ -229,5 +230,63 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		reads = 0;
 		const buffered = await openXlsx(await writeXlsx({ sheets: [flip] }));
 		expect(buffered.sheets.map((s) => s.name)).toEqual(["Good"]);
+	});
+});
+
+// F6.1 — the per-sheet part/rel wiring is single-sourced (sheetRelPlumbing + sheetSideParts), so the
+// buffered and streaming writers CANNOT drift on which OPC parts they emit or how a sheet's rels are
+// ordered. These guard exactly that invariant: reader-equivalence (above) wouldn't catch a part name
+// that changed in lockstep, and the body golden pins don't cover the side parts.
+describe("per-sheet part wiring (F6.1 dedup guard)", () => {
+	// One sheet exercises every side part (hyperlink + comments → rels/comments/vml), one is
+	// hyperlinks-only (rels only), one is bare (no side parts).
+	const wb: WorkbookInput = {
+		sheets: [
+			{
+				name: "M",
+				rows: [["a", "b"]],
+				hyperlinks: [{ ref: "A1", target: "https://x.io" }],
+				comments: [{ ref: "A1", author: "Z", text: "n" }],
+			},
+			{ name: "Links", rows: [["c"]], hyperlinks: [{ ref: "A1", target: "https://y.io" }] },
+			{ name: "Plain", rows: [["d"]] },
+		],
+	};
+	const partNames = (bytes: Uint8Array): string[] => [...openZip(bytes).entries.keys()].sort();
+
+	it("both writers emit the identical set of OPC parts", async () => {
+		const buffered = partNames(await writeXlsx(wb));
+		const streamed = partNames(await drain(streamXlsx(wb)));
+		expect(streamed).toEqual(buffered); // the drift guard: neither writer emits a part the other omits
+		// …and that set is exactly the expected per-sheet wiring (names owned by sheetSideParts).
+		expect(buffered).toEqual([
+			"[Content_Types].xml",
+			"_rels/.rels",
+			"xl/_rels/workbook.xml.rels",
+			"xl/comments1.xml",
+			"xl/drawings/vmlDrawing1.vml",
+			"xl/workbook.xml",
+			"xl/worksheets/_rels/sheet1.xml.rels",
+			"xl/worksheets/_rels/sheet2.xml.rels",
+			"xl/worksheets/sheet1.xml",
+			"xl/worksheets/sheet2.xml",
+			"xl/worksheets/sheet3.xml",
+		]);
+	});
+
+	it("sheet1 rels are ordered hyperlink (rId1), comments (rId2), vmlDrawing (rId3)", async () => {
+		const bytes = await writeXlsx(wb);
+		const rels = new TextDecoder().decode(
+			await openZip(bytes).read("xl/worksheets/_rels/sheet1.xml.rels"),
+		);
+		const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+		expect(rels).toBe(
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+				'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+				`<Relationship Id="rId1" Type="${R}/hyperlink" Target="https://x.io" TargetMode="External"/>` +
+				`<Relationship Id="rId2" Type="${R}/comments" Target="../comments1.xml"/>` +
+				`<Relationship Id="rId3" Type="${R}/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>` +
+				"</Relationships>",
+		);
 	});
 });

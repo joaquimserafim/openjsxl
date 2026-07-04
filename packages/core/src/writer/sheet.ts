@@ -669,8 +669,14 @@ export interface SheetRel {
 	readonly external: boolean;
 }
 
-export interface WorksheetResult {
-	readonly xml: string;
+/**
+ * The auxiliary parts a worksheet carries beside its own body: a rels part (present when the sheet
+ * has any relationships) and, for comments, the paired comments + VML drawing parts. Shared by the
+ * buffered {@link WorksheetResult} and the streaming {@link StreamedWorksheet} so the two writers
+ * can't drift; `sheetSideParts` (parts.ts) turns these into the actual OPC parts, one place owning
+ * the part names.
+ */
+export interface SheetSideParts {
 	/**
 	 * The sheet's relationships in rId order (rId = index + 1) — non-empty means it needs a rels
 	 * part. Hyperlinks come first so a hyperlinks-only sheet keeps its exact pre-F5.2 rels bytes.
@@ -680,6 +686,49 @@ export interface WorksheetResult {
 	readonly commentsXml?: string;
 	/** `xl/drawings/vmlDrawingN.vml` content — the legacy drawing that makes comments render. */
 	readonly vmlXml?: string;
+}
+
+export interface WorksheetResult extends SheetSideParts {
+	readonly xml: string;
+}
+
+/**
+ * Build a sheet's relationships and the body plumbing that references them — the block both writers
+ * had copied verbatim. Hyperlink targets take rId1..rIdN (matching the r:ids hyperlinksXml already
+ * emitted), then the comments + vmlDrawing pair; `legacyDrawing` is the body element pointing at the
+ * VML part, and `nsR` is the `xmlns:r` the root needs when the body references any rId. Single owner
+ * of the per-sheet rel ORDER, rId allocation, and the comment/VML part-path convention.
+ */
+function sheetRelPlumbing(
+	sheetIndex: number,
+	hyperlinkTargets: readonly string[],
+	hasComments: boolean,
+): { rels: SheetRel[]; legacyDrawing: string; nsR: string } {
+	const rels: SheetRel[] = hyperlinkTargets.map((target) => ({
+		type: `${NS_REL}/hyperlink`,
+		target,
+		external: true,
+	}));
+	let legacyDrawing = "";
+	if (hasComments) {
+		// The comments part is located by rel TYPE (no r:id in the sheet body); the vmlDrawing IS
+		// referenced by <legacyDrawing r:id>. Targets are relative to the worksheet's own directory.
+		rels.push({
+			type: `${NS_REL}/comments`,
+			target: `../comments${sheetIndex + 1}.xml`,
+			external: false,
+		});
+		rels.push({
+			type: `${NS_REL}/vmlDrawing`,
+			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
+			external: false,
+		});
+		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`; // the vmlDrawing rel, just pushed
+	}
+	// xmlns:r is declared whenever the body references an rId — a hyperlink and/or the legacyDrawing.
+	// A sheet using neither keeps the exact pre-F4.6 root element.
+	const nsR = hyperlinkTargets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
+	return { rels, legacyDrawing, nsR };
 }
 
 /**
@@ -773,34 +822,12 @@ export function worksheetXml(
 				? formatRef({ col: minCol, row: minRow })
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
 
-	// One rId counter for the sheet's relationships part. Hyperlink targets come FIRST (rId1..rIdN,
-	// matching the r:ids hyperlinksXml already emitted), so a hyperlinks-only sheet keeps its exact
-	// pre-F5.2 rels bytes; the comments and vmlDrawing parts (F5.2) take the ids after them.
-	const rels: SheetRel[] = links.targets.map((target) => ({
-		type: `${NS_REL}/hyperlink`,
-		target,
-		external: true,
-	}));
-	let legacyDrawing = "";
-	if (comments !== undefined) {
-		// The comments part is located by rel TYPE (no r:id in the sheet body); the vmlDrawing IS
-		// referenced by <legacyDrawing r:id>. Targets are relative to the worksheet's own directory.
-		rels.push({
-			type: `${NS_REL}/comments`,
-			target: `../comments${sheetIndex + 1}.xml`,
-			external: false,
-		});
-		rels.push({
-			type: `${NS_REL}/vmlDrawing`,
-			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
-			external: false,
-		});
-		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`; // the vmlDrawing rel, just pushed
-	}
-
-	// xmlns:r is declared whenever the body references an rId — a hyperlink and/or the legacyDrawing.
-	// A sheet using neither keeps the exact pre-F4.6 root element.
-	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
+	// Relationships + the body plumbing that references them (shared with the streaming writer).
+	const { rels, legacyDrawing, nsR } = sheetRelPlumbing(
+		sheetIndex,
+		links.targets,
+		comments !== undefined,
+	);
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
 	// hyperlinks, legacyDrawing (CT_Worksheet sequence — legacyDrawing follows the hyperlinks/
@@ -829,11 +856,8 @@ export function worksheetXml(
 // writer, so the two produce reader-equivalent output.
 
 /** A streamed worksheet: its XML as a chunk generator, plus the upfront-known rels/comment parts. */
-export interface StreamedWorksheet {
+export interface StreamedWorksheet extends SheetSideParts {
 	readonly chunks: AsyncGenerator<Uint8Array>;
-	readonly rels: readonly SheetRel[];
-	readonly commentsXml?: string;
-	readonly vmlXml?: string;
 }
 
 // Render one streamed row. Its number is the 1-based position in the stream. Mirrors the buffered
@@ -931,26 +955,13 @@ export function streamWorksheet(
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 
-	const rels: SheetRel[] = links.targets.map((target) => ({
-		type: `${NS_REL}/hyperlink`,
-		target,
-		external: true,
-	}));
-	let legacyDrawing = "";
-	if (comments !== undefined) {
-		rels.push({
-			type: `${NS_REL}/comments`,
-			target: `../comments${sheetIndex + 1}.xml`,
-			external: false,
-		});
-		rels.push({
-			type: `${NS_REL}/vmlDrawing`,
-			target: `../drawings/vmlDrawing${sheetIndex + 1}.vml`,
-			external: false,
-		});
-		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`;
-	}
-	const nsR = links.targets.length > 0 || legacyDrawing !== "" ? ` xmlns:r="${NS_REL}"` : "";
+	// Relationships + the body plumbing that references them — the SAME builder the buffered writer
+	// uses, so the two can't drift on rel order, rId allocation, or the legacyDrawing/xmlns:r refs.
+	const { rels, legacyDrawing, nsR } = sheetRelPlumbing(
+		sheetIndex,
+		links.targets,
+		comments !== undefined,
+	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
 	const footer = `</sheetData>${mergeCells}${links.xml}${legacyDrawing}</worksheet>`;
