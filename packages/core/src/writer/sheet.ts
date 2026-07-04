@@ -9,9 +9,10 @@ import {
 	parseRef,
 } from "../ooxml/a1";
 import { dateToSerial } from "../ooxml/dates";
+import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
 import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps, SheetImage } from "../types";
-import { MEDIA_MIME_TO_EXT, type MediaRegistry } from "./images";
+import type { MediaRegistry } from "./images";
 import type { StyleRegistry } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
 import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml";
@@ -661,11 +662,11 @@ function commentsParts(
 }
 
 // ── Pictures (F6.3) ────────────────────────────────────────────────────────────────────────────
+// MAX_EMU and the mime allowlist come from ooxml/drawing.ts — the SAME constants the tolerant
+// reader clamps/derives with, so whatever the reader returns is writable here (shared bounds).
 const NS_XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
-// The XML schema stores EMU as a signed 32-bit int; offsets/extents must fit in 0..2^31-1.
-const MAX_EMU = 0x7fffffff;
 
 /** The drawing part + its rels part for one sheet's pictures. */
 interface DrawingParts {

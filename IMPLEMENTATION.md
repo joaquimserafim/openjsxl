@@ -1098,6 +1098,33 @@ png/jpeg/gif — a real file with a bmp/tiff/webp/emf/wmf image round-trips as a
 refusal (spec-compliant) rather than carrying; widen the writer (single-source the
 mime↔ext map) or drop-and-document exotic images at 0.6 prep.
 
+### M6 analysis follow-up (post-milestone, owner-approved) ☑
+Post-milestone analysis (2 agents: scale+memory, debt+gaps; every finding re-verified
+empirically) → one fix set. **P1 shared-bounds parity:** `parseDrawing` now CLAMPS a
+producer's out-of-range anchor numbers into the writer's legal ranges (cols/rows into the
+grid, offsets/extents into EMU 0..2³¹−1) instead of returning them verbatim — previously a
+well-formed file with `colOff="-5000"` or `cx="2147483648"` read fine but the writer's
+typed rejection made the WHOLE file un-rewritable (violating the "reader clamps or drops"
+clause; the F4.5 geometry precedent). `MAX_EMU` moved to `ooxml/drawing.ts` as a shared
+constant (the a1.ts pattern); the writer imports it. **P1b (found during the fix,
+reproduced then pinned):** `mimeForMediaPath` did a prototype-chain lookup — a hostile
+media part named `image1.constructor` surfaced the `Object` constructor FUNCTION as the
+"mime" (breaking `SheetImage.mime: string`); now gated on `Object.hasOwn`, the reader-side
+twin of the writer's F6.3 fix. **P2 single-sourced media types:** the THREE hand-synced
+mime↔ext maps (reader `MIME_BY_EXT` 10-type, writer `MEDIA_MIME_TO_EXT`, content-types
+`MEDIA_EXT_TO_MIME`) collapse to ONE canonical `MEDIA_MIME_TO_EXT` in `ooxml/drawing.ts`;
+the reader's map and the content-types map now DERIVE from it (extra read-only types
+listed once, reader-side). No behavior change — the writer allowlist stays png/jpeg/gif
+pending the deferred exotic-mime decision. **P3 coverage:** +6 pinned tests — anchor
+clamps; prototype-key mime; GIF end-to-end (part name + content-type Default + re-read);
+XML-special-char picture-name round-trip; multiple `/drawing` rels on one sheet (crafted,
+rel order); `TargetMode="External"` blip skip. **P4 doc items** (streaming "constant
+memory in rows" image caveat, README fidelity tables, images() media-cache JSDoc note)
+deferred to the 0.6 release-prep pass. Gate: biome 0 / tsc 0 / **501 tests** /
+**byte-identity 12/12** (both writers × no-date, date, multi-sheet-sparse, empty-sheet,
+comments+links, images-mixed vs the pre-change worktree at `f769a37`) — writer bytes
+unchanged, so the F6.4 openpyxl validation stands transitively.
+
 ---
 
 ## M7+ — Later milestones (outline; expanded when reached)

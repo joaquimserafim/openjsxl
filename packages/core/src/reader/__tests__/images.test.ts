@@ -84,3 +84,110 @@ describe("Worksheet.images — sheets without pictures", () => {
 		expect(wb.sheet("Sheet1").cell("A1").value).toBe("hello");
 	});
 });
+
+// M6-analysis coverage: structural rel-graph edges no real producer emits — crafted through the
+// writer's own zip layer, like the bridge's hostile-file suite.
+describe("Worksheet.images — crafted rel-graph edges", () => {
+	const DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+	const NS_XDR =
+		'xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+	const REL_NS = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"';
+	const TYPE_DRAWING =
+		"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+	const TYPE_IMAGE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+	const drawingXml = (name: string): string =>
+		`${DECL}<xdr:wsDr ${NS_XDR}><xdr:oneCellAnchor>` +
+		`<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+		`<xdr:ext cx="100" cy="100"/>` +
+		`<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="${name}"/></xdr:nvPicPr>` +
+		`<xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill><xdr:spPr/></xdr:pic>` +
+		`<xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`;
+
+	// A minimal workbook whose sheet has the given drawing rels + drawing parts.
+	async function craft(
+		sheetDrawingRels: string,
+		drawings: readonly { name: string; xml: string; rels: string }[],
+	): Promise<Uint8Array> {
+		const { writeZip } = await import("../../writer/zip");
+		const enc = new TextEncoder();
+		return writeZip([
+			{
+				name: "[Content_Types].xml",
+				data: enc.encode(
+					`${DECL}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+				),
+			},
+			{
+				name: "_rels/.rels",
+				data: enc.encode(
+					`${DECL}<Relationships ${REL_NS}><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+				),
+			},
+			{
+				name: "xl/workbook.xml",
+				data: enc.encode(
+					`${DECL}<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+				),
+			},
+			{
+				name: "xl/_rels/workbook.xml.rels",
+				data: enc.encode(
+					`${DECL}<Relationships ${REL_NS}><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+				),
+			},
+			{
+				name: "xl/worksheets/sheet1.xml",
+				data: enc.encode(
+					`${DECL}<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`,
+				),
+			},
+			{
+				name: "xl/worksheets/_rels/sheet1.xml.rels",
+				data: enc.encode(
+					`${DECL}<Relationships ${REL_NS}>${sheetDrawingRels}</Relationships>`,
+				),
+			},
+			...drawings.flatMap((d) => [
+				{ name: `xl/drawings/${d.name}.xml`, data: enc.encode(d.xml) },
+				{
+					name: `xl/drawings/_rels/${d.name}.xml.rels`,
+					data: enc.encode(`${DECL}<Relationships ${REL_NS}>${d.rels}</Relationships>`),
+				},
+			]),
+			{ name: "xl/media/image1.png", data: enc.encode("crafted-media-bytes") },
+		]);
+	}
+
+	it("reads pictures from MULTIPLE /drawing rels on one sheet, in rel order", async () => {
+		// Valid OOXML a real producer rarely emits: sheet1 → drawing1.xml AND drawing2.xml, each
+		// holding one picture that shares the same media part.
+		const mediaRel = `<Relationship Id="rId1" Type="${TYPE_IMAGE}" Target="../media/image1.png"/>`;
+		const bytes = await craft(
+			`<Relationship Id="rId1" Type="${TYPE_DRAWING}" Target="../drawings/drawing1.xml"/>` +
+				`<Relationship Id="rId2" Type="${TYPE_DRAWING}" Target="../drawings/drawing2.xml"/>`,
+			[
+				{ name: "drawing1", xml: drawingXml("first"), rels: mediaRel },
+				{ name: "drawing2", xml: drawingXml("second"), rels: mediaRel },
+			],
+		);
+		const images = await (await openXlsx(bytes)).sheet("S").images();
+		expect(images.map((i) => i.name)).toEqual(["first", "second"]); // neither drawing dropped
+		expect(images.every((i) => text(i.bytes) === "crafted-media-bytes")).toBe(true);
+	});
+
+	it("skips a picture whose media rel is TargetMode=External (no throw, others kept)", async () => {
+		const bytes = await craft(
+			`<Relationship Id="rId1" Type="${TYPE_DRAWING}" Target="../drawings/drawing1.xml"/>`,
+			[
+				{
+					name: "drawing1",
+					xml: drawingXml("linked"),
+					rels: `<Relationship Id="rId1" Type="${TYPE_IMAGE}" Target="https://example.com/logo.png" TargetMode="External"/>`,
+				},
+			],
+		);
+		const wb = await openXlsx(bytes);
+		expect(await wb.sheet("S").images()).toEqual([]); // linked-not-embedded → degrade, not throw
+	});
+});

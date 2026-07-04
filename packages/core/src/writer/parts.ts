@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors";
+import { MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import type { SheetState } from "../types";
 import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
@@ -97,12 +98,12 @@ export function validateSheetMeta(sheets: unknown): {
 	return { states, names };
 }
 
-// The content type for each media extension the picture writer may emit (F6.3).
-const MEDIA_EXT_TO_MIME: Readonly<Record<string, string>> = {
-	png: "image/png",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
-};
+// The content type for each media extension the picture writer may emit (F6.3) — DERIVED by
+// inverting the canonical writer allowlist (ooxml/drawing.ts), so the Default entries here can
+// never drift from the extensions the media registry actually names its parts with.
+const MEDIA_EXT_TO_MIME: Readonly<Record<string, string>> = Object.fromEntries(
+	Object.entries(MEDIA_MIME_TO_EXT).map(([mime, ext]) => [ext, mime]),
+);
 
 /**
  * `[Content_Types].xml` — one Override per part not covered by the rels/xml defaults. The `vml`

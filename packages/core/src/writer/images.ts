@@ -9,13 +9,6 @@
 // images (a CLAUDE.md "no O(n²) on attacker-controlled counts" violation). FNV-1a is deterministic
 // (no randomness) and linear in total media bytes.
 
-/** The image media types the writer emits, mapped to the file extension used for the media part. */
-export const MEDIA_MIME_TO_EXT: Readonly<Record<string, string>> = {
-	"image/png": "png",
-	"image/jpeg": "jpeg",
-	"image/gif": "gif",
-};
-
 export interface MediaRegistry {
 	/** Intern image bytes (already validated) with their extension; returns the 1-based media number. */
 	intern(bytes: Uint8Array, ext: string): number;

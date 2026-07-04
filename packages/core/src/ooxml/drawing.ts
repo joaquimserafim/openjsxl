@@ -1,6 +1,13 @@
 import type { AnchorPoint } from "../types";
 import { localName } from "../utils";
 import { tokenize } from "../xml";
+import { MAX_COL, MAX_ROW } from "./a1";
+
+// The largest legal EMU value (2³¹−1) for anchor offsets and extents — a SHARED bound: the tolerant
+// reader CLAMPS a producer's out-of-range value into 0..MAX_EMU here, and the writer REJECTS an
+// out-of-range input typed (writer/sheet.ts emuValue) — both reading this one constant, so whatever
+// the reader returns is always writable (the a1.ts MAX_ROW/MAX_COL pattern).
+export const MAX_EMU = 0x7fffffff;
 
 // Parse a spreadsheetDrawing part (xl/drawings/drawingN.xml) into the picture anchors it declares,
 // walking the SAX tokenizer rather than building a DOM (F6.2). A drawing holds a sequence of
@@ -95,11 +102,16 @@ export function parseDrawing(xml: string): DrawingImage[] {
 	};
 
 	const newPoint = (): MutablePoint => ({ col: 0, row: 0, colOff: 0, rowOff: 0 });
+	// Pull a producer's value back into legal range. The tolerant reader CLAMPS out-of-bounds
+	// numbers (a negative offset, a 2³² extent, a cell beyond Excel's grid) instead of returning
+	// them verbatim — the writer would refuse them typed, and one malformed picture must not make
+	// a whole file un-rewritable. Same shared-bounds contract as column widths and row heights.
+	const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n);
 	const finish = (p: MutablePoint): AnchorPoint => ({
-		col: p.col + 1, // OOXML anchors are 0-based; the public model is 1-based
-		row: p.row + 1,
-		colOff: p.colOff,
-		rowOff: p.rowOff,
+		col: clamp(p.col, 0, MAX_COL - 1) + 1, // OOXML anchors are 0-based; the public model is 1-based
+		row: clamp(p.row, 0, MAX_ROW - 1) + 1,
+		colOff: clamp(p.colOff, 0, MAX_EMU),
+		rowOff: clamp(p.rowOff, 0, MAX_EMU),
 	});
 
 	for (const token of tokenize(xml)) {
@@ -134,7 +146,11 @@ export function parseDrawing(xml: string): DrawingImage[] {
 				// only capture an <ext> seen BEFORE the picture. This skips the picture's
 				// spPr/a:xfrm/a:ext (the shape-transform extent Excel/LibreOffice emit, which would
 				// otherwise overwrite the anchor size) and an extLst <ext> (which carries a uri, no cx).
-				ext = { cx: toInt(token.attrs.cx), cy: toInt(token.attrs.cy) };
+				// The extent is clamped into legal EMU range like every other anchor number.
+				ext = {
+					cx: clamp(toInt(token.attrs.cx), 0, MAX_EMU),
+					cy: clamp(toInt(token.attrs.cy), 0, MAX_EMU),
+				};
 			} else if (name === "grpSp") {
 				hasGroup = true;
 			} else if (name === "pic") {
@@ -193,14 +209,30 @@ export function parseDrawing(xml: string): DrawingImage[] {
 	return images;
 }
 
-// Media type from a part's file extension. Content-types Default entries are themselves keyed by
-// extension, and our writer (F6.3) sets them from the same map, so this round-trips exactly; an
-// unknown extension degrades to a generic binary type rather than guessing.
+// ── Media types ──────────────────────────────────────────────────────────────────────────────
+// ONE canonical mime ↔ extension source. The writer's allowlist (below) is the master; the
+// reader's ext → mime map DERIVES its overlapping entries from it, and the content-types emitter
+// (writer/parts.ts) derives its Default entries the same way — three former hand-synced copies
+// that could drift are now one definition.
+
+/**
+ * The image media types the WRITER accepts, mapped to the media-part extension it emits
+ * (`xl/media/imageN.<ext>`). This is the write-side allowlist — the reader recognizes more types
+ * (see below) and degrades the rest.
+ */
+export const MEDIA_MIME_TO_EXT: Readonly<Record<string, string>> = {
+	"image/png": "png",
+	"image/jpeg": "jpeg",
+	"image/gif": "gif",
+};
+
+// Media type from a part's file extension — the read side. The writable trio is DERIVED from the
+// allowlist above (spelled identically by construction, so the mime the reader reports for a part
+// our writer emitted always re-passes the writer's gate); the extra entries are read-only types
+// real producers embed, which the reader reports faithfully.
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
-	png: "image/png",
+	...Object.fromEntries(Object.entries(MEDIA_MIME_TO_EXT).map(([mime, ext]) => [ext, mime])),
 	jpg: "image/jpeg",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
 	bmp: "image/bmp",
 	tif: "image/tiff",
 	tiff: "image/tiff",
@@ -216,5 +248,10 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
 export function mimeForMediaPath(path: string): string {
 	const dot = path.lastIndexOf(".");
 	const ext = dot === -1 ? "" : path.slice(dot + 1).toLowerCase();
-	return MIME_BY_EXT[ext] ?? "application/octet-stream";
+	// Own-key lookup only: a hostile part name like `image1.constructor` must fall through to the
+	// generic type, not surface an Object.prototype member as the "mime" (the reader-side twin of
+	// the writer's Object.hasOwn allowlist gate).
+	return Object.hasOwn(MIME_BY_EXT, ext)
+		? (MIME_BY_EXT[ext] as string)
+		: "application/octet-stream";
 }

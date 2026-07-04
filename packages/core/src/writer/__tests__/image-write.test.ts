@@ -155,6 +155,53 @@ describe("writeXlsx — picture write (F6.3)", () => {
 		expect((await wb.sheet("S2").images()).length).toBe(1); // was silently lost before the fix
 	});
 
+	// M6-analysis coverage: GIF is the third allowlisted type but had no end-to-end pin — the
+	// mime → imageN.gif part → content-type Default → re-read mime chain must round-trip like
+	// png/jpeg do.
+	it("round-trips a GIF end-to-end (part name, content type, mime)", async () => {
+		const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 7]); // "GIF89a" + junk
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "S",
+					rows: [[1]],
+					images: [
+						{
+							anchor: { from: { col: 2, row: 2 }, ext: { cx: 100, cy: 100 } },
+							bytes: gif,
+							mime: "image/gif",
+						},
+					],
+				},
+			],
+		});
+		expect(entryNames(bytes)).toContain("xl/media/image1.gif");
+		const types = new TextDecoder().decode(await openZip(bytes).read("[Content_Types].xml"));
+		expect(types).toContain('<Default Extension="gif" ContentType="image/gif"/>');
+		const [img] = await (await openXlsx(bytes)).sheet("S").images();
+		expect(img?.mime).toBe("image/gif");
+		expect(img?.bytes).toEqual(gif);
+	});
+
+	// M6-analysis coverage: a picture name full of XML-special characters is escaped on write
+	// (escapeAttr) and decoded on read — pin the whole trip, not just the machinery.
+	it("round-trips a picture name with XML-special characters", async () => {
+		const name = `O'Brien & <"Logo">`;
+		const wb = await openXlsx(
+			await writeXlsx({
+				sheets: [
+					{
+						name: "S",
+						rows: [[1]],
+						images: [oneCell(1, 1, PNG(1), { name })],
+					},
+				],
+			}),
+		);
+		const [img] = await wb.sheet("S").images();
+		expect(img?.name).toBe(name);
+	});
+
 	it("streamed and buffered writers read back to the same images", async () => {
 		const images = [
 			oneCell(1, 1, PNG(1), { name: "A" }),

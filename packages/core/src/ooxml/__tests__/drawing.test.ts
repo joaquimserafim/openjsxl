@@ -112,6 +112,31 @@ describe("parseDrawing", () => {
 		expect(parseDrawing(two)[0]?.ext).toBeUndefined(); // a two-cell anchor must carry no ext
 	});
 
+	// M6-analysis regression: shared bounds. The tolerant reader CLAMPS a producer's out-of-range
+	// anchor numbers into the writer's legal ranges (grid cols/rows, EMU 0..2³¹−1) instead of
+	// returning them verbatim — one malformed picture must never make a whole file un-rewritable.
+	it("clamps out-of-range anchor values into shared writer bounds", () => {
+		const negOff = wsDr(
+			`<oneCellAnchor><from><col>1</col><colOff>-5000</colOff><row>1</row><rowOff>-1</rowOff></from>` +
+				`<ext cx="100" cy="100"/>${pic(1, "P", "rId1")}</oneCellAnchor>`,
+		);
+		expect(parseDrawing(negOff)[0]?.from).toEqual({ col: 2, row: 2, colOff: 0, rowOff: 0 });
+
+		const hugeExt = wsDr(
+			`<oneCellAnchor><from><col>1</col><row>1</row></from>` +
+				`<ext cx="2147483648" cy="100"/>${pic(1, "P", "rId1")}</oneCellAnchor>`,
+		);
+		expect(parseDrawing(hugeExt)[0]?.ext).toEqual({ cx: 0x7fffffff, cy: 100 }); // 2³¹ → 2³¹−1
+
+		const offGrid = wsDr(
+			`<twoCellAnchor><from><col>999999999</col><row>1</row></from>` +
+				`<to><col>2</col><row>999999999999999</row></to>${pic(1, "P", "rId1")}</twoCellAnchor>`,
+		);
+		const [img] = parseDrawing(offGrid);
+		expect(img?.from.col).toBe(16384); // Excel's last column (MAX_COL)
+		expect(img?.to?.row).toBe(1048576); // Excel's last row (MAX_ROW)
+	});
+
 	// Milestone review (F6.4) regression: the anchor ELEMENT names its shape — a oneCellAnchor is
 	// positioned by <ext>, a twoCellAnchor by <to>. The parser must return EXACTLY ONE of the two,
 	// matching what the writer accepts, so a malformed anchor can't produce a record the writer then
@@ -166,5 +191,17 @@ describe("mimeForMediaPath", () => {
 		expect(mimeForMediaPath("x.emf")).toBe("image/x-emf");
 		expect(mimeForMediaPath("x.weird")).toBe("application/octet-stream");
 		expect(mimeForMediaPath("noext")).toBe("application/octet-stream");
+	});
+
+	// M6-analysis regression: an Object.prototype key as the extension must degrade to the generic
+	// type — a hostile part named image1.constructor used to surface the Object constructor
+	// FUNCTION as the "mime", breaking SheetImage.mime's string contract (the reader-side twin of
+	// the writer's Object.hasOwn allowlist gate).
+	it("degrades prototype-key extensions to octet-stream, never a prototype member", () => {
+		for (const hostile of ["x.constructor", "x.__proto__", "x.hasOwnProperty", "x.valueOf"]) {
+			const mime = mimeForMediaPath(hostile);
+			expect(typeof mime).toBe("string");
+			expect(mime).toBe("application/octet-stream");
+		}
 	});
 });
