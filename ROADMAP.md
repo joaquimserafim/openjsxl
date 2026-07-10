@@ -75,7 +75,7 @@ Status: ☐ not started · ◐ in progress · ☑ done
 | **0.4** | Styles | Read + write fonts, fills, borders, alignment, number formats | ☑ |
 | **0.5** | Fidelity + streaming writer | Comments write, formula text, theme fidelity; constant-memory writer; benchmark harness | ☑ |
 | **0.6** | Images | drawingML picture read + anchored write; native lane deferred (0.5 benchmarks: pure-TS within ~1.5× of native calamine) | ☑ |
-| **0.7** | More formats | `.xlsb`, `.ods`, legacy `.xls` (BIFF8) read | ☐ |
+| **0.7** | More formats | `.ods`, `.xlsb`, `.csv`/`.tsv` read (legacy `.xls` deferred to M8+) | ☐ |
 | **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point; text fidelity ships in 0.5) | ☐ |
 | **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus | ☐ |
 | **1.0** | Stable | Frozen API, full `.xlsx` round-trip fidelity, docs site, published benchmarks | ☐ |
