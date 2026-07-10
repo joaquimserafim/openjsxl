@@ -1148,10 +1148,237 @@ unchanged, so the F6.4 openpyxl validation stands transitively.
 
 ---
 
-## M7+ — Later milestones (outline; expanded when reached)
+## M7 — More formats (v0.7)
 
-- **M7 — More formats (v0.7):** `.xlsb` (binary) read; `.ods` read; legacy `.xls`
-  (BIFF8) read.
+**Theme.** Read the spreadsheets people actually have. Three read-only formats: `.ods`
+(the LibreOffice / OpenDocument world), `.xlsb` (Excel's binary workbook — the default
+for huge grids), and legacy `.xls` (BIFF8 — the pre-2007 install base still behind
+countless "export" buttons). The writer stays `.xlsx`-only, so every new reader is
+automatically a converter through the existing bridge
+(`writeXlsx(workbookToInput(await openOds(bytes)))`) — which is the real-world job
+("user uploaded a spreadsheet", in whatever dialect). Competitive frame: ExcelJS reads
+none of these, SheetJS reads all three — this milestone closes the ingestion-breadth gap
+while keeping the zero-dep / typed / tolerant story.
+
+**Milestone-wide decisions** (set here so features don't re-litigate):
+1. **Read-only.** No ods/xlsb/xls writers. Conversion = bridge → `writeXlsx`, validated
+   as everywhere: input Excel forbids (an over-long ods sheet name) fails TYPED on write,
+   never silently renamed — reader degrades, WRITER rejects.
+2. **One shared model.** Every format returns the SAME public `Workbook`/`Worksheet`
+   surface; accessors a format doesn't support DEGRADE (`images()` → `[]`, `style()` →
+   `undefined`, `themeXml` → `undefined`, …), never throw. Per-format fidelity is a
+   documented matrix, not a type fork. The multi-format seam is internal (an F7.1 design
+   task); existing xlsx classes, bytes, and tests stay untouched.
+3. **Explicit entry points** — `openOds` / `openXlsb` / `openXls` (+
+   `detectSpreadsheetFormat`); no auto-dispatching mega-function in core: a browser
+   bundle that only reads xlsx must not pay for BIFF/CFB (tree-shakability verified in
+   F7.4). `XlsxError` stays the one error type across formats.
+4. **Fidelity scope = the data.** Values + types (string/number/date/bool/error), cached
+   formula VALUES, sheet names/order, merges, `dimension`; visibility +
+   `numberFormat(ref)` where the format hands them over anyway (xlsb/xls); hyperlinks
+   where cheap (ods/xlsb). OUT for 0.7 (named, never silent): styles read, formula TEXT
+   (xlsb/xls store token streams — a decompiler is its own feature; ods stores
+   OpenFormula needing ref/separator translation), comments, images, geometry, and
+   streaming variants of the new readers (`streamSheetRows` stays xlsx-only).
+5. **BIFF8 only** for `.xls` (BIFF5/7 BOF → typed `unsupported`); encrypted inputs — xls
+   `FILEPASS` (incl. the ubiquitous default-password `VelvetSweatshop` files), ods
+   manifest `encryption-data` — fail typed, never garbage-parse.
+6. **Tolerant-reader rules span formats.** Shared grid bounds clamp/drop; adversarial
+   input is a first-class case: ods `number-*-repeated` bombs, CFB FAT cycles, BIFF
+   record-length lies, and SST `Continue` splits are each NAMED test cases, bounded in
+   time and memory (the F4.4/F4.6 precedents).
+7. **Oracle swap.** openpyxl reads none of these. The independent oracle is
+   **python-calamine** (reads all three) for values/types/dates on every fixture, plus
+   xlrd (xls) and pyxlsb (xlsb) as cheap second opinions. Scratchpad venvs, as always.
+   Crafted fixtures must ALSO parse in the oracles — a fixture only our reader accepts
+   proves nothing.
+
+**Standing gates** per feature: biome by exit code + tsc + vitest; adversarial review
+(finders + refuting verifiers; UNVERIFIED ≠ refuted — re-verify empirically) with
+confirmed findings fixed + pinned pre-commit; fixtures follow the data/README checklist
+(real-producer + crafted-edge per format). The writer is untouched all milestone — the
+in-tree golden pins must stay green; any feature touching SHARED code (a1 / dates / zip /
+format-code logic) additionally runs the full byte-identity recipe.
+
+**Dependency order:** F7.1 `.ods` (pure XML — reuses the tokenizer wholesale; defines the
+multi-format seam with the least new machinery) → F7.2 `.xlsb` (the binary-record layer:
+varint framing, RK, wide strings — shared with xls) → F7.3 `.xls` (CFB container + BIFF8,
+the biggest lift, lands on warmed-up binary muscle) → F7.4 (detection, conversion corpus,
+docs, bench lanes). One feature per session, each proceed-gated: "proceed" → implement →
+gates → adversarial review → report + commit message → WAIT for the owner's "commit".
+
+### F7.1 — `.ods` read: `openOds` ☐
+**Context.** An ODF spreadsheet is a zip whose first entry is a STORED `mimetype`
+(`application/vnd.oasis.opendocument.spreadsheet`) and whose sheets ALL live in one
+`content.xml` (`office:spreadsheet` → `table:table` → `table:table-row` →
+`table:table-cell`). Types are EXPLICIT — `office:value-type` plus a typed value
+attribute — so there is no style-based date detection at all; dates/times are ISO-8601
+strings, not serials. A different vocabulary over the same SAX tokenizer; the zip layer
+is reused verbatim.
+**Scope (in).** `openOds(source)` → the shared Workbook surface. Cell mapping:
+`float`/`percentage`/`currency` → number (`office:value` authoritative — display text may
+be locale-formatted); `boolean`; `string` (nested `text:p` paragraphs joined with `\n`;
+`text:s [text:c]` / `text:tab` / `text:line-break` expanded; `text:a xlink:href` captured
+as the cell's hyperlink); `date` (`office:date-value` → UTC-based `Date`, time-of-day
+kept — the serialToDate convention); `time` (`office:time-value` ISO duration → number as
+fraction of a day, documented). Formula cells read their CACHED value via the same typed
+attrs. Repeats (`table:number-columns-repeated` on cells/covered cells,
+`table:number-rows-repeated` on rows) materialize content-aware; merges from
+`table:number-columns/rows-spanned` + `covered-table-cell`; sheet names/order from table
+order. Container check tolerant: `mimetype` entry OR the content root's document class.
+**Scope (out — named, documented).** Formula text (OpenFormula `of:=…`, `[.A1]` refs, `;`
+separators — a translation feature of its own); data styles → `style(ref)` /
+`numberFormat(ref)` read `undefined`; sheet visibility (lives in `settings.xml` config
+items — sheets read visible); annotations (comments), images, geometry; flat `.fods`
+(single-file XML, no zip); encrypted ods (typed `unsupported`).
+**Design decisions (made).**
+- **The repeat bomb is THE ods adversarial case.** Trailing empty repeated cells/rows
+  (LibreOffice ends every sheet with a row repeated to the 2^20 grid edge) are DROPPED,
+  not materialized; mid-content repeats materialize but clamp at the shared grid bounds
+  (MAX_ROW/MAX_COL — reader degrades); total materialization is bounded by CONTENT,
+  never by attacker-chosen repeat counts.
+- One `content.xml` holds every sheet: the first sheet access parses the part ONCE and
+  caches all sheets' tables (documented — per-sheet laziness can't exist inside a single
+  part).
+- The multi-format seam lands here (under decision 2's constraints). Leaning: extract
+  public STRUCTURAL interfaces the existing xlsx classes already satisfy — no xlsx code
+  motion, no consumer type break (`instanceof` was never documented API); final call in
+  this feature's report.
+**Tasks**
+- [ ] `ods/` dir: container check + `content.xml` SAX parse → per-sheet typed cell
+      tables (repeats/covered/spans/links; caps + trailing-empty drop).
+- [ ] Multi-format seam + `openOds` + facade export; degrade wiring for unsupported
+      accessors.
+- [ ] Fixtures: real-producer LibreOffice `.ods` (typed-value matrix incl. date/time/
+      percentage/currency, formula-cached, merges, repeats, links; provenance per
+      data/README) + crafted edge fixture via the generator (repeat bombs, covered-cell
+      shapes, trailing-empty tail, encrypted-manifest reject).
+- [ ] Tests: type matrix vs python-calamine cell-for-cell; repeat clamp/drop bounds;
+      merges + links; every degrade case; xlsx suite untouched-green.
+- [ ] Adversarial review (hostile-input lens on repeats; model lens on the seam).
+**Acceptance.** Fixture values/types/dates match python-calamine cell-for-cell; a crafted
+repeat bomb parses (or rejects) in bounded time/memory; `openXlsx` behavior and the full
+existing suite are untouched.
+
+### F7.2 — `.xlsb` read: `openXlsb` ☐
+**Context.** Same OPC container as xlsx — `[Content_Types].xml` and `_rels/*.rels` are
+XML, so the F1.4 relationship graph is reused VERBATIM — but workbook / worksheets /
+sharedStrings / styles are BIFF12 binary parts (`.bin`): records framed as a 1–2-byte
+varint id + 1–4-byte varint length (7 data bits per byte, high bit = continuation). Cell
+semantics mirror xlsx exactly: shared-string indexes, style-index date detection (numFmt
+CODES are the same strings — `isDateFormatCode` + the builtin-id table are reused), and
+the 1904 flag in `BrtWbProp`.
+**Scope (in).** `openXlsb(source)` → shared surface. New `biff/` dir for primitives
+SHARED with F7.3: bounded record stream (BIFF12 varint framing), wide strings (uint32
+count + UTF-16LE), RK decode (30-bit int-or-float + ÷100 flag — identical in BIFF8).
+Parsers: `workbook.bin` (BrtBundleSh → name/visibility/rel id; BrtWbProp → 1904),
+`sharedStrings.bin` (BrtSSTItem — rich runs/phonetics skipped, text kept, the F1.5
+convention), `styles.bin` (BrtFmt/BrtXF → numFmtId per xf, feeding date detection AND
+`numberFormat(ref)`), `sheetN.bin` (cells BrtCellIsst/St/Rk/Real/Bool/Error/Blank +
+BrtFmlaNum/Str/Bool/Error cached values; BrtWsDim → `dimension`; BrtMergeCell → merges;
+BrtHLink → hyperlinks through the sheet's rels).
+**Scope (out — named).** Formula text (BIFF12 stores token streams — decompiler deferred,
+alongside xls's); `style(ref)` beyond numFmt; everything decision 4 already names.
+**Design decisions (made).**
+- The xlsx laziness idiom kept: open parses workbook + sst + styles; sheet parts parse on
+  first access.
+- The record reader is bounds-checked against its part: a lying record length fails
+  typed, never over-reads; UNKNOWN record ids are skipped by declared length
+  (forward-compatible, like unknown XML elements).
+- Fixture validity is proven in the oracles: hand-built fixtures must parse in pyxlsb AND
+  calamine before our tests trust them.
+**Tasks**
+- [ ] `biff/` record stream + wide strings + RK (+ unit tests incl. the RK corner
+      matrix).
+- [ ] `xlsb/` part parsers + `openXlsb` + seam wiring + facade export.
+- [ ] Fixtures: hand-built minimal + edge `.xlsb` via the generator's binary part helpers
+      (oracle-validated) + one real Excel-authored workbook (committed if we can author
+      one; else `local/`, CI-skipped — the POI precedent).
+- [ ] Tests: full cell-record matrix; RK corners (int/float/÷100/negative); style-driven
+      dates + 1904; merges/hyperlinks/visibility/dimension; truncation, lying-length, and
+      unknown-record degrades.
+- [ ] Adversarial review (hostile-input lens on framing; spec lens vs MS-XLSB).
+**Acceptance.** Fixtures match python-calamine cell-for-cell (pyxlsb agreeing on the
+hand-built ones); hostile record streams fail typed in bounded time; xlsx suite green.
+
+### F7.3 — Legacy `.xls` read (BIFF8): `openXls` ☐
+**Context.** Pre-2007 Excel: a CFB/OLE2 compound file (FAT/miniFAT sector chains +
+directory) whose `Workbook` stream holds BIFF8 records (uint16 id + uint16 len ≤ 8224;
+`Continue` records extend payloads): the globals substream (CODEPAGE, DATEMODE, FORMAT,
+XF, SST, BOUNDSHEET, …) followed by one substream per sheet at the BOUNDSHEET offsets.
+BIFF8 Unicode strings flag compressed-vs-UTF-16 PER SEGMENT, and the flag RESTATES at
+every Continue boundary — the classic implementation trap. Date detection is XF `ifmt` +
+FORMAT records with the same builtin-id semantics as ooxml — the shared format-code
+logic is reused.
+**Scope (in).** `cfb/` container reader — format-agnostic (the `zip/` analogue): v3/v4
+sector sizes, FAT + miniFAT chains with cycle guards, directory walk, stream extraction.
+`xls/` BIFF8 parser: BOF version gate (0x0600 only, else typed `unsupported`);
+`FILEPASS` → typed `unsupported` (encrypted, incl. `VelvetSweatshop` defaults); sheets
+from BOUNDSHEET (name/order/visibility; non-worksheet substreams skipped); cells
+LABELSST / RK / MULRK / NUMBER / BOOLERR / LABEL (rare inline) / FORMULA cached values
+(inline num; string results via the following STRING record; bool/err via the 0xFFFF
+tag); SST with Continue-safe segment decoding, rich runs + phonetics skipped;
+MERGEDCELLS → merges; DIMENSIONS → `dimension`; `numberFormat(ref)` via XF/FORMAT;
+DATEMODE → 1904.
+**Scope (out — named).** Hyperlinks (HLINK's OLE-moniker payloads — deferred); styles
+beyond numFmt; BIFF5/7 (typed); charts/macros/pivots (substreams/records skipped);
+codepage tables (BIFF8 compressed strings are high-byte-zero UTF-16 — byte = code unit,
+no tables needed; pre-BIFF8 is where codepages live, and it is rejected).
+**Design decisions (made).**
+- `cfb/` knows nothing about xls — it is the container seam, exactly like `zip/`.
+- BIFF8's native grid (256 × 65 536) sits inside the shared bounds — no clamping needed;
+  out-of-grid refs from corrupt records drop the cell (degrade), never throw.
+- The `Workbook` stream materializes once (small relative to sheet XML); per-sheet
+  substreams parse lazily by BOUNDSHEET offset — the xlsx idiom again.
+- Hostile-container cases are first-class: FAT cycles, sector indexes past EOF, directory
+  loops, a BOUNDSHEET offset outside the stream — all typed or degraded, bounded.
+**Tasks**
+- [ ] `cfb/` reader + cycle/bounds guards + crafted-container tests.
+- [ ] `xls/` globals (SST/Continue strings, XF/FORMAT, DATEMODE, BOUNDSHEET) + sheet
+      substream cells + `openXls` + seam wiring + facade export.
+- [ ] Fixtures: real-producer LibreOffice `.xls` (committed, provenance) + POI corpus in
+      `local/` (CI-skipped) + hand-built minimal CFB/BIFF8 via the generator for the
+      Continue-split string matrix and the reject cases (BIFF5, FILEPASS, FAT cycle).
+- [ ] Tests: Continue-boundary string matrix (flag flips mid-string); RK/MULRK; the
+      cached-formula quartet; dates in both epochs; every reject/degrade case.
+- [ ] Adversarial review (container lens on CFB; algorithm lens on Continue/SST).
+**Acceptance.** Fixtures match python-calamine AND xlrd cell-for-cell (Continue-split
+strings exact); encrypted/legacy inputs fail typed; crafted hostile containers stay
+bounded; xlsx suite green.
+
+### F7.4 — Detection, conversion corpus, docs + bench lanes ☐
+**Scope (in).** `detectSpreadsheetFormat(bytes)` → `'xlsx' | 'xlsb' | 'ods' | 'xls' |
+undefined` (zip → peek `[Content_Types].xml` / `mimetype`; CFB magic → xls; cheap,
+allocation-light). Cross-format equivalence corpus: ONE logical workbook authored as
+.xlsx/.xlsb/.ods/.xls reads to the SAME value snapshot across all four readers; the
+corpus property extends across formats — every readable non-xlsx fixture CONVERTS
+(`workbookToInput` → `writeXlsx` → `openXlsx`) with values/types/merges lossless or
+fails TYPED. Example `11-read-anything.mjs` (detect → open → convert to xlsx). Docs:
+README matrix ("reads xlsx/xlsm, xlsb, ods, xls — writes xlsx") + per-format
+fidelity/drop tables in all three READMEs (+ the CLAUDE.md repo map gains the new dirs).
+Verify `.xlsm`/`.xltx` already open today (vba/template parts ignored via rels) and pin
+it with a fixture. Tree-shaking check: a consumer bundling only `openXlsx` must not
+carry BIFF/CFB/ODS code (`sideEffects` honest; measured with a small esbuild probe in
+the scratchpad). Bench: read lanes for the three formats vs python-calamine, published
+to docs/benchmarks.md.
+**Tasks**
+- [ ] `detectSpreadsheetFormat` + tests (each format + junk + empty + truncated).
+- [ ] Equivalence corpus (four containers, one snapshot) + the cross-format conversion
+      property in the corpus test.
+- [ ] Example 11 + examples README/package.json wiring; all examples green.
+- [ ] README/core/facade docs matrix + per-format drop lists + CLAUDE.md repo map;
+      xlsm/xltx fixture pin.
+- [ ] Tree-shake probe; bench read lanes + benchmarks.md refresh.
+- [ ] Full-milestone adversarial review (cross-format lens), M5/M6-analysis style.
+**Acceptance.** One snapshot across four containers; the conversion property holds over
+the whole corpus; docs enumerate per-format drops exactly; the bench table carries the
+new lanes. Release prep + the 0.7 bump happen ONLY at the owner's explicit request
+(CLAUDE.md #4).
+
+---
+
+## M8+ — Later milestones (outline; expanded when reached)
+
 - **Deferred — native lane:** the optional `@openjsxl/native` napi-rs binding to Rust
   `calamine` (and a WASM build) behind the zip/xml interface. Deferred by the F5.5
   benchmark evidence (see the M6 re-scope note); revisit if a workload shifts the math.
