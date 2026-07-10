@@ -504,6 +504,18 @@ const xlsb = [
 	},
 ];
 
+// ── Crafted delimited-text fixture (.csv) (F7.3) ─────────────────────────────────────────────────
+// A realistic CSV exercising the reader: a header row, a quoted field containing a comma AND an
+// embedded newline, an escaped quote (`""`), a leading-zero id that must stay a string, mixed
+// number/boolean/string types, and CRLF line endings (what Excel writes). Plain text, so it's its
+// own deterministic "generator".
+const csvBasic =
+	"id,name,qty,active\r\n" +
+	'007,"Acme, Inc.",42,TRUE\r\n' +
+	'008,"multi\nline",7,false\r\n' +
+	'009,"a ""quoted"" word",0,TRUE\r\n';
+const csvFixtures = [{ file: "basic.csv", text: csvBasic }];
+
 const dataDir = new URL("../data/", import.meta.url);
 await mkdir(dataDir, { recursive: true });
 
@@ -536,4 +548,10 @@ for (const { file, parts } of xlsb) {
 	const outUrl = new URL(file, dataDir);
 	await writeFile(outUrl, packParts(parts));
 	console.log(`wrote ${fileURLToPath(outUrl)} (crafted .xlsb fixture)`);
+}
+
+for (const { file, text } of csvFixtures) {
+	const outUrl = new URL(file, dataDir);
+	await writeFile(outUrl, new TextEncoder().encode(text));
+	console.log(`wrote ${fileURLToPath(outUrl)} (crafted .csv fixture)`);
 }

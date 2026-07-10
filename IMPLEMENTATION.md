@@ -1364,7 +1364,7 @@ scratchpad.
   verified against an oracle, and reading the WRONG bit would risk mis-dating the far more common
   1900 files — so xlsb dates use the 1900 epoch, documented, pending a real 1904 .xlsb.
 
-### F7.3 — `.csv` / `.tsv` read: `openCsv` ☐
+### F7.3 — `.csv` / `.tsv` read: `openCsv` ☑
 **Context.** Delimited text is the universal export (Google Sheets, Excel "Save as CSV",
 every DB / BI / analytics tool) and the single most common "user uploaded a spreadsheet"
 case. No container, no XML, no binary records — but "robust CSV" is deceptively subtle,
@@ -1402,22 +1402,42 @@ other new readers); quote/escape dialects beyond RFC 4180 + the `""` convention.
 - No zip, so `maxPartBytes` doesn't apply; the input bytes ARE the bound. `openCsv` accepts
   `Uint8Array | ArrayBuffer | string` (text passed straight through, decoded once otherwise).
 **Tasks**
-- [ ] `csv/` dir: the scanner state machine → typed cell rows (quoting, embedded
+- [x] `csv/` dir: the scanner state machine → typed cell rows (quoting, embedded
       newlines/delimiters, CRLF/CR/LF, BOM, delimiter auto-sniff, conservative inference).
-- [ ] `openCsv` + `CsvWorksheet` (reuse the seam) + `CsvReadOptions` + facade export.
-- [ ] Fixtures: crafted `.csv`/`.tsv` via the generator (quoted fields with commas +
-      embedded newlines + escaped quotes; CRLF; BOM; semicolon-delimited; a numeric/boolean/
-      string type matrix; a ragged file; a date-looking column that must stay string).
-- [ ] Tests: parse matrix vs Python's stdlib `csv` (RFC 4180 reference) cell-for-cell;
-      delimiter sniffing; inference boundaries (`"007"` stays string? leading-zero decision
-      documented; `1e3`, `-0`, `1.5`, `NaN` cases); grid-clamp bounds; the bridge
-      (`workbookToInput` → `writeXlsx`) round-trips values.
-- [ ] Adversarial review (hostile-input lens on quote/newline pathologies; model lens on
-      inference correctness — no fabricated dates, no lost precision on big integers).
+- [x] `openCsv` + `CsvWorksheet` (reuse the seam) + `CsvReadOptions` + facade export.
+- [x] Fixture: crafted `basic.csv` via the generator (quoted comma, embedded newline, escaped
+      quote, leading-zero ids, mixed types, CRLF). The `.tsv` / BOM / semicolon / ragged /
+      date-stays-string cases are covered by inline-string tests (openCsv accepts a string).
+- [x] Tests: parse matrix vs Python's stdlib `csv` (RFC 4180 reference) cell-for-cell (18 cases);
+      delimiter sniffing; inference boundaries (`007`/`00` stay strings; big-int precision;
+      `1e3`, `-0`, `NaN`/`Infinity`/`0x`/`1,000` stay strings); the bridge round-trips values.
+- [x] Adversarial review (hostile-input on quote/newline pathologies + grid materialization;
+      model lens on inference correctness).
 **Acceptance.** The parse matrix matches Python's `csv` cell-for-cell (quoting + embedded
 newlines exact); a pathological unterminated-quote / million-column file stays bounded;
 inference never fabricates a date and never corrupts a string that looks numeric-ish;
 `openXlsx` behavior and the full existing suite are untouched.
+
+**Landed (uncommitted, awaiting owner approval).** `openCsv(source, options?)` — SYNCHRONOUS (CSV
+has no container to decompress), accepting `Uint8Array | ArrayBuffer | string` and returning the
+SAME public `Workbook` as `openXlsx` (one sheet). `csv/parse.ts`: an RFC 4180 char-scanner
+(`parseDelimited` — quoted fields, `""` escape, embedded delimiters/newlines, CRLF/CR/LF, BOM strip;
+a quote is special ONLY at field start; unterminated quote → one field to EOF, bounded) +
+conservative inference (`inferCsvValue` — TRUE/FALSE→boolean; a plain numeric literal→number EXCEPT
+a leading-zero integer or a big integer beyond `Number.MAX_SAFE_INTEGER`, both kept STRING; dates
+NEVER inferred) + `sniffDelimiter`. `reader/csv.ts`: `openCsv` + `CsvWorksheet implements Worksheet`
+(cells + synthesized dimension; everything else degrades) + `CsvReadOptions` (delimiter / sheetName /
+inferTypes). The scanner is pinned CELL-FOR-CELL against Python's stdlib `csv` on 18 cases; fixture
+`basic.csv` cross-checked. Gate: biome 0 / tsc 0 / **580 tests** (+34) / xlsx suite untouched-green.
+**Adversarial review (3-lens workflow → refuting verifiers; 2 candidates → 0 CONFIRMED):** the
+mid-field-quote divergence (a `"` mid-field was wrongly opening a quoted region — `a"b,c` →
+`[["ab,c"]]` instead of `[['a"b','c']]`) was found EMPIRICALLY and fixed BEFORE the verify pass (quote
+special only at `field === ""`; pinned by 4 Python-validated cases), so the verifier confirmed the
+current code correct; the grid-materialization "DoS" was refuted — the intermediate `string[][]` is
+O(input) with no amplification (unlike ods there's no repeat/expansion), empirically bounded
+(200k-col grid ⇐ ~1.3 MB input, 26 ms / 35 MB). Probes stayed in the scratchpad.
+**Note (owner-notified):** the runnable `.csv` example + `detectSpreadsheetFormat` land in F7.4
+(which extends `examples/11-other-formats.mjs`); F7.3 ships the reader + tests + fixture.
 
 ### F7.4 — Detection, conversion corpus, docs + bench lanes ☐
 **Scope (in).** `detectSpreadsheetFormat(bytes)` → `'xlsx' | 'xlsb' | 'ods' | 'csv' |

@@ -50,6 +50,12 @@ so they are safe to commit and diff.
   cases for `openOds`: a manifest declaring `manifest:encryption-data` (→ `unsupported`), a text
   ODF `mimetype` (→ `unsupported`), and a container missing `content.xml` (→ `missing-part`).
 
+- **`basic.csv`** — a delimited-text fixture (F7.3) exercising the CSV reader: a header row, a
+  quoted field with a comma (`"Acme, Inc."`), an embedded newline inside a quoted field, an escaped
+  quote (`""`), leading-zero ids that must stay strings, mixed number/boolean/string types, and
+  **CRLF** line endings (what Excel writes). Its parse is pinned against Python's stdlib `csv` (the
+  RFC 4180 reference); `reader/__tests__/csv.test.ts` asserts the reader agrees cell-for-cell.
+
 - **`xlsb-basic.xlsb`** — a hand-crafted Excel Binary Workbook (F7.2): the same OPC container as
   `.xlsx` (rels + content-types are XML) with **BIFF12 binary** workbook/worksheets/sharedStrings/
   styles parts. Covers every cell record — shared string, RK int, real double, RK ÷100

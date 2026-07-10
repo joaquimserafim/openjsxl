@@ -1,0 +1,5 @@
+id,name,qty,active
+007,"Acme, Inc.",42,TRUE
+008,"multi
+line",7,false
+009,"a ""quoted"" word",0,TRUE
