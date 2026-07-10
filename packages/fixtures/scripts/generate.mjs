@@ -319,6 +319,191 @@ const ods = [
 	},
 ];
 
+// ── Hand-crafted Excel Binary Workbook (.xlsb) fixture (F7.2) ────────────────────────────────────
+// Same OPC container as .xlsx (rels + content-types are XML), but workbook/worksheets/sharedStrings/
+// styles are BIFF12 binary parts. Byte layouts validated against pyxlsb AND python-calamine (both
+// read this file's values); a real Excel-authored .xlsb is a welcome upgrade. Records are framed as
+// a variable-width id + a 7-bit varint length + payload; ids follow pyxlsb's byte-combined encoding,
+// which reproduces the exact bytes Excel writes.
+const enc16 = (s) => Buffer.from(s, "utf16le");
+const bu16 = (v) => {
+	const b = Buffer.alloc(2);
+	b.writeUInt16LE(v & 0xffff);
+	return b;
+};
+const bu32 = (v) => {
+	const b = Buffer.alloc(4);
+	b.writeUInt32LE(v >>> 0);
+	return b;
+};
+const bf64 = (v) => {
+	const b = Buffer.alloc(8);
+	b.writeDoubleLE(v);
+	return b;
+};
+const bwstr = (s) => Buffer.concat([bu32(s.length), enc16(s)]);
+const brkInt = (n) => {
+	const b = Buffer.alloc(4);
+	b.writeInt32LE((n << 2) | 0x02);
+	return b;
+};
+const brkFrac = (n) => {
+	// n stored with the ÷100 flag → the reader yields n/100.
+	const b = Buffer.alloc(4);
+	b.writeInt32LE((n << 2) | 0x03);
+	return b;
+};
+const brid = (c) => (c < 0x80 ? Buffer.from([c]) : Buffer.from([c & 0xff, c >> 8]));
+const brlen = (n) => {
+	const out = [];
+	let v = n;
+	do {
+		let b = v & 0x7f;
+		v >>>= 7;
+		if (v) b |= 0x80;
+		out.push(b);
+	} while (v);
+	return Buffer.from(out);
+};
+const brec = (c, p = Buffer.alloc(0)) => Buffer.concat([brid(c), brlen(p.length), p]);
+// record ids (pyxlsb)
+const B = {
+	ROW: 0x0000,
+	NUM: 0x0002,
+	BOOLERR: 0x0003,
+	BOOL: 0x0004,
+	FLOAT: 0x0005,
+	STRING: 0x0007,
+	FSTR: 0x0008,
+	FFLOAT: 0x0009,
+	WS: 0x0181,
+	WS_E: 0x0182,
+	SD: 0x0191,
+	SD_E: 0x0192,
+	DIM: 0x0194,
+	HL: 0x03ee,
+	WB: 0x0183,
+	WB_E: 0x0184,
+	SHS: 0x018f,
+	SHS_E: 0x0190,
+	SH: 0x019c,
+	SST: 0x019f,
+	SST_E: 0x01a0,
+	SI: 0x0013,
+	SS: 0x0296,
+	SS_E: 0x0297,
+	CX: 0x04e9,
+	CX_E: 0x04ea,
+	XF: 0x002f,
+};
+const bcell = (id, col, style, val) => brec(id, Buffer.concat([bu32(col), bu32(style), val]));
+const bxf = (ifmt) =>
+	brec(
+		B.XF,
+		Buffer.concat([
+			bu16(0xffff),
+			bu16(ifmt),
+			bu16(0),
+			bu16(0),
+			bu16(0),
+			Buffer.from([0, 0]),
+			bu16(0),
+		]),
+	);
+const brow = (r) => brec(B.ROW, Buffer.concat([bu32(r), Buffer.alloc(12)]));
+const bdim = (r1, r2, c1, c2) =>
+	brec(B.DIM, Buffer.concat([bu32(r1), bu32(r2), bu32(c1), bu32(c2)]));
+
+// Sheet1: string, int(42), real(3.14159), percentage(0.25), date(43831, style 1→builtin fmt 14),
+// bool, error(#DIV/0!); row 2 a cached-number formula (84) and a cached-string formula ("cached").
+const xlsbSheet1 = Buffer.concat([
+	brec(B.WS),
+	bdim(0, 1, 0, 6),
+	brec(B.SD),
+	brow(0),
+	bcell(B.STRING, 0, 0, bu32(0)),
+	bcell(B.NUM, 1, 0, brkInt(42)),
+	bcell(B.FLOAT, 2, 0, bf64(3.14159)),
+	bcell(B.NUM, 3, 0, brkFrac(25)),
+	bcell(B.NUM, 4, 1, brkInt(43831)),
+	bcell(B.BOOL, 5, 0, Buffer.from([1])),
+	bcell(B.BOOLERR, 6, 0, Buffer.from([0x07])),
+	brow(1),
+	bcell(B.FFLOAT, 0, 0, bf64(84)),
+	bcell(B.FSTR, 1, 0, bwstr("cached")),
+	brec(B.SD_E),
+	brec(B.HL, Buffer.concat([bu32(0), bu32(0), bu32(7), bu32(7), bwstr("rId1")])),
+	brec(B.WS_E),
+]);
+const xlsbSheet2 = Buffer.concat([
+	brec(B.WS),
+	bdim(0, 0, 0, 0),
+	brec(B.SD),
+	brow(0),
+	bcell(B.STRING, 0, 0, bu32(1)),
+	brec(B.SD_E),
+	brec(B.WS_E),
+]);
+const xlsbSheet3 = Buffer.concat([
+	brec(B.WS),
+	bdim(0, 0, 0, 0),
+	brec(B.SD),
+	brow(0),
+	bcell(B.STRING, 0, 0, bu32(0)),
+	brec(B.SD_E),
+	brec(B.WS_E),
+]);
+const xlsbSst = Buffer.concat([
+	brec(B.SST, Buffer.concat([bu32(2), bu32(2)])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("hello")])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("second")])),
+	brec(B.SST_E),
+]);
+const xlsbStyles = Buffer.concat([
+	brec(B.SS),
+	brec(B.CX, bu32(2)),
+	bxf(0),
+	bxf(14),
+	brec(B.CX_E),
+	brec(B.SS_E),
+]);
+const xlsbWorkbook = Buffer.concat([
+	brec(B.WB),
+	brec(B.SHS),
+	brec(B.SH, Buffer.concat([bu32(0), bu32(1), bwstr("rId1"), bwstr("Sheet1")])),
+	brec(B.SH, Buffer.concat([bu32(0), bu32(2), bwstr("rId2"), bwstr("Sheet2")])),
+	brec(B.SH, Buffer.concat([bu32(1), bu32(3), bwstr("rId4"), bwstr("Hidden")])),
+	brec(B.SHS_E),
+	brec(B.WB_E),
+]);
+const XLSB_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet2.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet3.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/sharedStrings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/><Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>`;
+const xlsb = [
+	{
+		file: "xlsb-basic.xlsb",
+		parts: [
+			{ name: "[Content_Types].xml", xml: XLSB_CT },
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.bin"/></Relationships>`,
+			},
+			{ name: "xl/workbook.bin", data: xlsbWorkbook },
+			{
+				name: "xl/_rels/workbook.bin.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${R_NS}/worksheet" Target="worksheets/sheet1.bin"/><Relationship Id="rId2" Type="${R_NS}/worksheet" Target="worksheets/sheet2.bin"/><Relationship Id="rId4" Type="${R_NS}/worksheet" Target="worksheets/sheet3.bin"/><Relationship Id="rId5" Type="${R_NS}/sharedStrings" Target="sharedStrings.bin"/><Relationship Id="rId6" Type="${R_NS}/styles" Target="styles.bin"/></Relationships>`,
+			},
+			{ name: "xl/worksheets/sheet1.bin", data: xlsbSheet1 },
+			{
+				name: "xl/worksheets/_rels/sheet1.bin.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${R_NS}/hyperlink" Target="https://example.com/x" TargetMode="External"/></Relationships>`,
+			},
+			{ name: "xl/worksheets/sheet2.bin", data: xlsbSheet2 },
+			{ name: "xl/worksheets/sheet3.bin", data: xlsbSheet3 },
+			{ name: "xl/sharedStrings.bin", data: xlsbSst },
+			{ name: "xl/styles.bin", data: xlsbStyles },
+		],
+	},
+];
+
 const dataDir = new URL("../data/", import.meta.url);
 await mkdir(dataDir, { recursive: true });
 
@@ -345,4 +530,10 @@ for (const { file, parts } of ods) {
 	const outUrl = new URL(file, dataDir);
 	await writeFile(outUrl, packParts(parts));
 	console.log(`wrote ${fileURLToPath(outUrl)} (crafted .ods fixture)`);
+}
+
+for (const { file, parts } of xlsb) {
+	const outUrl = new URL(file, dataDir);
+	await writeFile(outUrl, packParts(parts));
+	console.log(`wrote ${fileURLToPath(outUrl)} (crafted .xlsb fixture)`);
 }

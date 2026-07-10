@@ -50,6 +50,16 @@ so they are safe to commit and diff.
   cases for `openOds`: a manifest declaring `manifest:encryption-data` (→ `unsupported`), a text
   ODF `mimetype` (→ `unsupported`), and a container missing `content.xml` (→ `missing-part`).
 
+- **`xlsb-basic.xlsb`** — a hand-crafted Excel Binary Workbook (F7.2): the same OPC container as
+  `.xlsx` (rels + content-types are XML) with **BIFF12 binary** workbook/worksheets/sharedStrings/
+  styles parts. Covers every cell record — shared string, RK int, real double, RK ÷100
+  (percentage), a date-styled RK (builtin numFmt 14), boolean, error (`#DIV/0!`), and cached
+  number/string formula results — plus a hyperlink, a `<dimension>`, a second sheet, and a hidden
+  sheet. **Byte layouts validated against both pyxlsb and python-calamine** (both read its values;
+  calamine's `sheets_metadata` confirms the hidden sheet). A real Excel-authored `.xlsb` is a
+  welcome upgrade — Excel isn't available here to author one. `reader/__tests__/xlsb.test.ts`
+  asserts values, style-driven date detection, the hyperlink, visibility, and the bridge to xlsx.
+
 ## Real-producer fixtures
 
 Files exported by actual applications, committed directly here. These catch quirks the

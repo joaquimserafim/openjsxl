@@ -1289,7 +1289,7 @@ PER-SHEET, so N repeat-bomb sheets materialized N×2M cells and OOM'd from a few
 to a DOCUMENT-WIDE `totalCells` budget. Bonus hardening: a grid-edge span that clamps to a single-cell
 `"XFD1:XFD1"` range is dropped (not a merge). Probes stayed in the scratchpad.
 
-### F7.2 — `.xlsb` read: `openXlsb` ☐
+### F7.2 — `.xlsb` read: `openXlsb` ☑
 **Context.** Same OPC container as xlsx — `[Content_Types].xml` and `_rels/*.rels` are
 XML, so the F1.4 relationship graph is reused VERBATIM — but workbook / worksheets /
 sharedStrings / styles are BIFF12 binary parts (`.bin`): records framed as a 1–2-byte
@@ -1317,18 +1317,52 @@ own feature, deferred); `style(ref)` beyond numFmt; everything decision 4 alread
 - Fixture validity is proven in the oracles: hand-built fixtures must parse in pyxlsb AND
   calamine before our tests trust them.
 **Tasks**
-- [ ] `biff/` record stream + wide strings + RK (+ unit tests incl. the RK corner
+- [x] `biff/` record stream + wide strings + RK (+ unit tests incl. the RK corner
       matrix).
-- [ ] `xlsb/` part parsers + `openXlsb` + seam wiring + facade export.
-- [ ] Fixtures: hand-built minimal + edge `.xlsb` via the generator's binary part helpers
-      (oracle-validated) + one real Excel-authored workbook (committed if we can author
-      one; else `local/`, CI-skipped — the POI precedent).
-- [ ] Tests: full cell-record matrix; RK corners (int/float/÷100/negative); style-driven
-      dates + 1904; merges/hyperlinks/visibility/dimension; truncation, lying-length, and
-      unknown-record degrades.
-- [ ] Adversarial review (hostile-input lens on framing; spec lens vs MS-XLSB).
+- [x] `xlsb/` part parsers + `openXlsb` + seam wiring + facade export.
+- [x] Fixtures: hand-built `xlsb-basic.xlsb` via the generator's binary part helpers
+      (oracle-validated in pyxlsb AND calamine). A real Excel-authored workbook is a
+      welcome upgrade — Excel/LibreOffice aren't available here to author one.
+- [x] Tests: full cell-record matrix; RK corners (int/÷100/negative/double); style-driven
+      dates; hyperlinks/visibility/dimension; truncation, lying-length, unknown-record
+      degrades. *(merges + 1904 deferred — see below.)*
+- [x] Adversarial review (hostile-input lens on framing; spec lens vs MS-XLSB).
 **Acceptance.** Fixtures match python-calamine cell-for-cell (pyxlsb agreeing on the
 hand-built ones); hostile record streams fail typed in bounded time; xlsx suite green.
+
+**Landed (uncommitted, awaiting owner approval).** `openXlsb` returns the SAME public `Workbook`
+as `openXlsx`. New `biff/record.ts` (BIFF12 record layer: variable-id + 7-bit-varint-len framing,
+grounded in pyxlsb's source; RK decode int/÷100/double; UTF-16LE wide strings; EVERY field
+bounds-checked so truncated/lying/malformed input degrades, never throws or over-reads). New
+`xlsb/` parsers (workbook.bin → sheets + visibility; sharedStrings.bin; styles.bin → numFmtId per
+cellXf, reusing the xlsx `isDateFormatCode`/`isBuiltinDateId` — the latter newly exported from
+ooxml/styles) and `xlsb/sheet.ts` (the cell-record walker). `reader/xlsb.ts` = `openXlsb` +
+`XlsbWorksheet implements Worksheet`, reusing the zip reader + F1.4 rels graph verbatim (same OPC
+container). Reads: values (string / RK-int / real / RK-÷100 / bool / error / cached formula),
+style-driven date detection, `numberFormat(ref)`, hyperlinks (via sheet rels), dimension,
+visibility; everything else degrades. Fixture `xlsb-basic.xlsb` built by generate.mjs (a JS port of
+a Python builder validated against pyxlsb + calamine). **DE-RISK:** a hand-built .xlsb reads
+identically in pyxlsb AND calamine; date detection is validated via the MS-XLSB BrtXF iFmt@offset-2
+layout + unit tests (calamine itself does NOT date-convert .xlsb, so our reader is more capable).
+Gate: biome 0 / tsc 0 / **546 tests** (+18) / values cross-checked cell-for-cell vs calamine/pyxlsb
+/ xlsx suite untouched-green. Runnable example added: `examples/11-other-formats.mjs` reads a `.xlsb`
+and an `.ods` into the SAME Workbook API and converts the xlsb to xlsx via the bridge (all 11 examples
+green). F7.4 extends this example with `.csv` + `detectSpreadsheetFormat`.
+**Adversarial review (4-lens workflow → refuting verifiers; 9 candidates → 1 CONFIRMED, 8 refuted,
+fixed + pinned):** the cell style field was read as a full u32, but MS-XLSB §2.5.9 packs it as
+iStyleRef (24 bits) + fPhShow (1 bit) + reserved (7 bits) — an fPhShow=1 cell (CJK phonetic
+workbooks) carried a corrupted style index and silently lost date detection / number formats → mask
+to `& 0xffffff`; pinned by a test that fails without the mask (the committed fixture's style bytes
+all have the top 8 bits clear, so only a crafted fPhShow cell exposes it). Probes stayed in the
+scratchpad.
+**Scope refinements (owner-notified deviations from the F7.2 scope):**
+- **Merges DEFERRED for xlsb.** No independent oracle can verify a merge record without a real
+  Excel-authored .xlsb (pyxlsb doesn't parse merges; calamine's `to_python` doesn't surface them),
+  so shipping an unverifiable merge parser would violate the "crafted fixtures must parse in the
+  oracles" rule. `mergedCells` degrades to `[]`; revisit with a real .xlsb.
+- **1904 date system DEFERRED (defaults to 1900).** The `BrtWbProp` f1904 flag bit couldn't be
+  verified against an oracle, and reading the WRONG bit would risk mis-dating the far more common
+  1900 files — so xlsb dates use the 1900 epoch, documented, pending a real 1904 .xlsb.
 
 ### F7.3 — `.csv` / `.tsv` read: `openCsv` ☐
 **Context.** Delimited text is the universal export (Google Sheets, Excel "Save as CSV",
@@ -1408,7 +1442,8 @@ docs/benchmarks.md.
       text-but-not-CSV edge).
 - [ ] Equivalence corpus (four formats, one snapshot) + the cross-format conversion
       property in the corpus test.
-- [ ] Example 11 + examples README/package.json wiring; all examples green.
+- [ ] Extend example 11 (`11-other-formats.mjs` exists from F7.2 — reads .xlsb + .ods) with
+      `.csv` + `detectSpreadsheetFormat`; keep examples README/package.json wiring; all green.
 - [ ] README/core/facade docs matrix + per-format drop lists + CLAUDE.md repo map;
       xlsm/xltx fixture pin.
 - [ ] Tree-shake probe; bench read lanes + benchmarks.md refresh.

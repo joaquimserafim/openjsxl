@@ -15,6 +15,8 @@ export {
 	streamSheetRows,
 	Workbook,
 } from "./reader/workbook";
+// XLSB reader (F7.2) — open an Excel Binary Workbook and read the SAME public Workbook surface.
+export { openXlsb } from "./reader/xlsb";
 // Style model (F4.1) — shared by the reader (`Worksheet.style(ref)`) and, from F4.2, the writer.
 export type {
 	Alignment,

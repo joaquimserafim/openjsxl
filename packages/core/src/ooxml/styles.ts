@@ -92,7 +92,7 @@ export const BUILTIN_FORMATS: Readonly<Record<number, string>> = {
 	49: "@",
 };
 
-function isBuiltinDateId(id: number): boolean {
+export function isBuiltinDateId(id: number): boolean {
 	return (
 		(id >= 14 && id <= 22) ||
 		(id >= 27 && id <= 36) ||
