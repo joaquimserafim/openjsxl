@@ -1,7 +1,7 @@
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { parseStyles } from "../../ooxml";
-import { openXlsx, Worksheet } from "../workbook";
+import { openXlsx, XlsxWorksheet } from "../workbook";
 import { parseCellStyles } from "../worksheet";
 
 // Per-cell number formats (F2.3). Worksheet.numberFormat(ref) resolves a cell's style index
@@ -25,7 +25,7 @@ describe("Worksheet.numberFormat — real fixtures", () => {
 
 	it("is undefined when the workbook has no style table", () => {
 		// A Worksheet built with a style-less context can't resolve a format.
-		const ws = new Worksheet(
+		const ws = new XlsxWorksheet(
 			{ name: "S", path: "x", visible: true, state: "visible" },
 			'<c r="A1" s="1"><v>1</v></c>',
 			{

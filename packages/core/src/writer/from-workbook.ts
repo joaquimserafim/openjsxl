@@ -1,6 +1,6 @@
 import { XlsxError } from "../errors";
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1";
-import type { Workbook, Worksheet } from "../reader/workbook";
+import type { Workbook } from "../reader/workbook";
 import type {
 	Cell,
 	ColumnProps,
@@ -10,6 +10,7 @@ import type {
 	RowProps,
 	SheetImage,
 	SheetState,
+	Worksheet,
 } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
 

@@ -26,6 +26,7 @@ import type {
 	SheetImage,
 	SheetInfo,
 	SheetState,
+	Worksheet,
 } from "../types";
 import { openZip, type ZipArchive } from "../zip";
 import {
@@ -141,7 +142,11 @@ async function loadSheetImages(
 	return images;
 }
 
-export class Worksheet {
+// The xlsx-backed implementation of the public {@link Worksheet} interface (M7 renamed this from
+// `Worksheet` to make room for the multi-format seam — the public type is now the interface in
+// ../types, which this and the ODS reader's `OdsWorksheet` both satisfy). Bodies are unchanged.
+// Exported for white-box tests only; NOT re-exported from the package index, so not public API.
+export class XlsxWorksheet implements Worksheet {
 	/** Sheet name as shown on Excel's tab. */
 	readonly name: string;
 	readonly #info: SheetInfo;
@@ -365,6 +370,9 @@ export class Workbook {
 	readonly sheets: readonly SheetInfo[];
 	readonly #byName: Map<string, Worksheet>;
 	readonly #themeXml: string | undefined;
+	// Note: `Worksheet` here is the public interface (../types), so this same `Workbook` class is
+	// reused by every format's reader — the ODS reader builds `OdsWorksheet` instances and hands
+	// them to this constructor unchanged (F7.1).
 	// The parsed theme is computed on first resolveColor; `undefined` is a valid result (no theme
 	// part, or an unparseable one), so a separate flag records that the parse already ran.
 	#theme: ThemeColors | undefined;
@@ -543,7 +551,10 @@ export async function openXlsx(
 			// first Worksheet.images() call so a sheet whose images you never read costs no media I/O.
 			const loadImages = (): Promise<readonly SheetImage[]> =>
 				loadSheetImages(zip, path, rels);
-			byName.set(info.name, new Worksheet(info, xml, context, rels, commentsXml, loadImages));
+			byName.set(
+				info.name,
+				new XlsxWorksheet(info, xml, context, rels, commentsXml, loadImages),
+			);
 		}
 	}
 

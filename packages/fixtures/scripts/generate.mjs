@@ -222,6 +222,103 @@ const crafted = [
 	},
 ];
 
+// ── Hand-crafted OpenDocument spreadsheet (.ods) fixtures (F7.1) ────────────────────────────────
+// An .ods is a ZIP whose FIRST entry is a STORED `mimetype`; sheets all live in one content.xml.
+// packParts stores every entry in array order, so putting `mimetype` first yields an ODF-conformant
+// container. These cover the shapes a real producer (LibreOffice) would emit that odfpy won't easily
+// reproduce — the repeat-to-grid-edge tail (the "repeat bomb"), covered-cell merges, a hidden and an
+// empty sheet — plus the typed reject cases (encrypted, wrong document type, no content.xml).
+const ODF_NS =
+	'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+	'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" ' +
+	'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" ' +
+	'xmlns:xlink="http://www.w3.org/1999/xlink"';
+const MIMETYPE_ODS = "application/vnd.oasis.opendocument.spreadsheet";
+const odfManifest = (mediaType) =>
+	`${XMLD}\n<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">` +
+	`<manifest:file-entry manifest:full-path="/" manifest:media-type="${mediaType}"/>` +
+	`<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
+const odfContent = (body) =>
+	`${XMLD}\n<office:document-content ${ODF_NS} office:version="1.3"><office:body><office:spreadsheet>${body}</office:spreadsheet></office:body></office:document-content>`;
+
+// The edge sheet: row 1 has 6 real columns (one empty, one a hyperlink) then an empty repeat to the
+// 16 384-column edge; row 2 fills a value across 3 columns; rows 3-4 are a 2×2 covered-cell merge at
+// A3; row 5 repeats an empty row to the 2^20 grid edge (the bomb — must cost O(1) to read).
+const odsEdgeBody =
+	'<table:table table:name="Data">' +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="string"><text:p>hello</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="float" office:value="42"><text:p>42</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="boolean" office:boolean-value="true"><text:p>TRUE</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="date" office:date-value="2024-01-15"><text:p>2024-01-15</text:p></table:table-cell>' +
+	"<table:table-cell/>" +
+	'<table:table-cell office:value-type="string"><text:p><text:a xlink:href="https://example.com/">link</text:a></text:p></table:table-cell>' +
+	'<table:table-cell table:number-columns-repeated="16378"/>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="float" office:value="7" table:number-columns-repeated="3"><text:p>7</text:p></table:table-cell>' +
+	'<table:table-cell table:number-columns-repeated="16381"/>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="string" table:number-columns-spanned="2" table:number-rows-spanned="2"><text:p>merged</text:p></table:table-cell>' +
+	"<table:covered-table-cell/>" +
+	'<table:table-cell table:number-columns-repeated="16382"/>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	'<table:covered-table-cell table:number-columns-repeated="2"/>' +
+	'<table:table-cell table:number-columns-repeated="16382"/>' +
+	"</table:table-row>" +
+	'<table:table-row table:number-rows-repeated="1048571">' +
+	'<table:table-cell table:number-columns-repeated="16384"/>' +
+	"</table:table-row>" +
+	"</table:table>" +
+	'<table:table table:name="Hidden" table:visibility="collapse">' +
+	'<table:table-row><table:table-cell office:value-type="string"><text:p>secret</text:p></table:table-cell></table:table-row>' +
+	"</table:table>" +
+	'<table:table table:name="Blank"/>';
+
+const ods = [
+	{
+		file: "ods-edge.ods",
+		parts: [
+			{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) },
+			{ name: "content.xml", xml: odfContent(odsEdgeBody) },
+			{ name: "META-INF/manifest.xml", xml: odfManifest(MIMETYPE_ODS) },
+		],
+	},
+	{
+		// A valid ZIP whose manifest declares encryption — openOds must refuse it typed (unsupported).
+		file: "ods-encrypted.ods",
+		parts: [
+			{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) },
+			{ name: "content.xml", xml: odfContent('<table:table table:name="S"/>') },
+			{
+				name: "META-INF/manifest.xml",
+				xml:
+					`${XMLD}\n<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">` +
+					'<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml">' +
+					'<manifest:encryption-data manifest:checksum-type="SHA1"/></manifest:file-entry></manifest:manifest>',
+			},
+		],
+	},
+	{
+		// A valid ODF ZIP that is a TEXT document, not a spreadsheet — openOds must reject the mimetype.
+		file: "ods-not-spreadsheet.ods",
+		parts: [
+			{
+				name: "mimetype",
+				data: new TextEncoder().encode("application/vnd.oasis.opendocument.text"),
+			},
+			{ name: "content.xml", xml: `${XMLD}\n<office:document-content/>` },
+		],
+	},
+	{
+		// A ZIP with the right mimetype but NO content.xml — openOds must fail with missing-part.
+		file: "ods-no-content.ods",
+		parts: [{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) }],
+	},
+];
+
 const dataDir = new URL("../data/", import.meta.url);
 await mkdir(dataDir, { recursive: true });
 
@@ -242,4 +339,10 @@ for (const { file, parts } of crafted) {
 	const outUrl = new URL(file, dataDir);
 	await writeFile(outUrl, packParts(parts));
 	console.log(`wrote ${fileURLToPath(outUrl)} (crafted fixture)`);
+}
+
+for (const { file, parts } of ods) {
+	const outUrl = new URL(file, dataDir);
+	await writeFile(outUrl, packParts(parts));
+	console.log(`wrote ${fileURLToPath(outUrl)} (crafted .ods fixture)`);
 }

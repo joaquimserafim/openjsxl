@@ -1216,7 +1216,7 @@ exists, kept third for numbering) → F7.4 (detection, conversion corpus, docs, 
 lanes). One feature per session, each proceed-gated: "proceed" → implement → gates →
 adversarial review → report + commit message → WAIT for the owner's "commit".
 
-### F7.1 — `.ods` read: `openOds` ☐
+### F7.1 — `.ods` read: `openOds` ☑
 **Context.** An ODF spreadsheet is a zip whose first entry is a STORED `mimetype`
 (`application/vnd.oasis.opendocument.spreadsheet`) and whose sheets ALL live in one
 `content.xml` (`office:spreadsheet` → `table:table` → `table:table-row` →
@@ -1254,20 +1254,40 @@ items — sheets read visible); annotations (comments), images, geometry; flat `
   motion, no consumer type break (`instanceof` was never documented API); final call in
   this feature's report.
 **Tasks**
-- [ ] `ods/` dir: container check + `content.xml` SAX parse → per-sheet typed cell
+- [x] `ods/` dir: container check + `content.xml` SAX parse → per-sheet typed cell
       tables (repeats/covered/spans/links; caps + trailing-empty drop).
-- [ ] Multi-format seam + `openOds` + facade export; degrade wiring for unsupported
+- [x] Multi-format seam + `openOds` + facade export; degrade wiring for unsupported
       accessors.
-- [ ] Fixtures: real-producer LibreOffice `.ods` (typed-value matrix incl. date/time/
-      percentage/currency, formula-cached, merges, repeats, links; provenance per
-      data/README) + crafted edge fixture via the generator (repeat bombs, covered-cell
-      shapes, trailing-empty tail, encrypted-manifest reject).
-- [ ] Tests: type matrix vs python-calamine cell-for-cell; repeat clamp/drop bounds;
+- [x] Fixtures: real-producer `.ods` (odfpy — no local LibreOffice; typed matrix + formula +
+      merges + hyperlink + multi-sheet) + crafted edge/reject fixtures via the generator
+      (repeat bomb, covered-cell merge, hidden/empty sheets; encrypted / wrong-mimetype /
+      no-content rejects).
+- [x] Tests: type matrix vs python-calamine cell-for-cell; repeat clamp/drop bounds;
       merges + links; every degrade case; xlsx suite untouched-green.
-- [ ] Adversarial review (hostile-input lens on repeats; model lens on the seam).
+- [x] Adversarial review (hostile-input lens on repeats; model lens on the seam).
 **Acceptance.** Fixture values/types/dates match python-calamine cell-for-cell; a crafted
 repeat bomb parses (or rejects) in bounded time/memory; `openXlsx` behavior and the full
 existing suite are untouched.
+
+**Landed (uncommitted, awaiting owner approval → committed with this feature).** `openOds`
+returns the SAME public `Workbook` as `openXlsx`. **Seam:** `Worksheet` is now a structural
+INTERFACE (`types.ts`) — the `#private`-field class is nominally typed, so a parallel ODS class
+can't be assignable to it; instead the xlsx class became `XlsxWorksheet implements Worksheet`
+(pure rename, zero logic change), `OdsWorksheet implements Worksheet` is a plain data holder, and
+the format-agnostic `Workbook` class is REUSED. `Row` moved to `types.ts`. Public change: `Worksheet`
+was an exported class, now an exported interface — `instanceof Worksheet` breaks (undocumented, unused
+in-tree). `ods/content.ts` is a pure SAX parser (typed values; repeats with an O(1) empty-tail drop;
+covered-cell merges; `<text:a>` hyperlinks; a synthesized dimension); `reader/ods.ts` = `openOds` +
+`OdsWorksheet` + container/encryption/mimetype checks (typed `XlsxError`). Fixtures: real
+`odf-basic.ods` (odfpy, calamine-cross-checked) + crafted `ods-edge/-encrypted/-not-spreadsheet/
+-no-content.ods`. Bridge (`workbookToInput` → `writeXlsx`) converts `.ods` → `.xlsx`. Gate: biome 0 /
+tsc 0 / **528 tests** / cell-for-cell vs python-calamine / xlsx suite untouched-green.
+**Adversarial review (4-lens workflow → refuting verifiers; 9 candidates → 2 CONFIRMED, 5 refuted,
+both fixed + pinned):** (1) `parseOdsDate` shifted years 0–99 by +1900 (the `Date.UTC` two-digit-year
+trap — `0050-01-15` read as 1950; calamine reads year 50) → `setUTCFullYear`; (2) `MAX_ODS_CELLS` was
+PER-SHEET, so N repeat-bomb sheets materialized N×2M cells and OOM'd from a few KB of input → hoisted
+to a DOCUMENT-WIDE `totalCells` budget. Bonus hardening: a grid-edge span that clamps to a single-cell
+`"XFD1:XFD1"` range is dropped (not a merge). Probes stayed in the scratchpad.
 
 ### F7.2 — `.xlsb` read: `openXlsb` ☐
 **Context.** Same OPC container as xlsx — `[Content_Types].xml` and `_rels/*.rels` are

@@ -16,6 +16,14 @@ export type Cell =
 	| (CellBase & { readonly type: "date"; readonly value: Date })
 	| (CellBase & { readonly type: "error"; readonly value: string });
 
+/** A populated row from {@link Worksheet.rows}. Sparse: absent rows/cells are simply omitted. */
+export interface Row {
+	/** 1-based row index — from `<row r>`, or positional when the attribute is absent. */
+	readonly index: number;
+	/** Cells present in the row, in document order. Gaps are simply absent (sparse). */
+	readonly cells: readonly Cell[];
+}
+
 /**
  * A sheet tab's visibility (the `state` attribute on `<sheet>`). `hidden` sheets can be re-shown
  * from Excel's UI; `veryHidden` ones only through VBA or by editing the file. An absent or
@@ -263,4 +271,47 @@ export interface CellStyle {
 	readonly fill?: FillStyle;
 	readonly border?: BorderStyle;
 	readonly alignment?: Alignment;
+}
+
+// ── The reader's worksheet surface (multi-format seam, M7) ───────────────────────────────────────
+// `Worksheet` is a structural INTERFACE, not a class, so every format's reader can return the SAME
+// public shape: the xlsx reader's `XlsxWorksheet` and the ODS reader's `OdsWorksheet` both implement
+// it (F7.1). A format that can't express an accessor DEGRADES — returns `[]`/`undefined`/an empty
+// map — never throws. `Workbook.sheet(name)` returns this type.
+
+export interface Worksheet {
+	/** Sheet name as shown on the tab. */
+	readonly name: string;
+	/** Format-native part locator (xlsx: `xl/worksheets/sheet1.xml`; ods: a synthetic id). */
+	readonly path: string;
+	/** false for hidden or very-hidden sheets. */
+	readonly visible: boolean;
+	/** The tab's visibility state: `"visible"`, `"hidden"`, or `"veryHidden"`. */
+	readonly state: SheetState;
+	/** Merged-cell ranges in A1 notation, in document order. Empty when none. */
+	readonly mergedCells: readonly string[];
+	/** Hyperlinks declared on this sheet, in document order. Empty when none. */
+	readonly hyperlinks: readonly Hyperlink[];
+	/** The sheet's declared used range in A1 notation, or `undefined` when absent. */
+	readonly dimension: string | undefined;
+	/** The comments anchored to cells on this sheet. Empty when none (or unsupported by the format). */
+	readonly comments: readonly Comment[];
+	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
+	readonly columns: readonly ColumnProps[];
+	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */
+	readonly rowProperties: ReadonlyMap<number, RowProps>;
+	/** The sheet's frozen pane, or `undefined` when nothing is frozen (or unsupported). */
+	readonly freeze: FreezePane | undefined;
+	/** The number-format code applied at `ref`, or `undefined` (also when the format has no styles). */
+	numberFormat(ref: string): string | undefined;
+	/** The resolved style at `ref`, or `undefined` (also when the format has no styles). */
+	style(ref: string): CellStyle | undefined;
+	/** The formula text at `ref`, or `undefined` (also when the format doesn't carry formula text). */
+	formula(ref: string): string | undefined;
+	/** The pictures on this sheet, in order. Empty when none (or unsupported by the format). */
+	images(): Promise<readonly SheetImage[]>;
+	/** The cell at an A1 reference. Absent cells read as `empty`. */
+	cell(ref: string): Cell;
+	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
+	rows(): AsyncGenerator<Row>;
 }

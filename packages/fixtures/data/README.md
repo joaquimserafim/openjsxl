@@ -39,6 +39,17 @@ so they are safe to commit and diff.
   reader never decodes them and derives mime from the extension. `reader/__tests__/images.test.ts`
   asserts the two survivors, the shared buffer, and that the rest read normally.
 
+- **`ods-edge.ods`** — a hand-crafted OpenDocument spreadsheet (F7.1) covering the shapes a real
+  producer (LibreOffice) emits that odfpy won't: the **repeat bomb** (row 1 padded with an empty
+  cell repeated to column 16 384, and an empty row repeated ~1e6 times to the 2^20 grid edge — a
+  correct reader drops these in O(1)), a **value repeated across columns**, a **2×2 covered-cell
+  merge** (`A3:B4`), a **hidden** sheet (`table:visibility="collapse"`), and an **empty** sheet.
+  The `mimetype` is the first stored entry. `reader/__tests__/ods.test.ts` asserts the used range
+  stays `A1:F3` (the tail never materializes). Opens cleanly in python-calamine.
+- **`ods-encrypted.ods`**, **`ods-not-spreadsheet.ods`**, **`ods-no-content.ods`** — typed-reject
+  cases for `openOds`: a manifest declaring `manifest:encryption-data` (→ `unsupported`), a text
+  ODF `mimetype` (→ `unsupported`), and a container missing `content.xml` (→ `missing-part`).
+
 ## Real-producer fixtures
 
 Files exported by actual applications, committed directly here. These catch quirks the
@@ -101,6 +112,14 @@ git-ignored [`../local/`](../local) directory and are never committed.
   the blip, and **package-absolute** media targets (`/xl/media/image1.png`). Real Pillow-generated
   PNG/JPEG bytes; `reader/__tests__/images.test.ts` pins their SHA-256 (byte round-out), the 1-based
   anchors, and the mime.
+
+- **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
+  openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
+  float, negative float, two booleans, a date and a date-time, a percentage and a currency; a
+  formula cell (`of:=[.B1]*2`, cached `84`); an in-cell hyperlink (`<text:a>`); a 2×2 merge
+  (`A4:B5`); and a second sheet. A **real LibreOffice** `.ods` is a welcome future upgrade. Every
+  value is cross-checked against **python-calamine** (an independent ODF reader) in
+  `reader/__tests__/ods.test.ts`.
 
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).

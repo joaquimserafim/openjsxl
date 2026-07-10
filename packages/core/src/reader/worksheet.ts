@@ -12,9 +12,13 @@ import {
 	type Relationship,
 	translateFormula,
 } from "../ooxml";
-import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, RowProps } from "../types";
+import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, Row, RowProps } from "../types";
 import { localName, relationshipId } from "../utils";
 import { createXmlStream, tokenize, type XmlToken } from "../xml";
+
+// `Row` is part of the public reader surface; its canonical home is ../types (shared across
+// formats, M7). Re-exported here so the worksheet parsers and reader/workbook.ts keep their imports.
+export type { Row } from "../types";
 
 // Turn a worksheet part (xl/worksheets/sheetN.xml) into rows of typed cells. We walk the
 // tokenizer event stream rather than building a DOM, so peak memory tracks one row, not the
@@ -30,13 +34,6 @@ import { createXmlStream, tokenize, type XmlToken } from "../xml";
 // structure, so this code must not corrupt a well-formed row because of a malformed
 // neighbour. A new `<row>`/`<c>` opening while one is still unclosed finalizes the open one
 // first, and a row left open at end-of-input (truncated file) is still emitted.
-
-export interface Row {
-	/** 1-based row index — from `<row r>`, or positional when the attribute is absent. */
-	readonly index: number;
-	/** Cells present in the row, in document order. Gaps are simply absent (sparse). */
-	readonly cells: readonly Cell[];
-}
 
 function safeColumn(ref: string): number | undefined {
 	try {
