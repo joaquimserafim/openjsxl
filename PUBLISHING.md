@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.6.0` (already set) — skip this step. For a later
+For the current release the version is `0.7.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -123,6 +123,16 @@ git push -f origin v<version>
   make a file un-rewritable. Additive API: `Worksheet.images()`, `SheetInput.images`,
   `SheetImage`/`ImageAnchor`/`AnchorPoint` types. Round-trip drop-list: bare error cells;
   absolute-anchored and non-picture drawings (skipped on read); picture effects.
+- **`0.7.0`** — more formats to read: `openXlsb` (Excel Binary Workbook / BIFF12), `openOds`
+  (OpenDocument), and `openCsv` (`.csv`/`.tsv`, RFC 4180) all open into the same `Workbook` surface
+  as `openXlsx`, so "a user uploaded a spreadsheet" is one code path; `detectSpreadsheetFormat`
+  sniffs the container to route by content, and `.xlsm`/`.xltx` open through `openXlsx`. Read-only —
+  conversion to `.xlsx` is the bridge (`workbookToInput` → `writeXlsx`), and per-format accessors a
+  format can't express degrade rather than throw (the drop-list is a documented matrix). The writer
+  is unchanged, so `.xlsx` output stays byte-identical. Additive API: `openXlsb`/`openOds`/`openCsv`,
+  `detectSpreadsheetFormat`, `SpreadsheetFormat`/`CsvReadOptions` types, and `Worksheet`/`Row` are now
+  structural interfaces (the xlsx implementation is `XlsxWorksheet` — `instanceof Worksheet`, never
+  documented, no longer applies).
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
