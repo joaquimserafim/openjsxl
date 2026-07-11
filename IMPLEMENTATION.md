@@ -1600,7 +1600,412 @@ Gate: biome 0 / tsc 0 / **607 tests** (+4). Probes stayed in the scratchpad; rep
 
 ---
 
-## M8+ — Later milestones (outline; expanded when reached)
+## M8 — Formulas (v0.8)
+
+**Theme.** An **opt-in** formula parser + evaluator behind a **separate entry point** —
+`openjsxl/formula` — so the core stays lean: a consumer who never imports it never loads a
+byte of it (module-graph isolation, stronger than tree-shaking). Formula TEXT
+read/translate/write shipped in F5.4 (`ooxml/formula.ts` is a shift tokenizer for
+shared-formula translation, NOT an AST — F8.1 builds the real parser). Scoped 2026-07-11
+from a 2-agent research pass with install-verified oracles.
+
+**Milestone-wide decisions** (set here so features don't re-litigate):
+1. **Separate subpath entry, not a new package.** `@openjsxl/core` gains `"./formula"`
+   (tsup `entry: { index, formula: 'src/formula/index.ts' }`; `exports["./formula"]` with
+   its own `types`/`import`), and the `openjsxl` facade mirrors it (`src/formula.ts` =
+   `export * from "@openjsxl/core/formula"` — the facade header already reserves this
+   pattern). Same-package placement lets the evaluator reuse `a1.ts`/`dates.ts` internals
+   without exposing them as public API. **Build rule:** tsup gets `splitting: false` —
+   a second ESM entry otherwise hoists shared modules into chunks and would churn
+   `dist/index.js`; with splitting off, the formula bundle duplicates the few shared
+   helpers (a few KB — accepted) and the `"."` entry's emitted file stays byte-identical.
+   Verify exactly that, plus `writeXlsx` bytes and a tree-shake/size probe re-run (F7.4
+   precedent).
+2. **Evaluation is read-only.** `evaluate*` never mutates the `Workbook`, never writes
+   results into cells, and the writer never refreshes stored `<v>` caches (byte-identity).
+   Our evaluated result CAN disagree with a stale producer cache — expected, documented.
+3. **Deterministic by default.** Volatile functions (NOW, TODAY, RAND, RANDBETWEEN)
+   **typed-reject** unless the caller injects `options.now` / `options.random` — a
+   configuration failure naming the cell + function, distinct from in-sheet error values.
+   No fixed-epoch default: a silently-wrong date is the silent mangling this repo bans.
+4. **Errors are values; failures are typed.** The full 8-member ST_CellErrorType set —
+   `#DIV/0! #VALUE! #REF! #NAME? #N/A #NUM! #NULL! #GETTING_DATA` — parses and PROPAGATES
+   as `EvalValue` variants that round-trip into the writer's error-cell path
+   (`#GETTING_DATA` already flows through the shared Cell model via the xlsb reader; our
+   own functions never PRODUCE it). Cycles evaluate to a
+   dedicated cycle-error value per affected cell (HyperFormula precedent; NOT Excel's
+   silent 0, and NOT a throw — one cycle must not abort an unrelated region). Parser/
+   evaluator failures (depth cap, fuel budget, volatile-unconfigured) throw a typed
+   `FormulaError` — the formula entry's OWN error class; core's closed `XlsxErrorCode`
+   union stays frozen.
+5. **Scalar-only evaluation; every exclusion named, parseable, never silent.** Excluded
+   from v0.8 evaluation (still PARSED so nothing is mangled): structured refs
+   `Table1[@Col]`, external refs `[1]!A1` (→ typed unsupported error value), dynamic-array
+   spill `#` (array masters yield their top-left value — named degradation), R1C1
+   (excluded outright — never the stored form). `@` implicit intersection parses AND
+   evaluates (scalar passthrough / single-cell intersection / else `#VALUE!`). 3-D refs
+   (`Sheet1:Sheet3!A1`) are **parse-only in v0.8** — evaluation yields the typed
+   unsupported error value (a multi-sheet RangeView + sheet-order resolution is its own
+   work item; promising "aggregators only" without owning it somewhere was scope debt).
+   Defined names resolve constants + simple ranges only; anything else →
+   `#NAME?`/typed-unsupported (scope fence — `refersTo` is a full formula language of its
+   own). At 418 functions, HyperFormula ships without structured refs/3-D/dynamic arrays
+   — good cover.
+6. **Excel semantics, plain IEEE-754 doubles.** The verified coercion matrix is the
+   contract: empty cell → 0 in arithmetic, `""` in concat, equals BOTH 0 and `""` under
+   `=`; TRUE→1/FALSE→0; numeric strings coerce in arithmetic (locale-invariant en-US
+   parsing, never host-locale) else `#VALUE!`; comparisons never coerce and order
+   number < text < FALSE < TRUE (text case-insensitive); SUM skips text/bools in RANGES
+   but coerces literal ARGS (`SUM("5",TRUE)`=6); IF/CHOOSE evaluate only the taken branch,
+   AND/OR do NOT short-circuit; `=-2^2`→4 (unary minus binds above `^`), `=2^3^2`→64
+   (left-assoc `^`). No cosmetic display rounding (no evaluator replicates it — pycel,
+   'formulas', HyperFormula are all plain doubles ± epsilon); oracle comparisons use
+   relative tolerance (~1e-9).
+7. **Adversarial-input safety by construction.** The stored form allows a ~4,000-level
+   paren bomb inside MAX_FORMULA_LEN=8192 (the 64-level limit is FUNCTIONS only) — the
+   parser uses an explicit stack/depth caps (64 function nesting, 256 parens, ≤255 args)
+   with typed errors, never a bare RangeError. Ranges NEVER materialize: `SUM(A:A)`
+   iterates USED cells via a lazy `RangeView` (F4.4/F4.6 precedent); `COUNTBLANK` does
+   extent arithmetic. Evaluation carries a fuel budget (`options.maxCellVisits`, generous
+   default) → typed budget-exceeded; memoization makes shared subgraphs pay once. The
+   evaluator itself is iterative (explicit work stack + tri-color marks) — a 1M-row
+   dependency CHAIN is acyclic and must not blow the JS stack.
+8. **Oracles (install-verified 2026-07-11).** PRIMARY: Python **`formulas`** 1.3.4 (EUPL,
+   venv-only) — works on Py 3.14, evaluates raw strings AND whole .xlsx workbooks, 470
+   functions. SECONDARY: **pycel** 1.0b30 (GPLv3, venv-only) — BROKEN on Py ≥3.12
+   (`ast.Str`), pin `/opt/homebrew/bin/python3.11` explicitly. TERTIARY: Excel-authored
+   fixtures' own cached `<v>` values (Excel computed them; zero tooling). **HyperFormula
+   as an in-repo devDep is an OWNER DECISION** (GPLv3-or-commercial dual license +
+   `licenseKey:'gpl-v3'` in test code) — default is scratchpad-npm probes only, the
+   openpyxl-venv pattern. formulajs is MIT but parser-less (function-impl reference only).
+
+**Standing gates** per feature: biome by exit code + tsc + vitest; adversarial review with
+confirmed findings fixed + pinned pre-commit. The writer is untouched all milestone —
+golden pins stay green; entry-point work (F8.1) additionally re-runs the tree-shake probe
+and verifies `"."` chunk-split neutrality.
+
+**Dependency order:** F8.1 parser → F8.2 evaluator core → F8.3 function library → F8.4
+integration + docs + oracle corpus. One feature per session, each proceed-gated.
+
+### F8.1 — Formula parser + the `openjsxl/formula` entry point ☐
+**Context.** The stored form is canonical en-US (ECMA-376 §18.17): `,` arg separators,
+`.` decimals, quoted sheet names with `''` doubling, TRUE/FALSE, array constants
+`{1,2;3,4}` (`,` = columns, `;` = rows, constants only). Full MS precedence table:
+`: (space) ,` reference ops → unary `-` → `%` → `^` → `* /` → `+ -` → `&` → comparisons;
+left-to-right on ties, plus the two quirks in decision 6.
+**Scope (in).** `src/formula/` in core: a lexer (extends F5.4's token classes with
+operators/braces/array literals) + a Pratt / precedence-climbing parser producing a typed
+AST — explicit operand/operator stack or hard depth counter (decision 7 caps). Parses the
+COMPLETE stored-form surface: literals (number/string/bool/all 8 error literals incl.
+`#NULL!`), $-pinned A1 refs, whole-column/row ranges (`A:A`, `1:1`), quoted+unquoted sheet
+refs, 3-D refs, union `,` inside parens, range `:` as operator (parse-only for
+`INDEX():INDEX()`), defined names, calls ≤255 args, array literals, structured/external
+refs → opaque nodes, `@`/`#` tokens. `parseFormula(text): FormulaAst` + typed
+`FormulaError('parse-error' | 'depth-exceeded' | …)`. The `"./formula"` subpath lands here
+on both packages.
+**Scope (out — named).** No evaluation (F8.2); no R1C1; no locale variants (stored form
+only); no serializer back to text beyond what translateFormula already does.
+**Tasks**
+- [ ] Lexer + AST types + Pratt parser (explicit stack; depth/arg caps; typed errors).
+- [ ] `"./formula"` subpath: core tsup second entry + exports map; facade mirror; the
+      `"."` chunk-split neutrality check + tree-shake probe re-run.
+- [ ] Tests: precedence table pinned (incl. `-2^2`, `2^3^2`, `%`, `&`), every literal
+      form, sheet-name quoting, array constants, the 8,192-char paren bomb → typed error,
+      255-arg cap, opaque structured/external nodes; parse–reprint round-trips where the
+      grammar is unambiguous.
+- [ ] Oracle: token/shape agreement vs Python `formulas` `Parser().ast()` on a matrix of
+      real-world formulas (incl. every F5.4 fixture formula).
+- [ ] Adversarial review (parser lens).
+**Acceptance.** Every formula in every corpus fixture parses to an AST (or a typed error);
+the paren bomb is a typed error in bounded time; the `"."` entry's bytes/behavior are
+untouched (size probe re-run); core stays zero-dep.
+
+### F8.2 — Evaluator core: dependency walk, coercion, errors, budgets ☐
+**Context.** One-shot, pull-based evaluation — not a reactive engine. Pull + memoization
++ tri-color marks gives topological order implicitly, cycle detection for free (grey hit),
+and sparse demand (`evaluateCell` and `evaluateAll` both fall out).
+**Scope (in).** `evaluateWorkbook(workbook, options?)` / `evaluateCell(workbook, sheet,
+ref, options?)` over the SHARED `Workbook` surface (any format that carries formula text —
+xlsx today). Iterative walker (explicit stack, tri-color: white/grey/black; grey-hit =
+cycle → cycle-error value + the cycle's refs reported in the result). `EvalValue` =
+`number | string | boolean | null(empty) | FormulaErrorValue | RangeView` (lazy iterator
+over USED cells — never a materialized 2-D array). The decision-6 coercion matrix; error
+propagation; per-function laziness flags (IF-family lazy, AND/OR strict). Defined-names
+resolution (workbook.xml `<definedNames>` incl. `_xlnm.*` + sheet-scoped `localSheetId` —
+NEW parser, nothing in-tree reads it today): constants + simple ranges only per decision 5.
+Fuel budget + `options.now`/`options.random` plumbing (rejection lives here; the volatile
+functions themselves land in F8.3).
+**Scope (out — named).** INDIRECT/OFFSET-style dynamic references (they make the dep graph
+unknowable at parse time and reopen the cycle/giant-range analyses — the concrete reason
+they are absent from F8.3's tiers too); iterative-calculation mode; cross-workbook refs.
+**Tasks**
+- [ ] `<definedNames>` parser (constants + simple ranges; the rest → `#NAME?`-on-use).
+- [ ] Tri-color iterative walker + memo table + cycle-error values + fuel budget.
+- [ ] Coercion/error semantics module with the decision-6 matrix as a pinned test table
+      (each trap = one oracle-validated case).
+- [ ] `RangeView` over the reader's sparse cells; whole-column/row intersection with the
+      used range; `COUNTBLANK` extent arithmetic.
+- [ ] Hostile tests: self-ref `=A1` in A1, long cycle, 1M-row acyclic chain (no stack
+      growth), `SUM(A1:XFD1048576)` in bounded time, budget-exceeded typed.
+- [ ] Adversarial review (semantics + hostile-input lenses).
+**Acceptance.** The matrix table matches Python `formulas` (tolerance 1e-9) cell-for-cell;
+cycles yield error values without aborting unrelated cells; all hostile cases bounded.
+
+### F8.3 — Function library: tier 1 + tier 2 + the extension registry ☐
+**Context.** Triple-oracle coverage exists for every tier-1 function (pycel ~164 ∩
+`formulas` 470 ∩ HyperFormula 418).
+**Scope (in).** **Tier 1 (the v0.8 cut, ~40):** SUM AVERAGE COUNT COUNTA COUNTBLANK MIN
+MAX IF IFERROR AND OR NOT VLOOKUP HLOOKUP INDEX MATCH CHOOSE SUMIF COUNTIF AVERAGEIF ROUND
+ROUNDUP ROUNDDOWN INT ABS MOD CONCAT/CONCATENATE LEN LEFT RIGHT MID TRIM UPPER LOWER
+ISBLANK ISNUMBER ISTEXT ISERROR ISNA TODAY NOW (the last two behind the injection gate).
+**Tier 2 (stretch, in-order, cut allowed at review):** SUMIFS COUNTIFS AVERAGEIFS
+SUMPRODUCT XLOOKUP IFS SWITCH XOR SUBSTITUTE REPLACE FIND SEARCH VALUE TEXTJOIN REPT EXACT
+PROPER CHAR CODE POWER SQRT EXP LN LOG LOG10 PI SIGN TRUNC CEILING FLOOR ROW COLUMN ROWS
+COLUMNS MEDIAN LARGE SMALL DATE YEAR MONTH DAY HOUR MINUTE SECOND TIME DATEVALUE EDATE
+EOMONTH WEEKDAY DAYS N T NA ERROR.TYPE RAND RANDBETWEEN (the last two behind the
+`options.random` injection gate — they are what makes that plumbing real). **Registry:** `options.functions:
+Record<string, FunctionSpec>`; `FunctionSpec = { minArgs, maxArgs, volatile?, lazyArgs?,
+evaluate(args, ctx): EvalValue }`; case-insensitive; built-ins are pre-registered specs
+(the registry is proven by being our own mechanism); unknown function → `#NAME?` value
+(parse always succeeds). Caller-supplied specs validated with `isPlainRecord` + single-read
+TOCTOU like every other caller object.
+**Scope (out — named, with reasons).** TEXT (drags in a full number-format RENDERER — its
+own feature); OFFSET/INDIRECT (F8.2 decision); financial/engineering/statistical breadth;
+array-arithmetic inside aggregator args (`SUM(A1:A3*B1:B3)` — CSE masters evaluate
+scalar-only → top-left value; NAMED degradation in the drop list).
+**Tasks**
+- [ ] Registry + spec validation + volatile gate; tier-1 implementations w/ per-function
+      oracle tests (range-vs-literal coercion asymmetry pinned per aggregate).
+- [ ] Tier-2 in order (each lands with its oracle test or not at all).
+- [ ] Lookup semantics pinned: VLOOKUP/MATCH approximate-match (sorted assumption),
+      exact-match miss → `#N/A`; INDEX 0/out-of-range → `#REF!`.
+- [ ] UDF example + docs (registry is public API).
+- [ ] Adversarial review (function-semantics lens vs oracles).
+**Acceptance.** Every shipped function agrees with Python `formulas` (and pycel where
+covered) on a shared vector table; the volatile gate typed-rejects without injection and
+is deterministic with it; UDFs register and evaluate.
+
+### F8.4 — Integration, docs, example, oracle corpus ☐
+**Scope (in).** End-to-end: real openpyxl/Excel-authored fixture workbooks evaluated
+against (a) Python `formulas` whole-workbook results and (b) their own stored `<v>` caches
+(with the stale-cache caveat documented); evaluation-vs-cache divergence NAMED. Example
+`12-formulas.mjs` (parse → evaluate → UDF → error/cycle handling). README/core/facade
+docs: the entry point, determinism/volatile contract, the drop list (decision 5 + F8.3
+outs), function coverage table. Bench lane: evaluate-1M-SUM-chains vs HyperFormula
+(scratchpad probe) — indicative only. Size matrix re-run (dist gains the formula chunk;
+`"."` unchanged). Full-milestone adversarial review, M7-style.
+**Acceptance.** Corpus formulas evaluate to oracle-agreed values or NAMED degradations;
+docs enumerate the exclusions exactly; `pnpm check`/tsc/vitest green; core `"."` bytes +
+writeXlsx bytes untouched; 0.8 release prep owner-gated as always.
+
+---
+
+## M9 — Breadth + hardening (v0.9)
+
+**Theme.** The three highest-demand structural features after styles — **tables, data
+validation, conditional formatting** — read + write + bridge, plus a **fuzzing harness**
+and corpus expansion that harden every reader against wild bytes. Scoped 2026-07-11 from
+schema + probe research (element order verified against ECMA-376 sml.xsd AND openpyxl
+output AND the in-tree `inventory-table.xlsx`).
+
+**Milestone-wide decisions:**
+1. **Element order (load-bearing, exact slots).** In CT_Worksheet's 38-child sequence:
+   `conditionalFormatting*` then `dataValidations` slot BETWEEN `mergeCells` and
+   `hyperlinks`; `tableParts` slots AFTER `legacyDrawing`, just before `extLst` — NOT
+   after hyperlinks. Writer's order comment (writer/sheet.ts) gets the full sequence;
+   each insertion is pinned by a golden-bytes test. (Sheet-level `autoFilter` would slot
+   between `sheetData` and `mergeCells` — deferred, see decision 10.)
+2. **One shared model per feature** in `types.ts` (reader returns IS writer input; bridge
+   = structural pass-through): `TableInfo` (name/ref/header/totals/columns/styleInfo),
+   `DataValidation` (type/operator/formulas/sqref[]/prompts/errors — the `showDropDown`
+   attribute is INVERTED in the file format; the model exposes the intuitive boolean and
+   documents the inversion), `ConditionalFormattingRule` (discriminated union over
+   ST_CfType with raw formulas/cfvos/colors). xlsb/ods/csv readers DEGRADE for all three
+   (pinned by tests).
+3. **dxf is its own `DxfStyle` type, INLINE in the model — indexes never go public.**
+   `DxfStyle` shares Color/FontStyle/BorderEdge primitives but NOT FillStyle semantics: a
+   solid dxf fill's visible color is **`bgColor` with patternType absent — the exact
+   INVERSE of CellStyle's fgColor rule**. Stored raw, never normalized (a "clean-up" here
+   silently swaps every CF highlight color). Inline numFmt code strings (matches our
+   model). Emission order inside `<dxf>`: font, numFmt, fill, alignment, border,
+   protection. **Ownership:** the reader RESOLVES `@dxfId` → an inline `DxfStyle` on the
+   rule/table object at parse time; the writer INTERNS the inline styles into one
+   `<dxfs>` table and assigns ids at emit (structural interning, the F4.2 styles
+   precedent). No public numeric dxf index anywhere — cfRule `@dxfId` and table `*DxfId`
+   share one file-level index space, and pass-through indexes would demand a bridge-wide
+   remap whose off-by-one is invisible to schema validation.
+4. **x14 posture: degrade on read, never emit.** Worksheet-level `extLst` extensions
+   (x14:dataValidations `{CCE6A557-…}`, x14:conditionalFormattings `{78C0D931-…-F0AAD7539E65}`)
+   are skipped; the cfRule-level `<extLst>` x14:id twin link `{B025F937-…}` is STRIPPED on
+   read (a dangling GUID must not round-trip). Named consequences, documented + pinned:
+   Excel-authored cross-sheet DV (x14-only) is invisible; Excel 2010+ dataBars lose their
+   x14 twin (render 2007-style). Cross-sheet refs in MAIN-part formula1 are accepted both
+   ways (openpyxl/ExcelJS-compatible). The corpus lossless-or-typed property gains x14 as
+   an EXPECTED named degradation.
+5. **Shared bounds, single-sourced** (reader clamps/drops, writer rejects): DV
+   promptTitle/errorTitle ≤32, prompt/error ≤255, inline list literal ≤255; CF priority
+   int ≥1; cfvo counts (colorScale 2–3, dataBar 2, iconSet = icon count); `@dxfId` must
+   index the emitted dxfs; **sqref stays SYMBOLIC** — parsed with the a1 machinery,
+   capped in RANGE COUNT, never expanded per-cell (a whole-grid sqref × 10k ranges is the
+   M9 repeat-bomb; F4.4/F4.6 posture).
+6. **Writer normalizations (determinism, semantics-preserving):** cfRule priorities are
+   renumbered densely 1..n on WRITE **by ascending caller priority, document order as the
+   tie-break** — NEVER by document order alone (producer priority order routinely disagrees
+   with document order, and priority decides which overlapping rule WINS; renumbering by
+   position would silently swap precedence — the exact silent mangling this repo bans).
+   The model's `priority` field is therefore honored input (writer validates int ≥1 per
+   decision 5, sorts, renumbers densely); the reader surfaces producer priorities verbatim
+   — posture snapshotted in the corpus test. Booleans as 1/0, FF-prefixed ARGB out (the
+   existing shared `HEX_COLOR` already accepts 6- and 8-digit input on both sides — no
+   widening needed or wanted), leading `=` stripped from DV/CF formula text, everything
+   through escapeText/isXmlSafe (typed reject), single-read TOCTOU throughout.
+7. **Dual-encoded rules round-trip verbatim.** containsText/timePeriod cfRules carry BOTH
+   declarative attrs AND a generated `<formula>` (relative to the sqref top-left, often
+   containing TODAY()) — both sides pass through untouched; regenerating either
+   desynchronizes them. Never evaluate, never rewrite (1904-mode serials included).
+8. **Table writer rules (the repair-prompt feature):** tableColumn names DERIVE from
+   header-row cell values (single source of truth — openpyxl itself can author
+   repair-triggering mismatches; reject empty/duplicate/non-string headers typed);
+   workbook-unique auto-assigned `@id`; displayName uniqueness CASE-INSENSITIVE across
+   sheets + lexical rules (no spaces, not a cell ref incl. bare C/R, ≤255) in a shared
+   constants module (a future defined-names feature reads the same bounds); tableColumns
+   count == ref width; overlapping table ranges rejected; `autoFilter` child written by
+   default; rel + content-type Override only when tables exist (byte-identity).
+9. **Byte-identity.** A workbook using none of the M9 features emits EXACT pre-M9 bytes —
+   no tables dir, no Overrides, no empty `<dataValidations>`/`<dxfs>`. Corpus property +
+   bridge snapshot extend to tables/DV/CF.
+10. **Scope fences (named):** no sheet-level autoFilter authoring (needs the hidden
+    `_xlnm._FilterDatabase` defined name — defer); no custom table-style DEFINITION parts
+    (built-in `tableStyleInfo` names only); iconSet limited to built-in ST_IconSetType;
+    write-side x14 never; LibreOffice models tables as database ranges — a divergence to
+    test when an LO fixture exists, not to absorb.
+11. **Both writers, same features.** `streamXlsx` shares the buffered writer's element
+    templates but assembles its own header/footer strings — DV/CF slot into the streamed
+    footer exactly as into the buffered template, and tables emit their side parts through
+    the shared `sheetSideParts` plumbing (F6.1 precedent). Every F9.1–F9.3 feature lands
+    on BOTH writers in the same commit, with the streamed==buffered equivalence test
+    extended — a streaming writer that silently DROPS a sheet's validations is the failure
+    mode this line exists to prevent.
+12. **Oracles:** openpyxl 3.1.5 (verified: reads+writes all three, round-trips
+    warnings-as-errors clean; emits NO x14 → exercises exactly the base schema). ExcelJS
+    4.4.0 (already a bench devDep) is the ONLY local x14 producer — authors the
+    x14-degrade fixtures. SheetJS = loads-without-throwing smoke only. **Real Excel =
+    the owner** — the repair-prompt property (element order, header/name match) can only
+    be truly verified there; named dependency, not silently dropped.
+
+**Standing gates** as always; every writer-touching feature runs the byte-identity recipe.
+
+**Dependency order:** F9.1 tables → F9.2 data validation → F9.3 conditional formatting +
+dxfs (largest; consumes the dxf index rules) → F9.4 fuzzing + corpus + milestone review.
+
+### F9.1 — Tables: read + write + bridge ☐
+**Scope (in).** Read: `xl/tables/tableN.xml` (`@ref @displayName @headerRowCount
+@totalsRowCount`, `autoFilter`, `tableColumns` (+`@totalsRowFunction/@totalsRowLabel`,
+`totalsRowFormula` for custom), `tableStyleInfo`) via the sheet's `tableParts` rels;
+`Worksheet.tables: readonly TableInfo[]`. Write: `SheetInput.tables` per decision-8 rules;
+part + rel (`…/relationships/table`) + content-type Override; `<tableParts>` after
+`legacyDrawing`. Bridge carries. Table dxf attrs (`headerRowDxfId` etc.) are DROPPED
+NAMED in F9.1 (no public raw indexes — decision 3); when F9.3's dxf parser lands they
+become inline `DxfStyle` fields on `TableInfo` columns, additively.
+**Scope (out).** calculatedColumnFormula authoring (read verbatim, carried); totals-row
+CELL formulas (Excel writes SUBTOTAL(109,…) cells — we write the table part only,
+documented); structured-ref formula rewriting.
+**Tasks**
+- [ ] Table part parser + `TableInfo` + degrade pins (xlsb/ods/csv).
+- [ ] Writer: derivation/validation rules, part/rel/CT wiring, order pin, byte-identity.
+- [ ] Bridge + corpus snapshot extension; fixtures `openpyxl-tables.xlsx` + crafted edge
+      (header mismatch → typed reject; duplicate displayName; overlap).
+- [ ] Oracle both ways (openpyxl); owner opens output in real Excel (repair-prompt check).
+- [ ] Adversarial review.
+**Acceptance.** inventory-table.xlsx reads verbatim; write→openpyxl clean; no-table
+workbooks byte-identical; every decision-8 rejection typed + named.
+
+### F9.2 — Data validation: read + write + bridge ☐
+**Scope (in).** `<dataValidations>` between mergeCells and hyperlinks. All 8 types +
+operators; formula1/formula2 verbatim (incl. cross-sheet in main part); multi-range
+`@sqref` (space-separated, symbolic); prompts/errors + `errorStyle`; the dropdown
+inversion per decision 2; inline-list quoting quirk (`"a,b,c"` — quotes are formula text)
+documented + escaped. x14 DV skipped-named (decision 4). `Worksheet.dataValidations`,
+`SheetInput.dataValidations`, bridge carry.
+**Tasks**
+- [ ] Parser + model + degrade pins; bounds (decision 5) single-sourced.
+- [ ] Writer + order pin + byte-identity; escaping/TOCTOU.
+- [ ] Fixtures: `openpyxl-datavalidation.xlsx` (all types, multi-range, both dropdown
+      states, cross-sheet list) + ExcelJS x14 fixture pinning the degrade.
+- [ ] Corpus/bridge extension; oracle both ways; adversarial review (hostile sqref).
+**Acceptance.** All-8-types fixture round-trips; x14 degrade pinned; hostile sqref
+bounded; DV-free workbooks byte-identical.
+
+### F9.3 — Conditional formatting + differential styles (dxfs) ☐
+**Scope (in).** `<conditionalFormatting @sqref>` blocks + `<cfRule>` for the FULL base
+ST_CfType set (cellIs, expression, colorScale, dataBar, iconSet, top10, aboveAverage,
+uniqueValues/duplicateValues, containsText-family, containsBlanks/Errors-family,
+timePeriod) with `@priority/@stopIfTrue/@operator/@text/@rank/@percent/@timePeriod/…`,
+`<formula>×0–3`, cfvo/color children (counts per decision 5). `<dxfs>` in styles.xml as
+inline `DxfStyle` (decision 3: reader resolves ids at parse, writer interns at emit —
+no public index, no bridge remap). Priorities per decision 6; dual-encoding per decision 7; x14 per
+decision 4 (incl. rule-level extLst strip; ExcelJS-authored dataBar fixture pins it).
+`Worksheet.conditionalFormatting`, `SheetInput.conditionalFormatting`, bridge carry.
+**Scope (out).** Rule EVALUATION (which cells currently match is M8-adjacent, out);
+custom icon sets; x14 emission.
+**Tasks**
+- [ ] dxfs parser + writer interning per decision 3 (bgColor rule pinned by a color-swap
+      regression; interning correctness pinned — two rules sharing one producer dxf must
+      keep identical styles after the round-trip).
+- [ ] cfRule parser/emitter (discriminated union; verbatim formulas; the decision-6
+      priority posture pinned by a precedence-preservation regression); order pin +
+      byte-identity.
+- [ ] Retrofit inline `DxfStyle` onto F9.1's `TableInfo` columns (additive).
+- [ ] Fixtures: `openpyxl-condformat.xlsx` (≥10 rule types + several dxfs incl.
+      font+fill+border+numFmt) + ExcelJS x14 dataBar (degrade pin) + crafted hostile
+      (10k ranges × whole-grid sqref, priority collisions/0/negatives).
+- [ ] Corpus/bridge extension; oracle both ways; adversarial review.
+**Acceptance.** Every base rule type round-trips with its dxf intact (colors NOT swapped);
+x14 stripped-named; hostile sqref bounded; CF-free workbooks byte-identical.
+
+### F9.4 — Fuzzing harness, corpus expansion, milestone hardening review ☐
+**Context.** jazzer.js (libFuzzer) needs native bindings — out. **fast-check** (MIT, pure
+TS, seeded + shrinking, runs inside vitest) is the property-based half; a hand-rolled
+seeded mutation engine (~200 lines, xorshift PRNG — zero deps) is the corpus half. No
+maintained pure-JS coverage-guided fuzzer exists (verified July 2026).
+**Scope (in).** NEW private `packages/fuzz` (bench precedent; fast-check as its only
+devDep). Half A — properties over WRITER inputs: generated workbook trees incl. hostile
+getters/Proxies, non-plain prototypes, unknown keys; assert `writeXlsx` round-trips
+through `openXlsx` OR throws `XlsxError('invalid-input')` only, plus write-twice
+byte-identical determinism. Half B — seeded mutation over `packages/fixtures/data/*`:
+bit/byte flips, truncation, zip-structure mutations (EOCD/central-directory counts,
+offsets, CRCs, name lengths), XML-aware mutations (huge count attrs, sqref explosion,
+deep nesting, duplicate attrs, encoding garbage), replayed against all four openers under
+wall-clock + RSS budgets; invariant: resolve OR `instanceof XlsxError` — any
+TypeError/RangeError/OOM/timeout is a crasher. **CI posture:** a fixed-seed smoke
+(fast-check numRuns ≈50 + a few hundred mutants, <10 s) lives as an ordinary vitest suite
+in `packages/fuzz/__tests__` so the root gate covers it with zero new plumbing; long runs
+are local-only (`pnpm --filter @openjsxl/fuzz fuzz -- --ms=…`). **Triage pipeline:**
+crashers → gitignored `packages/fuzz/crashers/` (reproducer bytes + seed + trace),
+auto-minimized (chunk-removal binary search), fixed, then MANUALLY promoted to
+`packages/fixtures/data/edge-*.…` with provenance + a verbatim-read regression (the
+existing data/README checklist).
+**Corpus expansion.** Authorable now: the three openpyxl fixtures (F9.1–F9.3) + the
+ExcelJS x14 fixture. **Owner-provided asks (named, not silently dropped):** a real Excel
+365 file (negative-value dataBar + x14 twin, custom icon set, cross-sheet DV in extLst,
+calculatedColumnFormula table); a Google Sheets export with DV+CF; a LibreOffice file
+(tables-as-database-ranges divergence). Differently-licensed → gitignored `local/`.
+**Tasks**
+- [ ] `packages/fuzz` skeleton + fast-check writer properties (Half A).
+- [ ] Mutation engine + four-opener replay harness + budgets (Half B).
+- [ ] CI smoke wiring (fixed-seed vitest suite; flake-proof: generous budgets, no
+      wall-clock asserts in CI — those live in the local long-run only).
+- [ ] Triage/minimize/promote pipeline + crashers/ gitignore from day one.
+- [ ] Corpus: author + commit the fixtures above; file the owner asks.
+- [ ] Long local run against M9-complete readers; fix + pin every crasher; full-milestone
+      adversarial review (cross-feature + hardening lenses).
+**Acceptance.** The smoke runs in the standard gate deterministically; a long local run
+completes with zero unexplained crashers (every one fixed + promoted or explained); the
+corpus property covers tables/DV/CF; M9 done = 0.9 release prep, owner-gated.
+
+---
+
+## M10+ — Later milestones (outline; expanded when reached)
 
 - **Deferred — legacy `.xls` (BIFF8) read:** a CFB/OLE2 container reader + BIFF record
   layer (globals + per-sheet substreams; the SST `Continue`-split Unicode-flag trap;
@@ -1610,10 +2015,6 @@ Gate: biome 0 / tsc 0 / **607 tests** (+4). Probes stayed in the scratchpad; rep
 - **Deferred — native lane:** the optional `@openjsxl/native` napi-rs binding to Rust
   `calamine` (and a WASM build) behind the zip/xml interface. Deferred by the F5.5
   benchmark evidence (see the M6 re-scope note); revisit if a workload shifts the math.
-- **M8 — Formula evaluation (v0.8):** opt-in parser + evaluator for common functions,
-  behind a separate entry point so the core stays lean (text fidelity landed in F5.4).
-- **M9 — Breadth + hardening (v0.9):** tables, data validation, conditional formatting;
-  fuzzing, expanded corpus.
 - **1.0:** frozen API, full round-trip fidelity, documentation site, benchmarks kept
   current (harness from F5.5).
 
