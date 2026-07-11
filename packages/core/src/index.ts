@@ -8,6 +8,8 @@ export { columnToIndex, formatRef, indexToColumn, parseRef } from "./ooxml/a1";
 export { dateToSerial, serialToDate } from "./ooxml/dates";
 // CSV/TSV reader (F7.3) — open delimited text and read the SAME public Workbook surface.
 export { type CsvReadOptions, openCsv } from "./reader/csv";
+// Format detection (F7.4) — sniff bytes to route to the right open* function.
+export { detectSpreadsheetFormat, type SpreadsheetFormat } from "./reader/detect";
 // ODS reader (F7.1) — open an .ods and read the SAME public Workbook surface.
 export { openOds } from "./reader/ods";
 // Reader API (F1.7) — open a workbook and read typed cells.

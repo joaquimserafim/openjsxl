@@ -39,6 +39,13 @@ so they are safe to commit and diff.
   reader never decodes them and derives mime from the extension. `reader/__tests__/images.test.ts`
   asserts the two survivors, the shared buffer, and that the rest read normally.
 
+- **`xlsm-macro.xlsm`** — a crafted macro-enabled workbook (F7.4): the same XML workbook/worksheet
+  as any `.xlsx`, but the package declares the macroEnabled main content type and carries an
+  `xl/vbaProject.bin` part. `openXlsx` resolves parts through the rels graph and never reads the
+  content-type label or the VBA blob, so it opens like an `.xlsx` (`.xltx`/`.xltm` templates are the
+  same shape). `reader/__tests__/cross-format.test.ts` reads its two cells and pins
+  `detectSpreadsheetFormat` → `'xlsx'`; it also reads cleanly in python-calamine.
+
 - **`ods-edge.ods`** — a hand-crafted OpenDocument spreadsheet (F7.1) covering the shapes a real
   producer (LibreOffice) emits that odfpy won't: the **repeat bomb** (row 1 padded with an empty
   cell repeated to column 16 384, and an empty row repeated ~1e6 times to the 2^20 grid edge — a
@@ -49,6 +56,14 @@ so they are safe to commit and diff.
 - **`ods-encrypted.ods`**, **`ods-not-spreadsheet.ods`**, **`ods-no-content.ods`** — typed-reject
   cases for `openOds`: a manifest declaring `manifest:encryption-data` (→ `unsupported`), a text
   ODF `mimetype` (→ `unsupported`), and a container missing `content.xml` (→ `missing-part`).
+
+- **`equiv.xlsx`**, **`equiv.xlsb`**, **`equiv.ods`**, **`equiv.csv`** — the cross-format
+  **equivalence corpus** (F7.4): ONE logical table (a `Data` sheet — `name`/`qty`/`active` header
+  over `Apples,42,TRUE` and `Pears,7,FALSE`) authored identically in all four readable formats. No
+  dates, because CSV infers only numbers/booleans (the documented type boundary). `reader/__tests__/
+  cross-format.test.ts` asserts all four readers return the SAME typed value snapshot; the binary
+  (`.xlsb`) and XML (`.ods`) lanes are cross-checked in python-calamine. This is the corpus behind
+  "a user uploaded a spreadsheet" being one code path regardless of dialect.
 
 - **`basic.csv`** — a delimited-text fixture (F7.3) exercising the CSV reader: a header row, a
   quoted field with a comma (`"Acme, Inc."`), an embedded newline inside a quoted field, an escaped

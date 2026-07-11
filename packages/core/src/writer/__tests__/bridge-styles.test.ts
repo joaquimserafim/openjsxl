@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { XlsxError } from "../../errors";
+import { openCsv } from "../../reader/csv";
+import { openOds } from "../../reader/ods";
 import { openXlsx, type Workbook } from "../../reader/workbook";
+import { openXlsb } from "../../reader/xlsb";
 import { workbookToInput } from "../from-workbook";
 import { writeXlsx } from "../workbook";
 
@@ -68,6 +71,36 @@ async function styleSnapshot(wb: Workbook) {
 
 async function rewrite(wb: Workbook): Promise<Uint8Array> {
 	return writeXlsx(await workbookToInput(wb));
+}
+
+// A VALUE-and-structure snapshot for the cross-format conversion property (F7.4). Unlike
+// styleSnapshot, it deliberately omits styles/number-formats/geometry: the ods/xlsb/csv readers
+// don't carry those, and the writer adds an implicit date format on the way out, so comparing them
+// across a conversion would diverge for reasons that aren't data loss. The contract for a non-xlsx
+// source is exactly this: values, types, merges, hyperlinks, and tab state survive the trip to .xlsx.
+async function dataSnapshot(wb: Workbook) {
+	const out: Record<string, unknown> = {};
+	for (const info of wb.sheets) {
+		const sheet = wb.sheet(info.name);
+		const cells: Record<string, unknown> = {};
+		for await (const row of sheet.rows()) {
+			for (const cell of row.cells) {
+				cells[cell.ref] = {
+					// Error cells flatten to their literal text on write (documented F3.3), so an
+					// 'error' cell's comparable identity IS the string it becomes.
+					type: cell.type === "error" ? "string" : cell.type,
+					value: cell.value instanceof Date ? cell.value.getTime() : cell.value,
+				};
+			}
+		}
+		out[info.name] = {
+			cells,
+			mergedCells: sheet.mergedCells,
+			hyperlinks: sheet.hyperlinks,
+			state: info.state,
+		};
+	}
+	return out;
 }
 
 describe("bridge — styles round-trip", () => {
@@ -200,6 +233,58 @@ describe("bridge — corpus property", () => {
 		// The only fixture allowed to refuse: the fuzz file whose cell ref is a 300-letter column
 		// (kept faithfully by the tolerant reader, but addressable nowhere on a writable grid).
 		expect(typedFailures).toEqual(["edge-overflow-col.xlsx"]);
+	});
+
+	it("every readable ods/xlsb/csv fixture converts to xlsx losslessly or fails typed (F7.4)", async () => {
+		// The corpus property, extended across formats: a non-xlsx file read → bridge → writeXlsx →
+		// read must preserve values/types/merges/hyperlinks/state, or refuse with a TYPED error. The
+		// intentionally-broken fixtures (encrypted / wrong-mimetype / no-content) throw on open and are
+		// skipped, exactly like the broken .xlsx fixtures above.
+		const dataDir = fileURLToPath(new URL("../../../../fixtures/data/", import.meta.url));
+		const files = (await readdir(dataDir)).filter((f) => /\.(ods|xlsb|csv)$/.test(f));
+		expect(files.length).toBeGreaterThan(3);
+		const lossless: string[] = [];
+		const typedFailures: string[] = [];
+		for (const file of files) {
+			const bytes = await loadFixture(file);
+			let before: Workbook;
+			try {
+				before = file.endsWith(".csv")
+					? openCsv(bytes)
+					: file.endsWith(".ods")
+						? await openOds(bytes)
+						: await openXlsb(bytes);
+			} catch {
+				continue; // the intentionally-broken (typed-reject) fixtures throw on open
+			}
+			const snap = await dataSnapshot(before);
+			let out: Uint8Array;
+			try {
+				out = await rewrite(before);
+			} catch (e) {
+				expect(e, file).toBeInstanceOf(XlsxError);
+				expect((e as XlsxError).code, file).toBe("invalid-input");
+				typedFailures.push(file);
+				continue;
+			}
+			expect(await dataSnapshot(await openXlsx(out)), file).toEqual(snap);
+			lossless.push(file);
+		}
+		// Every readable ods/xlsb/csv fixture converts losslessly — NONE is allowed to typed-reject on
+		// write. Pinning the (empty) reject set catches a lossless→reject regression that a bare count
+		// would hide (the F7.4-review hole). The key fixtures must be in the lossless set, not silently
+		// skipped as if they had thrown on open.
+		expect(typedFailures).toEqual([]);
+		for (const key of [
+			"equiv.ods",
+			"equiv.xlsb",
+			"equiv.csv",
+			"xlsb-basic.xlsb",
+			"ods-edge.ods",
+			"basic.csv",
+		]) {
+			expect(lossless, key).toContain(key);
+		}
 	});
 });
 

@@ -34,6 +34,30 @@ const fixtures = [
 			],
 		},
 	},
+	// The cross-format EQUIVALENCE table (F7.4): one logical table authored identically as .xlsx /
+	// .xlsb / .ods / .csv so all four readers must return the SAME value snapshot. No dates — CSV
+	// infers only numbers/booleans, so a date column would diverge (the documented CSV boundary).
+	{
+		file: "equiv.xlsx",
+		spec: {
+			sheets: [
+				{
+					name: "Data",
+					cells: [
+						{ ref: "A1", text: "name" },
+						{ ref: "B1", text: "qty" },
+						{ ref: "C1", text: "active" },
+						{ ref: "A2", text: "Apples" },
+						{ ref: "B2", number: 42 },
+						{ ref: "C2", bool: true },
+						{ ref: "A3", text: "Pears" },
+						{ ref: "B3", number: 7 },
+						{ ref: "C3", bool: false },
+					],
+				},
+			],
+		},
+	},
 	// A minimal workbook: numbers and a boolean only, so it carries NO sharedStrings.xml and NO
 	// styles.xml — exercises the reader tolerating missing optional parts (F2.4b).
 	{
@@ -184,6 +208,37 @@ const imagesEdgeDrawing =
 	"</wsDr>";
 
 const crafted = [
+	// A macro-enabled workbook (.xlsm): the same XML workbook/worksheet as any .xlsx, but the package
+	// declares the macroEnabled main content type and carries an `xl/vbaProject.bin` part. openXlsx
+	// resolves parts through the rels graph and never reads the content-type label or the VBA blob, so
+	// it opens an .xlsm exactly like an .xlsx (F7.4 pin). `.xltx`/`.xltm` templates are the same shape.
+	{
+		file: "xlsm-macro.xlsm",
+		parts: [
+			{
+				name: "[Content_Types].xml",
+				xml: `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+			},
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.xml"/></Relationships>`,
+			},
+			{
+				name: "xl/workbook.xml",
+				xml: `${XMLD}\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${R_NS}"><sheets><sheet name="Macros" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+			},
+			{
+				name: "xl/_rels/workbook.xml.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${R_NS}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${R_NS}/vbaProject" Target="vbaProject.bin"/></Relationships>`,
+			},
+			{
+				name: "xl/worksheets/sheet1.xml",
+				xml: `${XMLD}\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:B1"/><sheetData><row r="1"><c r="A1"><v>42</v></c><c r="B1" t="b"><v>1</v></c></row></sheetData></worksheet>`,
+			},
+			// The VBA blob openXlsx must ignore — opaque placeholder bytes, never decoded.
+			{ name: "xl/vbaProject.bin", data: new TextEncoder().encode("openjsxl-ignored-vba") },
+		],
+	},
 	{
 		file: "images-edge.xlsx",
 		parts: [
@@ -277,7 +332,36 @@ const odsEdgeBody =
 	"</table:table>" +
 	'<table:table table:name="Blank"/>';
 
+// The ODS lane of the cross-format equivalence table (F7.4) — same logical rows as equiv.{xlsx,xlsb,
+// csv}: three strings, two floats, two booleans. `office:value` is authoritative for the typed cells.
+const odsEquivBody =
+	'<table:table table:name="Data">' +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="string"><text:p>name</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="string"><text:p>qty</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="string"><text:p>active</text:p></table:table-cell>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="string"><text:p>Apples</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="float" office:value="42"><text:p>42</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="boolean" office:boolean-value="true"><text:p>TRUE</text:p></table:table-cell>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	'<table:table-cell office:value-type="string"><text:p>Pears</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="float" office:value="7"><text:p>7</text:p></table:table-cell>' +
+	'<table:table-cell office:value-type="boolean" office:boolean-value="false"><text:p>FALSE</text:p></table:table-cell>' +
+	"</table:table-row>" +
+	"</table:table>";
+
 const ods = [
+	{
+		file: "equiv.ods",
+		parts: [
+			{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) },
+			{ name: "content.xml", xml: odfContent(odsEquivBody) },
+			{ name: "META-INF/manifest.xml", xml: odfManifest(MIMETYPE_ODS) },
+		],
+	},
 	{
 		file: "ods-edge.ods",
 		parts: [
@@ -477,7 +561,63 @@ const xlsbWorkbook = Buffer.concat([
 	brec(B.WB_E),
 ]);
 const XLSB_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet2.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet3.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/sharedStrings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/><Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>`;
+// The xlsb lane of the cross-format equivalence table (F7.4) — same logical rows as equiv.{xlsx,ods,
+// csv}: three shared strings, two RK ints, two booleans. One sheet "Data", no styles (no dates).
+const xlsbEquivSheet = Buffer.concat([
+	brec(B.WS),
+	bdim(0, 2, 0, 2),
+	brec(B.SD),
+	brow(0),
+	bcell(B.STRING, 0, 0, bu32(0)),
+	bcell(B.STRING, 1, 0, bu32(1)),
+	bcell(B.STRING, 2, 0, bu32(2)),
+	brow(1),
+	bcell(B.STRING, 0, 0, bu32(3)),
+	bcell(B.NUM, 1, 0, brkInt(42)),
+	bcell(B.BOOL, 2, 0, Buffer.from([1])),
+	brow(2),
+	bcell(B.STRING, 0, 0, bu32(4)),
+	bcell(B.NUM, 1, 0, brkInt(7)),
+	bcell(B.BOOL, 2, 0, Buffer.from([0])),
+	brec(B.SD_E),
+	brec(B.WS_E),
+]);
+const xlsbEquivSst = Buffer.concat([
+	brec(B.SST, Buffer.concat([bu32(5), bu32(5)])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("name")])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("qty")])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("active")])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("Apples")])),
+	brec(B.SI, Buffer.concat([Buffer.from([0]), bwstr("Pears")])),
+	brec(B.SST_E),
+]);
+const xlsbEquivWorkbook = Buffer.concat([
+	brec(B.WB),
+	brec(B.SHS),
+	brec(B.SH, Buffer.concat([bu32(0), bu32(1), bwstr("rId1"), bwstr("Data")])),
+	brec(B.SHS_E),
+	brec(B.WB_E),
+]);
+const XLSB_EQUIV_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/sharedStrings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/></Types>`;
+
 const xlsb = [
+	{
+		file: "equiv.xlsb",
+		parts: [
+			{ name: "[Content_Types].xml", xml: XLSB_EQUIV_CT },
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.bin"/></Relationships>`,
+			},
+			{ name: "xl/workbook.bin", data: xlsbEquivWorkbook },
+			{
+				name: "xl/_rels/workbook.bin.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${R_NS}/worksheet" Target="worksheets/sheet1.bin"/><Relationship Id="rId5" Type="${R_NS}/sharedStrings" Target="sharedStrings.bin"/></Relationships>`,
+			},
+			{ name: "xl/worksheets/sheet1.bin", data: xlsbEquivSheet },
+			{ name: "xl/sharedStrings.bin", data: xlsbEquivSst },
+		],
+	},
 	{
 		file: "xlsb-basic.xlsb",
 		parts: [
@@ -514,7 +654,13 @@ const csvBasic =
 	'007,"Acme, Inc.",42,TRUE\r\n' +
 	'008,"multi\nline",7,false\r\n' +
 	'009,"a ""quoted"" word",0,TRUE\r\n';
-const csvFixtures = [{ file: "basic.csv", text: csvBasic }];
+// The CSV lane of the cross-format equivalence table (F7.4) — same logical rows as equiv.{xlsx,xlsb,
+// ods}. CRLF endings (Excel's), no quoting needed, no dates.
+const csvEquiv = "name,qty,active\r\nApples,42,TRUE\r\nPears,7,FALSE\r\n";
+const csvFixtures = [
+	{ file: "basic.csv", text: csvBasic },
+	{ file: "equiv.csv", text: csvEquiv },
+];
 
 const dataDir = new URL("../data/", import.meta.url);
 await mkdir(dataDir, { recursive: true });

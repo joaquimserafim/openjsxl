@@ -29,7 +29,7 @@ node examples/07-styles-and-layout.mjs # styled cells, widths, freeze, merges, l
 node examples/08-streaming-write.mjs # constant-memory write from an async row source (0.5)
 node examples/09-comments-formulas-theme.mjs # comments, live formulas, resolveColor (0.5)
 node examples/10-images.mjs          # anchored pictures: write, read back, round-trip (0.6)
-node examples/11-other-formats.mjs   # read .xlsb + .ods into the same Workbook API (0.7)
+node examples/11-other-formats.mjs   # detect + read .xlsb/.ods/.csv into the same Workbook API (0.7)
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.

@@ -85,9 +85,21 @@ merges) throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossl
 types, sheet names/order, styles, formulas, comments, pictures, custom themes, geometry,
 merges, hyperlinks, and visibility.
 
+## Other formats (read-only)
+
+openjsxl writes `.xlsx`, but reads more: `openXlsb` (Excel Binary Workbook), `openOds`
+(OpenDocument), and `openCsv` (delimited text) return the SAME `Workbook` as `openXlsx`, and
+`detectSpreadsheetFormat(bytes)` → `'xlsx' | 'xlsb' | 'ods' | 'csv' | undefined` routes by content
+(container formats by their package; CSV by a documented text heuristic). Accessors a format can't
+express degrade (`style()` → `undefined`, `mergedCells` → `[]`), never throw. `.xlsb`/`.ods` carry
+values, dates, merges (ods) and hyperlinks; `.csv` infers numbers & booleans only (never dates).
+Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `writeXlsx`).
+
 ## Exports
 
 - **Reader:** `openXlsx`, `streamSheetRows`, `Workbook`, `Worksheet`, `ReadOptions`
+- **Other-format readers:** `openXlsb`, `openOds`, `openCsv` (+ `CsvReadOptions`),
+  `detectSpreadsheetFormat` (+ `SpreadsheetFormat`)
 - **Writer:** `writeXlsx`, `streamXlsx`, `workbookToInput`, `WorkbookInput`, `SheetInput`,
   `CellInput`, `StyledCell`, `CellValue`, `WriteOptions`, `StreamWorkbookInput`,
   `StreamSheetInput`, `StreamRows`

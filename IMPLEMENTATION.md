@@ -1439,7 +1439,7 @@ O(input) with no amplification (unlike ods there's no repeat/expansion), empiric
 **Note (owner-notified):** the runnable `.csv` example + `detectSpreadsheetFormat` land in F7.4
 (which extends `examples/11-other-formats.mjs`); F7.3 ships the reader + tests + fixture.
 
-### F7.4 — Detection, conversion corpus, docs + bench lanes ☐
+### F7.4 — Detection, conversion corpus, docs + bench lanes ☑ (bench lanes → post-M7 pass)
 **Scope (in).** `detectSpreadsheetFormat(bytes)` → `'xlsx' | 'xlsb' | 'ods' | 'csv' |
 undefined` (zip signature → peek `[Content_Types].xml` for xlsx/xlsb vs `mimetype` for
 ods; NOT a zip but decodes as text → `'csv'` best-effort; else `undefined`). CSV has no
@@ -1458,20 +1458,56 @@ code (`sideEffects` honest; measured with a small esbuild probe in the scratchpa
 read lanes for xlsb/ods vs python-calamine and csv vs Python `csv`, published to
 docs/benchmarks.md.
 **Tasks**
-- [ ] `detectSpreadsheetFormat` + tests (each format + junk + empty + truncated + a
+- [x] `detectSpreadsheetFormat` + tests (each format + junk + empty + truncated + a
       text-but-not-CSV edge).
-- [ ] Equivalence corpus (four formats, one snapshot) + the cross-format conversion
+- [x] Equivalence corpus (four formats, one snapshot) + the cross-format conversion
       property in the corpus test.
-- [ ] Extend example 11 (`11-other-formats.mjs` exists from F7.2 — reads .xlsb + .ods) with
+- [x] Extend example 11 (`11-other-formats.mjs` exists from F7.2 — reads .xlsb + .ods) with
       `.csv` + `detectSpreadsheetFormat`; keep examples README/package.json wiring; all green.
-- [ ] README/core/facade docs matrix + per-format drop lists + CLAUDE.md repo map;
+- [x] README/core/facade docs matrix + per-format drop lists + CLAUDE.md repo map;
       xlsm/xltx fixture pin.
-- [ ] Tree-shake probe; bench read lanes + benchmarks.md refresh.
-- [ ] Full-milestone adversarial review (cross-format lens), M5/M6-analysis style.
+- [x] Tree-shake probe. — [ ] bench read lanes + benchmarks.md refresh (→ post-M7 bench pass).
+- [x] Full-milestone adversarial review (cross-format lens), M5/M6-analysis style.
 **Acceptance.** One snapshot across four formats; the conversion property holds over
 the whole corpus; docs enumerate per-format drops exactly; the bench table carries the
 new lanes. Release prep + the 0.7 bump happen ONLY at the owner's explicit request
 (CLAUDE.md #4).
+
+**Landed (uncommitted, awaiting owner approval).** `detectSpreadsheetFormat(source, options?)` →
+`'xlsx' | 'xlsb' | 'ods' | 'csv' | undefined` (`reader/detect.ts`, facade-exported with
+`SpreadsheetFormat`). Zip-container sniff reusing the hardened `openZip`: an ODF `mimetype` →
+`'ods'` (a **mimetype-less ODS** is still recognized via its `content.xml` `office:spreadsheet`
+body, so detect is never stricter than `openOds`); `[Content_Types].xml` binary main type → `'xlsb'`,
+the four XML spreadsheet content types (.xlsx/.xlsm/.xltx/.xltm) → `'xlsx'`. Non-zip decodable UTF-8
+text → `'csv'` (documented best-effort; C0-control/invalid-UTF-8 → `undefined`). Each classification
+read is a **bounded 1 MiB streaming prefix** (`sniff`), so a decompression-bomb part can't force an
+unbounded inflate (empirically: a 57 KB zip declaring a 60 MB Content_Types classifies in 9 ms /
+~6 MB RSS). Fully type-safe — no `any`, no `as` assertions.
+Cross-format **equivalence corpus** `equiv.{xlsx,xlsb,ods,csv}` (one logical table; no dates) →
+identical full-cell value snapshot across all four readers (`reader/__tests__/cross-format.test.ts`;
+.xlsb/.ods lanes cross-checked in python-calamine). **Conversion property** extended
+(`writer/__tests__/bridge-styles.test.ts`): every readable ods/xlsb/csv fixture converts to `.xlsx`
+lossless (values/types/merges/hyperlinks/state) or fails typed — the typed-reject set is pinned
+(empty) and the key fixtures pinned present. **xlsm/xltx pin:** crafted `xlsm-macro.xlsm` — `openXlsx`
+reads it (vba/content-type-label ignored), detect → `'xlsx'`. Example 11 rewritten as a detect-driven
+"read anything" demo (11/11 examples green). Docs: format matrix + per-format drop tables in all three
+READMEs; CLAUDE.md repo map (ods/biff/xlsb/csv); corpus README. **Tree-shake probe** (scratchpad
+esbuild): an `openXlsx`-only bundle drops ~16.8 KB (34%) and leaks **zero** ods/xlsb/csv/detect
+symbols — `sideEffects:false` honest.
+Gate: biome 0 / tsc 0 / **603 tests** (+23) / 11 examples green / xlsx suite untouched.
+**Adversarial review (workflow `wln823b14`: 4-lens finders → refuting verifiers; 5 candidates → 5
+CONFIRMED = 2 code defects + 2 test holes, all fixed + pinned; 0 refuted):** (1) detect missed a
+mimetype-less ODS `openOds` reads → added the content.xml `office:spreadsheet` fallback; (2) detect
+fully inflated the mimetype/Content_Types part (a ~4.29 GB bomb DoS, contradicting its own
+"never hangs") → bounded 1 MiB streaming `sniff`; (3) the conversion test didn't pin *which* fixtures
+typed-reject → pinned the (empty) reject set + key-fixture presence; (4) the equivalence test sampled
+9 fixed refs → now compares the full populated-cell set (catches an out-of-range cell). Probes stayed
+in the scratchpad.
+**Remaining for M7 (post-commit, owner's separate post-M7 ask):** re-run `pnpm bench` + add read lanes
+(csv vs Python `csv` is easy; **xlsb/ods at bench scale are constrained** — no local Excel/LibreOffice
+to author 1M-cell files, and a hand-built binary xlsb at that scale is high-risk to trust) + publish
+the library install/bundle-size matrix (openjsxl ~193 KB/0 deps · exceljs 20.8 MB/9 deps · xlsx
+7.15 MB/7 deps). Sequenced as its own commit; owner steer on the xlsb/ods-scale bench lanes.
 
 ---
 

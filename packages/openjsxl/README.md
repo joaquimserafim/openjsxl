@@ -73,6 +73,14 @@ const bytes = await writeXlsx({
 values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
 hyperlinks, and sheet visibility all round-trip.
 
+**Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
+Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
+`Workbook`, and `detectSpreadsheetFormat(bytes)` routes by content (`'xlsx' | 'xlsb' | 'ods' |
+'csv' | undefined`; `.xlsm`/`.xltx` read as `'xlsx'`). Accessors a format can't express degrade,
+never throw — `.xlsb`/`.ods` carry values, dates, merges (ods) and hyperlinks; `.csv` infers
+numbers & booleans only (never dates). So "a user uploaded a spreadsheet" is one code path, and any
+reader converts to `.xlsx` through the bridge.
+
 See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
 design notes, and roadmap.
 

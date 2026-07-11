@@ -14,7 +14,9 @@ runtimes — Node, Deno, Bun, the browser, and edge.
 > memory; get typed errors on malformed input. Write `.xlsx` from plain data with `writeXlsx`,
 > and read → modify → write with `workbookToInput`. **New in 0.6:** anchored pictures — read
 > them with `sheet.images()`, write them via `images` on a sheet, and they round-trip through
-> the bridge byte-exact (png, jpeg, gif, bmp, tiff, webp, emf, wmf).
+> the bridge byte-exact (png, jpeg, gif, bmp, tiff, webp, emf, wmf). **New in 0.7:** it now
+> *reads* more than it writes — `.xlsb`, `.ods`, and `.csv`/`.tsv` open into the same `Workbook`,
+> with `detectSpreadsheetFormat` to route by content.
 > Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
 > [implementation plan](./IMPLEMENTATION.md).
 
@@ -273,6 +275,50 @@ formulas re-emit as per-cell plain formulas (the same text Excel shows in each c
 formulas keep only their cached value); a tolerated non-canonical cell ref spelling (e.g.
 lowercase `a1`) re-emits canonically (`A1`); and media parts renumber with alternate extension
 spellings normalized (`tif` → `tiff`, `jpg` → `jpeg` — the image bytes themselves are untouched).
+
+## Reading other formats (0.7)
+
+openjsxl **writes `.xlsx`**, but it **reads more**: `openXlsb` (Excel Binary Workbook), `openOds`
+(OpenDocument / LibreOffice), and `openCsv` (delimited text) all return the SAME `Workbook` as
+`openXlsx` — typed cells, the same accessors, the same discriminated-union `Cell`.
+`detectSpreadsheetFormat(bytes)` sniffs the container so "a user uploaded a spreadsheet" is one
+code path, and any reader becomes a converter to `.xlsx` through the bridge:
+
+```ts
+import {
+	detectSpreadsheetFormat, openXlsx, openXlsb, openOds, openCsv,
+	workbookToInput, writeXlsx,
+} from 'openjsxl';
+import { readFile, writeFile } from 'node:fs/promises';
+
+const bytes = await readFile('upload.bin');
+const wb = await (async () => {
+	switch (await detectSpreadsheetFormat(bytes)) {
+		case 'xlsx': return openXlsx(bytes); // also .xlsm / .xltx / .xltm
+		case 'xlsb': return openXlsb(bytes);
+		case 'ods':  return openOds(bytes);
+		case 'csv':  return openCsv(bytes);  // synchronous — CSV has no container
+		default: throw new Error('unrecognized spreadsheet format');
+	}
+})();
+
+await writeFile('out.xlsx', await writeXlsx(await workbookToInput(wb))); // convert to .xlsx
+```
+
+Each reader returns the shared model; features a format can't express **degrade** (`style()` →
+`undefined`, `mergedCells` → `[]`, `images()` → `[]`), never throw. What each format carries:
+
+| Format | Reads | Not carried (degrades) |
+| --- | --- | --- |
+| **`.xlsx` / `.xlsm` / `.xltx`** | everything in the round-trip table above | — |
+| **`.xlsb`** | values & types, dates (style-driven), number formats, hyperlinks, dimension, sheet visibility | merges, formula text (cached values kept), styles, comments, geometry, images |
+| **`.ods`** | values & types, dates, merges, in-cell hyperlinks, sheet names/order | styles & number formats, formula text (cached values kept), visibility, comments, geometry, images |
+| **`.csv` / `.tsv`** | values with conservative type inference (numbers & booleans; **never dates**), one sheet, auto-detected delimiter | everything structural — CSV carries none |
+
+`detectSpreadsheetFormat` returns `'xlsx' | 'xlsb' | 'ods' | 'csv' | undefined`. Container formats
+are identified by their package; **CSV has no magic bytes**, so any non-zip input that decodes as
+UTF-8 text classifies as `'csv'` — a documented best-effort heuristic, not a guarantee. Encrypted
+`.ods` and other unreadable inputs fail with a typed `XlsxError`.
 
 ## Why
 
