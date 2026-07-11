@@ -55,36 +55,60 @@ export async function detectSpreadsheetFormat(
 
 	// xlsx / xlsb / ods all share the ZIP (OPC / ODF) container. A leading PK signature marks a zip;
 	// peek the entries that name the format. Any zip error (not-a-zip, corrupt, ZIP64) → unknown.
-	if (looksLikeZip(bytes)) {
-		try {
-			const zip = openZip(bytes, options);
-			// ODS names its media type in a `mimetype` entry (ODF requires it first + stored).
-			if (zip.has("mimetype")) {
-				const mimetype = (await sniff(zip, "mimetype")).trim();
-				if (mimetype.startsWith(ODS_SPREADSHEET)) return "ods";
-			}
-			// OOXML distinguishes a binary (xlsb) from an XML (xlsx / xlsm / xltx) workbook in the
-			// package content types.
-			if (zip.has("[Content_Types].xml")) {
-				const ct = await sniff(zip, "[Content_Types].xml");
-				if (ct.includes(XLSB_MAIN)) return "xlsb";
-				if (isOoxmlSpreadsheet(ct)) return "xlsx";
-			} else if (zip.has("content.xml")) {
-				// A `mimetype`-less ODS (a real-producer quirk `openOds` deliberately tolerates): the
-				// spreadsheet body lives in content.xml, whose `office:spreadsheet` root also tells an
-				// .ods from an .odt / .odp — so detect's verdict is never stricter than its opener.
-				const content = await sniff(zip, "content.xml");
-				if (content.includes("office:spreadsheet")) return "ods";
-			}
-		} catch {
-			// A corrupt / ZIP64 / otherwise-unreadable zip is a container we can't classify.
-		}
-		return undefined; // a zip, but not a spreadsheet package (e.g. a .docx, or a plain .zip)
+	if (!looksLikeZip(bytes)) {
+		// Not a zip. CSV/TSV has no magic bytes, so decodable UTF-8 text is classified `csv`
+		// (best-effort); binary noise is `undefined`.
+		return looksLikeText(bytes) ? "csv" : undefined;
 	}
 
-	// Not a zip. CSV/TSV has no magic bytes, so decodable UTF-8 text is classified `csv` (best-effort);
-	// binary noise is `undefined`.
-	return looksLikeText(bytes) ? "csv" : undefined;
+	// xlsx / xlsb / ods all share the ZIP (OPC / ODF) container. Only two operations below can
+	// actually throw, and each is shielded at its own site rather than under one blanket try: the
+	// central-directory walk here (a PK signature over a truncated / ZIP64 / corrupt file), and the
+	// per-entry decompression inside `sniff` (which returns `undefined` for an unreadable entry).
+	// Everything else — map lookups, string tests — is pure and stays shield-free, so a genuine bug
+	// in the classification logic surfaces instead of being swallowed as "unclassifiable".
+	let zip: ZipArchive;
+	try {
+		zip = openZip(bytes, options);
+	} catch {
+		return undefined; // a PK signature, but not a readable archive
+	}
+
+	// ODS names its media type in a `mimetype` entry (ODF requires it first + stored). A present,
+	// non-empty mimetype is authoritative BOTH ways: a spreadsheet type decides `ods`, and any other
+	// type disqualifies the ODS fallback below — `openOds` rejects such a file typed
+	// (reader/ods.ts), so classifying it `ods` would be a guaranteed-wrong route.
+	let odsDisqualified = false;
+	if (zip.has("mimetype")) {
+		const mimetype = (await sniff(zip, "mimetype"))?.trim();
+		if (mimetype === undefined) {
+			// Unreadable entry: openOds reads `mimetype` whenever it is present, so it cannot
+			// succeed on this file either — but an OOXML opener never touches it, so keep going.
+			odsDisqualified = true;
+		} else if (mimetype.startsWith(ODS_SPREADSHEET)) {
+			return "ods";
+		} else {
+			odsDisqualified = mimetype !== ""; // empty is tolerated, like openOds
+		}
+	}
+	// OOXML distinguishes a binary (xlsb) from an XML (xlsx / xlsm / xltx) workbook in the
+	// package content types.
+	if (zip.has("[Content_Types].xml")) {
+		const ct = await sniff(zip, "[Content_Types].xml");
+		if (ct !== undefined) {
+			if (ct.includes(XLSB_MAIN)) return "xlsb";
+			if (isOoxmlSpreadsheet(ct)) return "xlsx";
+		}
+	} else if (!odsDisqualified && zip.has("content.xml")) {
+		// A `mimetype`-less (or empty-mimetype) ODS — a real-producer quirk `openOds` deliberately
+		// tolerates. The `<office:spreadsheet>` element in content.xml tells a spreadsheet from an
+		// .odt / .odp. (A mimetype-less NON-spreadsheet ODF classifies `undefined` even though
+		// `openOds` would technically open it as a zero-sheet workbook — routing a text document
+		// to a spreadsheet opener helps nobody.)
+		const content = await sniff(zip, "content.xml");
+		if (content?.includes("<office:spreadsheet")) return "ods";
+	}
+	return undefined; // a zip, but not a spreadsheet package (e.g. a .docx, or a plain .zip)
 }
 
 // A ZIP starts with a PK signature: a local file header (`03 04`), or the empty-archive EOCD
@@ -128,19 +152,27 @@ function looksLikeText(b: Uint8Array): boolean {
 	return true;
 }
 
-// Read up to MAX_SNIFF_BYTES DECOMPRESSED bytes of a zip part, streaming and stopping early. The
-// early break cancels the underlying inflate (inflateRawStream's `finally`), so a bomb part inflates
-// at most ~one chunk past the cap instead of its full declared size — this is what keeps detection
-// bounded on the default (no-maxPartBytes) call. Enough to peek any real part's format markers.
-async function sniff(zip: ZipArchive, name: string): Promise<string> {
+// Read up to MAX_SNIFF_BYTES DECOMPRESSED bytes of a zip part, streaming and stopping early —
+// or `undefined` when the entry cannot be read (a corrupt local header, entry data past EOF, a
+// broken deflate stream, an unsupported compression method, or a caller `maxPartBytes` refusal).
+// The decompression is the one throwing operation in a part read, so ITS shield lives here; the
+// classification logic above stays try-free. The early break cancels the underlying inflate
+// (inflateRawStream's `finally`), so a bomb part inflates at most ~one chunk past the cap instead
+// of its full declared size — this is what keeps detection bounded on the default
+// (no-maxPartBytes) call. Enough to peek any real part's format markers.
+async function sniff(zip: ZipArchive, name: string): Promise<string | undefined> {
 	const chunks: Uint8Array[] = [];
 	let total = 0;
-	for await (const chunk of zip.readStream(name)) {
-		const room = MAX_SNIFF_BYTES - total;
-		const take = chunk.byteLength <= room ? chunk : chunk.subarray(0, room);
-		chunks.push(take);
-		total += take.byteLength;
-		if (total >= MAX_SNIFF_BYTES) break;
+	try {
+		for await (const chunk of zip.readStream(name)) {
+			const room = MAX_SNIFF_BYTES - total;
+			const take = chunk.byteLength <= room ? chunk : chunk.subarray(0, room);
+			chunks.push(take);
+			total += take.byteLength;
+			if (total >= MAX_SNIFF_BYTES) break;
+		}
+	} catch {
+		return undefined; // an undecodable part reads as absent for classification
 	}
 	const joined = new Uint8Array(total);
 	let offset = 0;

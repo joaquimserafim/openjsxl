@@ -117,8 +117,8 @@ const SPREADSHEET_BODY = '<office:spreadsheet><table:table table:name="S"/></off
 
 describe("detectSpreadsheetFormat — mimetype-less ODS (openOds tolerates it; F7.4 review)", () => {
 	it("classifies a mimetype-less ODS as ods via its content.xml spreadsheet body", async () => {
-		// A few producers omit the optional `mimetype` entry; openOds reads such a file, so detect must
-		// too (its verdict must never be stricter than its paired opener).
+		// A few producers omit the optional `mimetype` entry; openOds reads such a file into real
+		// sheets, so detect recognizes it too — a routing caller must not drop a readable spreadsheet.
 		const noMime = await writeZip([
 			{ name: "content.xml", data: enc.encode(odfContent(SPREADSHEET_BODY)) },
 		]);
@@ -126,10 +126,71 @@ describe("detectSpreadsheetFormat — mimetype-less ODS (openOds tolerates it; F
 	});
 
 	it("does NOT classify a mimetype-less TEXT document (.odt) as ods", async () => {
+		// (openOds would technically open this as a zero-sheet workbook — mimetype absent, content.xml
+		// present — but routing a text document to a spreadsheet opener helps nobody; undefined is the
+		// honest verdict.)
 		const odt = await writeZip([
 			{ name: "content.xml", data: enc.encode(odfContent("<office:text/>")) },
 		]);
 		expect(await detectSpreadsheetFormat(odt)).toBeUndefined();
+	});
+
+	it("tolerates a present-but-EMPTY mimetype entry, like openOds", async () => {
+		const emptyMime = await writeZip([
+			{ name: "mimetype", data: enc.encode("") },
+			{ name: "content.xml", data: enc.encode(odfContent(SPREADSHEET_BODY)) },
+		]);
+		expect(await detectSpreadsheetFormat(emptyMime)).toBe("ods");
+	});
+});
+
+describe("detectSpreadsheetFormat — a disqualifying mimetype suppresses the ods fallback (post-M7 review)", () => {
+	// openOds REJECTS any present non-empty non-spreadsheet mimetype (typed `unsupported`), so detect
+	// classifying such a file `ods` would be a guaranteed-wrong route. The fallback fires only when
+	// the mimetype entry is absent or empty — mirroring openOds's own tolerance condition.
+	it("does not classify a real .odt as ods even when its text MENTIONS office:spreadsheet", async () => {
+		const odt = await writeZip([
+			{
+				name: "mimetype",
+				data: enc.encode("application/vnd.oasis.opendocument.text"),
+			},
+			{
+				name: "content.xml",
+				data: enc.encode(
+					odfContent("<office:text><text:p>office:spreadsheet</text:p></office:text>"),
+				),
+			},
+		]);
+		expect(await detectSpreadsheetFormat(odt)).toBeUndefined();
+	});
+
+	it("does not classify a garbage-mimetype zip as ods despite a genuine spreadsheet body", async () => {
+		// openOds rejects this exact file ("not an OpenDocument spreadsheet (mimetype: …)"), so ods
+		// would route the caller into a certain typed failure.
+		const garbage = await writeZip([
+			{ name: "mimetype", data: enc.encode("application/octet-stream") },
+			{ name: "content.xml", data: enc.encode(odfContent(SPREADSHEET_BODY)) },
+		]);
+		expect(await detectSpreadsheetFormat(garbage)).toBeUndefined();
+	});
+
+	it("still classifies via [Content_Types].xml when the mimetype entry is unreadable", async () => {
+		// Per-entry shielding: one undecodable entry treats THAT part as absent instead of aborting
+		// the whole classification. Here `maxPartBytes` makes the oversized mimetype entry refuse to
+		// read, but openXlsx never touches mimetype — so the workbook content type still decides.
+		// (The earlier blanket try/catch returned undefined for this file.)
+		const zip = await writeZip([
+			{ name: "mimetype", data: enc.encode("x".repeat(1000)) },
+			{
+				name: "[Content_Types].xml",
+				data: enc.encode(
+					contentTypes(
+						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+					),
+				),
+			},
+		]);
+		expect(await detectSpreadsheetFormat(zip, { maxPartBytes: 800 })).toBe("xlsx");
 	});
 });
 

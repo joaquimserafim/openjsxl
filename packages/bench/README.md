@@ -54,7 +54,7 @@ openpyxl and python-calamine numbers are gathered separately (they need Python, 
 into the report as clearly-labelled reference rows:
 
 ```sh
-python3.13 -m venv .venv && . .venv/bin/activate   # Python 3.9–3.13 (see py/requirements.txt)
+python3 -m venv .venv && . .venv/bin/activate      # Python 3.9–3.14 (see py/requirements.txt)
 pip install -r py/requirements.txt
 python3 py/bench_py.py         # reads the same .cache/ fixtures → .cache/python.json
 node src/run.mjs --render-only  # merge the Python column in without re-running the JS matrix

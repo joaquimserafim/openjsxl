@@ -1564,6 +1564,40 @@ root README (refreshed 1M table + size mini-table + cross-format line), facade R
 README (`pnpm sizes` + the new lanes). Gate: biome 0 / tsc 0 / **603 tests** (no core code moved — bench
 is a private package). **M7 fully complete.**
 
+**Post-M7 review follow-up (uncommitted, awaiting owner approval).** Owner-requested cost-capped
+review (workflow `wmb7424k9`: 3 finders → capped refuting verifiers, 7 agents) of `5cc8802` + `c2f6f6a`
+— targeting the F7.4 post-review fixes (themselves unreviewed) and the never-reviewed bench commit.
+**7 findings: 4 CONFIRMED by verifiers + 3 UNVERIFIED (cost cap) re-verified CONFIRMED by hand; 0
+refuted. All fixed:**
+1. *(medium, core)* `detect.ts`: the content.xml ODS fallback fired even when a present non-empty
+   NON-spreadsheet `mimetype` had been read — classifying files `openOds` deterministically rejects
+   (a real `.odt`, a garbage-mimetype zip) as `ods`. Fixed: the fallback now fires only when the
+   mimetype entry is absent or empty (mirroring ods.ts's own tolerance) and matches the structural
+   `<office:spreadsheet` element, not the bare substring. +3 pinned tests (**606**).
+2. *(low, core)* The "detect is never stricter than its opener" comment/invariant was false for a
+   mimetype-less `.odt` (openOds opens it as a ZERO-sheet workbook; detect says undefined —
+   deliberately). Comments in detect.ts/detect.test.ts rewritten honestly; openOds's docstring
+   corrected (non-spreadsheet rejection happens via the mimetype, when present).
+3. *(medium, bench)* `sizes.mjs` counted the library itself as its own dependency (off-by-one:
+   openjsxl "2"→**1** (its own core), ExcelJS 97→**96**, SheetJS 9→**8**); report.mjs's bold-0 branch
+   was unreachable. Fixed count (`lines − 2`), sizes.json regenerated, READMEs reconciled.
+4. *(low, bench)* The sizes.json `note` (openjsxl measured at published 0.6.0; M7 adds no deps) was
+   captured but never rendered — now a footnote under the size table.
+5. *(low, bench)* formats.mjs comment claimed calamine anchors the **ods** lane — false (calamine
+   rejects SheetJS-authored ods); comment now states the ods lane has no independent anchor.
+6. *(medium, bench)* The Python reference ran on **calamine 0.7.0 / Python 3.14.6** while
+   requirements.txt pinned 0.2.3 / ≤3.13 — published numbers weren't reproducible from the documented
+   env. requirements.txt re-pinned to the versions actually measured (0.7.0 ships 3.9–3.14 wheels);
+   bench README updated.
+7. *(low, docs)* "within ~1.5× of native calamine" was stale vs the fresh data (1M read ratios
+   1.31/1.61/1.63) → reworded to "~1.3–1.6× (workload-dependent)".
+Plus an owner style pass on detect.ts: the blanket try/catch around the whole zip branch replaced by
+per-site shields on the only two throwing ops — one try around `openZip`, and `sniff()` owning the
+try around its readStream iteration (→ `string | undefined`); pure logic stays shield-free. Side
+benefit, pinned: one unreadable entry (e.g. an oversized mimetype under `maxPartBytes`) no longer
+aborts classification — the OOXML branch still decides (openXlsx never reads mimetype).
+Gate: biome 0 / tsc 0 / **607 tests** (+4). Probes stayed in the scratchpad; repo swept clean.
+
 ---
 
 ## M8+ — Later milestones (outline; expanded when reached)

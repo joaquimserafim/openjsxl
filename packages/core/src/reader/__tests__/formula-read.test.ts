@@ -99,7 +99,7 @@ describe("parseFormulas — units", () => {
 describe("formula(ref) — real fixtures (e2e)", () => {
 	it("reads basic.xlsx's cached formula as live text", async () => {
 		const wb = await openXlsx(await loadFixture("basic.xlsx"));
-		const s = wb.sheet(wb.sheets[0]!.name);
+		const s = wb.sheet(wb.sheets[0]?.name ?? "");
 		expect(s.formula("E1")).toBe("B1*2");
 		expect(s.cell("E1").value).toBe(84); // cached result still available
 		expect(s.formula("A1")).toBeUndefined(); // a value cell has no formula
@@ -115,9 +115,8 @@ describe("formula(ref) — real fixtures (e2e)", () => {
 	});
 
 	it("reads a formula alongside an error cached value", async () => {
-		const s = (await openXlsx(await loadFixture("errors.xlsx"))).sheet(
-			(await openXlsx(await loadFixture("errors.xlsx"))).sheets[0]!.name,
-		);
+		const wb = await openXlsx(await loadFixture("errors.xlsx"));
+		const s = wb.sheet(wb.sheets[0]?.name ?? "");
 		expect(s.formula("A1")).toBe("5/0");
 		expect(s.cell("A1").type).toBe("error");
 		expect(s.cell("A1").value).toBe("#DIV/0!");

@@ -6,7 +6,9 @@
 // the same file" rule: xlsx reuses the ExcelJS-authored fixture; xlsb/ods are authored by SheetJS
 // (a real producer that can WRITE those binary/ODF containers); csv is authored directly (it is just
 // text — no producer bias). The SheetJS-reads-a-SheetJS-file caveat is the same one ExcelJS→xlsx
-// already carries, and python-calamine (independent) anchors the xlsb/ods numbers.
+// already carries, and python-calamine (independent) anchors the xlsb numbers. The ods lane has NO
+// independent anchor: calamine rejects SheetJS-authored .ods with a parse error (openjsxl and
+// SheetJS both read it) — stated in the report rather than hidden.
 
 import { existsSync, writeFileSync } from "node:fs";
 import { buildDataset } from "./workloads.mjs";

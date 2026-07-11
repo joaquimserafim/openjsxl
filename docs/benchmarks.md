@@ -18,19 +18,21 @@ working set one call actually costs.
 ## Library size
 
 A clean production install (`npm install --omit=dev`) of each library — measured 2026-07-11 on
-Node 24.18.0. **Deps** is the full transitive runtime package count; **Own
-size** is the package's own unpacked tarball; **Installed** is the library plus every runtime
-dependency on disk.
+Node 24.18.0. **Deps** counts the runtime packages the library pulls in
+(transitive, excluding the library itself); **Own size** is the package's own unpacked tarball;
+**Installed** is the library plus every runtime dependency on disk.
 
 | Library | Version | Deps | Own size | Installed |
 | --- | --- | --- | --- | --- |
-| **openjsxl** | `0.6.0` | 2 | 6 KB | 0.2 MB |
-| **ExcelJS** | `4.4.0` | 97 | 20.8 MB | 34.4 MB |
-| **SheetJS** | `0.18.5` | 9 | 7.2 MB | 14.0 MB |
+| **openjsxl** | `0.6.0` | 1 | 6 KB | 0.2 MB |
+| **ExcelJS** | `4.4.0` | 96 | 20.8 MB | 34.4 MB |
+| **SheetJS** | `0.18.5` | 8 | 7.2 MB | 14.0 MB |
 
-openjsxl ships **zero third-party runtime dependencies** — its only listed dependency is its own
-`@openjsxl/core` (both packages are pure TypeScript over platform Web APIs). ExcelJS and SheetJS
-pull in a tree of runtime packages, which is what the *Installed* column reflects.
+_openjsxl: its one dependency is its own `@openjsxl/core` — zero third-party packages. Measured at 0.6.0 (the latest published version); the M7 readers add code but no dependencies._
+
+openjsxl ships **zero third-party runtime dependencies** (both its packages are pure TypeScript over
+platform Web APIs). ExcelJS and SheetJS pull in a tree of runtime packages, which is what the
+*Installed* column reflects.
 
 
 ## Read
@@ -170,7 +172,8 @@ Measured out-of-band on: darwin · Python 3.14.6 · 2026-07-11
 > much lower baseline RSS than Node, openpyxl runs in its streaming `read_only`/`write_only` modes
 > (tiny memory, unlike the in-memory JS APIs benchmarked above), and `python-calamine` is a native
 > Rust binding — the cross-language *speed bar* openjsxl targets, not a same-runtime peer. The point:
-> openjsxl is the fastest pure-JS option here and lands within ~1.5× of native calamine on read.
+> openjsxl is the fastest pure-JS option here and lands within ~1.3–1.6× of native calamine on read
+> (workload-dependent; measured against the versions stamped above).
 
 **Read**
 

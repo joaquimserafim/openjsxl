@@ -116,21 +116,25 @@ function sizesSection() {
 	const rows = data.libs.map((l) => [
 		`**${l.name}**`,
 		`\`${version(l.spec)}\``,
-		l.totalDeps === 0 ? "**0**" : String(l.totalDeps),
+		String(l.totalDeps),
 		fmtBytes(l.ownBytes),
 		`${(l.installKB / 1024).toFixed(1)} MB`,
 	]);
+	const notes = data.libs
+		.filter((l) => l.note)
+		.map((l) => `\n_${l.name}: ${l.note}_\n`)
+		.join("");
 	return `
 A clean production install (\`npm install --omit=dev\`) of each library — measured ${data.date} on
-Node ${data.node.replace(/^v/, "")}. **Deps** is the full transitive runtime package count; **Own
-size** is the package's own unpacked tarball; **Installed** is the library plus every runtime
-dependency on disk.
+Node ${data.node.replace(/^v/, "")}. **Deps** counts the runtime packages the library pulls in
+(transitive, excluding the library itself); **Own size** is the package's own unpacked tarball;
+**Installed** is the library plus every runtime dependency on disk.
 
 ${table(["Library", "Version", "Deps", "Own size", "Installed"], rows)}
-
-openjsxl ships **zero third-party runtime dependencies** — its only listed dependency is its own
-\`@openjsxl/core\` (both packages are pure TypeScript over platform Web APIs). ExcelJS and SheetJS
-pull in a tree of runtime packages, which is what the *Installed* column reflects.
+${notes}
+openjsxl ships **zero third-party runtime dependencies** (both its packages are pure TypeScript over
+platform Web APIs). ExcelJS and SheetJS pull in a tree of runtime packages, which is what the
+*Installed* column reflects.
 `;
 }
 
@@ -155,7 +159,8 @@ function pythonSection() {
 > much lower baseline RSS than Node, openpyxl runs in its streaming \`read_only\`/\`write_only\` modes
 > (tiny memory, unlike the in-memory JS APIs benchmarked above), and \`python-calamine\` is a native
 > Rust binding — the cross-language *speed bar* openjsxl targets, not a same-runtime peer. The point:
-> openjsxl is the fastest pure-JS option here and lands within ~1.5× of native calamine on read.
+> openjsxl is the fastest pure-JS option here and lands within ~1.3–1.6× of native calamine on read
+> (workload-dependent; measured against the versions stamped above).
 `;
 	for (const op of ["read", "write"]) {
 		const workloads = [

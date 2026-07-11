@@ -21,7 +21,11 @@ import { fileURLToPath } from "node:url";
 const CACHE = fileURLToPath(new URL("../.cache/", import.meta.url));
 
 const LIBS = [
-	{ name: "openjsxl", spec: "openjsxl@0.6.0", note: "0.6.0 — M7 adds no dependencies" },
+	{
+		name: "openjsxl",
+		spec: "openjsxl@0.6.0",
+		note: "its one dependency is its own `@openjsxl/core` — zero third-party packages. Measured at 0.6.0 (the latest published version); the M7 readers add code but no dependencies.",
+	},
 	{ name: "ExcelJS", spec: "exceljs@4.4.0" },
 	{ name: "SheetJS", spec: "xlsx@0.18.5" },
 ];
@@ -35,9 +39,11 @@ function measure(lib) {
 	process.stdout.write(`▶ sizing ${lib.spec} … `);
 	sh("npm init -y", dir);
 	sh(`npm install --omit=dev --no-audit --no-fund --loglevel=error ${lib.spec}`, dir);
-	// `npm ls --all --parseable` prints one line per installed package (root first) → count − 1 deps.
+	// `npm ls --all --parseable` prints one line per installed package: the ROOT project, the library
+	// ITSELF, then its transitive deps — so the dependency count excludes the first two (counting the
+	// library as its own dependency inflated every row by one; post-M7 review).
 	const lsLines = sh("npm ls --all --omit=dev --parseable", dir).split("\n").filter(Boolean);
-	const totalDeps = Math.max(0, lsLines.length - 1);
+	const totalDeps = Math.max(0, lsLines.length - 2);
 	const directDeps = Object.keys(
 		JSON.parse(sh(`npm view ${lib.spec} dependencies --json`) || "{}"),
 	).length;

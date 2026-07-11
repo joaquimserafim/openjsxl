@@ -1,5 +1,5 @@
-# Out-of-band reference benchmarks (see bench_py.py). Pinned so the numbers reproduce.
-# Needs Python 3.9–3.13: python-calamine 0.2.3 (PyO3 0.22) has no wheel for 3.14 and won't build
-# against it. Use e.g. `python3.13 -m venv .venv` if your default `python3` is newer.
+# Out-of-band reference benchmarks (see bench_py.py). Pinned so the numbers reproduce — these are
+# the versions the published docs/benchmarks.md reference numbers were measured with (2026-07-11,
+# Python 3.14.6). python-calamine 0.7.0 ships wheels for Python 3.9–3.14.
 openpyxl==3.1.5
-python-calamine==0.2.3
+python-calamine==0.7.0

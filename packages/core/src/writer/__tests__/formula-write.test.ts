@@ -95,7 +95,7 @@ describe("bridge — formula round-trip (e2e)", () => {
 	it("carries basic.xlsx's formula as live text", async () => {
 		const before = await openXlsx(await loadFixture("basic.xlsx"));
 		const after = await openXlsx(await writeXlsx(await workbookToInput(before)));
-		const s = after.sheet(after.sheets[0]!.name);
+		const s = after.sheet(after.sheets[0]?.name ?? "");
 		expect(s.formula("E1")).toBe("B1*2");
 		expect(s.cell("E1").value).toBe(84);
 	});
@@ -103,7 +103,7 @@ describe("bridge — formula round-trip (e2e)", () => {
 	it("carries error-cell formulas (cached error becomes its string text)", async () => {
 		const before = await openXlsx(await loadFixture("errors.xlsx"));
 		const after = await openXlsx(await writeXlsx(await workbookToInput(before)));
-		const s = after.sheet(after.sheets[0]!.name);
+		const s = after.sheet(after.sheets[0]?.name ?? "");
 		expect(s.formula("A1")).toBe("5/0");
 		expect(s.cell("A1").value).toBe("#DIV/0!"); // error text preserved as a string result
 	});

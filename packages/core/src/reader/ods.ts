@@ -156,8 +156,10 @@ class OdsWorksheet implements Worksheet {
  * Open an OpenDocument spreadsheet (`.ods`) and read its cells. Returns the same {@link Workbook}
  * as {@link openXlsx} — sheets, typed cells, merges, hyperlinks, and a synthesized dimension.
  * Styles, formula text, comments, sheet geometry, and images are not carried by this reader and
- * degrade to empty/undefined on their accessors. Encrypted documents and non-spreadsheet ODF
- * files fail with a typed {@link XlsxError}.
+ * degrade to empty/undefined on their accessors. Encrypted documents fail with a typed
+ * {@link XlsxError}; a non-spreadsheet ODF file is rejected by its `mimetype` entry when one is
+ * present (a mimetype-less container is judged by its `content.xml` alone and may open with
+ * zero sheets).
  */
 export async function openOds(
 	source: Uint8Array | ArrayBuffer,

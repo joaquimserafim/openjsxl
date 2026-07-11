@@ -11,7 +11,7 @@ the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
 "Fast" is measured, not asserted — on a 1M-cell sheet, ~2–3× the read throughput of ExcelJS/SheetJS
 at a fraction of the memory, and it installs in **0.2 MB with zero third-party dependencies** (vs
-ExcelJS's 34 MB / 97 packages and SheetJS's 14 MB / 9)
+ExcelJS's 34 MB / 96 packages and SheetJS's 14 MB / 8)
 ([benchmarks](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md)).
 
 ```sh
