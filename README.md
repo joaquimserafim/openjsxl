@@ -338,15 +338,28 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
 | --- | --- | --- | --- |
-| **read** | **0.70 s · 205 MB** | 1.5 s · 820 MB | 2.1 s · 521 MB |
-| **write** | **0.69 s · 395 MB** | 3.1 s · 1.5 GB | 2.2 s · 565 MB |
+| **read** | **0.71 s · 207 MB** | 1.6 s · 801 MB | 2.2 s · 537 MB |
+| **write** | **0.74 s · 395 MB** | 3.3 s · 1.4 GB | 2.6 s · 565 MB |
 
 Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~95 MB)** no matter
-the row count (flat in *rows* — embedded images, when present, stay resident until the stream
-ends). The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write),
-the methodology, and out-of-band **openpyxl** / **python-calamine** reference numbers are in
-[`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce it end-to-end with `pnpm bench`.
-_(Measured 2026-07-03; every "fast" in these docs traces back to this table.)_
+the row count (flat in *rows* — embedded images, when present, stay resident until the stream ends).
+
+**Reads more than `.xlsx`.** The same million cells as `.xlsb`, `.ods`, and `.csv`, each parsed and
+materialized cell-by-cell — openjsxl leads every format (e.g. `.xlsb` in **0.18 s** vs SheetJS's
+1.55 s; ExcelJS reads neither `.xlsb` nor `.ods`).
+
+**And it stays small** — a clean production install (`npm install --omit=dev`), the library plus every
+runtime dependency on disk:
+
+| | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
+| --- | --- | --- | --- |
+| runtime deps | **0 third-party** | 97 packages | 9 packages |
+| installed | **0.2 MB** | 34 MB | 14 MB |
+
+The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write), the four-format
+read lanes, the library-size table, the methodology, and out-of-band **openpyxl** /
+**python-calamine** reference numbers are in [`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce
+it end-to-end with `pnpm bench`. _(Measured 2026-07-11; every "fast" in these docs traces back here.)_
 
 ## Approach
 

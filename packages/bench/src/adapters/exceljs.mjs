@@ -5,9 +5,18 @@ import ExcelJS from "exceljs";
 
 export const capabilities = { read: true, write: true, writeStyled: true, stream: false };
 
-export async function read(bytes) {
+// ExcelJS reads xlsx and csv only — it has no xlsb/ods parser, so those lanes decline (thrown →
+// reported as n/a, never measured doing less work).
+export async function read(bytes, format = "xlsx") {
 	const wb = new ExcelJS.Workbook();
-	await wb.xlsx.load(bytes);
+	if (format === "csv") {
+		const { Readable } = await import("node:stream");
+		await wb.csv.read(Readable.from([Buffer.from(bytes)]));
+	} else if (format === "xlsx") {
+		await wb.xlsx.load(bytes);
+	} else {
+		throw new Error(`unsupported: ExcelJS cannot read ${format}`);
+	}
 	let sink = 0;
 	wb.eachSheet((ws) => {
 		ws.eachRow({ includeEmpty: false }, (row) => {

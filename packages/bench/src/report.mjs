@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { FORMAT_READERS, FORMATS } from "./formats.mjs";
 import { machineLine } from "./machine.mjs";
 import { fmtBytes, fmtMs } from "./stats.mjs";
 
@@ -8,6 +9,7 @@ import { fmtBytes, fmtMs } from "./stats.mjs";
 
 const DOCS = fileURLToPath(new URL("../../../docs/benchmarks.md", import.meta.url));
 const PYTHON_CACHE = fileURLToPath(new URL("../.cache/python.json", import.meta.url));
+const SIZES_CACHE = fileURLToPath(new URL("../.cache/sizes.json", import.meta.url));
 
 const READ_COLS = ["openjsxl", "ExcelJS", "SheetJS"];
 const WRITE_COLS = ["openjsxl (buffered)", "openjsxl (streamed)", "ExcelJS", "SheetJS"];
@@ -20,7 +22,7 @@ function pick(results, op, workload, sizeKey, label) {
 
 // A time·memory cell. Missing/failed → em dash (footnote explains the common case: SheetJS styles).
 function cellTimeMem(res) {
-	if (!res || !res.ok) return "—";
+	if (!res?.ok) return "—";
 	return `${fmtMs(res.timeMs)} · ${fmtBytes(res.peakRss)}`;
 }
 
@@ -70,6 +72,66 @@ function sizeSection(results, sizes, workloads) {
 		md += `\n#### ${workload}\n\n${table(["Cells", ...WRITE_COLS], rows)}\n`;
 	}
 	return md;
+}
+
+// The cross-format read section: one sub-table per container, columns = the libraries that read it
+// (xlsb/ods have no ExcelJS column — it can't read them). Same time·memory cells as the main matrix.
+function formatSection(results) {
+	const sizeKeys = [...new Set(results.map((r) => r.sizeKey))];
+	let md = "";
+	for (const format of FORMATS) {
+		const labels = FORMAT_READERS[format].map((r) => r.label);
+		const rows = sizeKeys.map((sizeKey) => [
+			`\`${sizeKey}\``,
+			...labels.map((label) =>
+				cellTimeMem(
+					results.find(
+						(r) => r.format === format && r.sizeKey === sizeKey && r.label === label,
+					),
+				),
+			),
+		]);
+		md += `\n#### ${format}\n\n${table(["Cells", ...labels], rows)}\n`;
+	}
+	return md;
+}
+
+// The library size matrix — a clean production install of each library, from ../.cache/sizes.json
+// (populated out-of-band by sizes.mjs, since it does real npm installs). Speed is one axis; the cost
+// of the dependency footprint is the other, and the one openjsxl's zero-dep design targets.
+function sizesSection() {
+	if (!existsSync(SIZES_CACHE)) {
+		return [
+			"\nMeasured out-of-band by a clean `npm install` per library. Populate with:",
+			"",
+			"```sh",
+			"node packages/bench/src/sizes.mjs   # writes packages/bench/.cache/sizes.json",
+			"pnpm bench --render-only            # re-render with the size table filled in",
+			"```",
+			"",
+		].join("\n");
+	}
+	const data = JSON.parse(readFileSync(SIZES_CACHE, "utf8"));
+	const version = (spec) => spec.slice(spec.lastIndexOf("@") + 1);
+	const rows = data.libs.map((l) => [
+		`**${l.name}**`,
+		`\`${version(l.spec)}\``,
+		l.totalDeps === 0 ? "**0**" : String(l.totalDeps),
+		fmtBytes(l.ownBytes),
+		`${(l.installKB / 1024).toFixed(1)} MB`,
+	]);
+	return `
+A clean production install (\`npm install --omit=dev\`) of each library — measured ${data.date} on
+Node ${data.node.replace(/^v/, "")}. **Deps** is the full transitive runtime package count; **Own
+size** is the package's own unpacked tarball; **Installed** is the library plus every runtime
+dependency on disk.
+
+${table(["Library", "Version", "Deps", "Own size", "Installed"], rows)}
+
+openjsxl ships **zero third-party runtime dependencies** — its only listed dependency is its own
+\`@openjsxl/core\` (both packages are pure TypeScript over platform Web APIs). ExcelJS and SheetJS
+pull in a tree of runtime packages, which is what the *Installed* column reflects.
+`;
 }
 
 function pythonSection() {
@@ -125,13 +187,33 @@ function pythonSection() {
 			md += `\n_${workload}_\n\n${table(["Cells", ...cols], rows)}\n`;
 		}
 	}
+	// The cross-format read reference: calamine for xlsx/xlsb/ods, stdlib csv for csv.
+	const formatRes = data.results.filter((r) => r.op === "read-format");
+	if (formatRes.length) {
+		const formats = [...new Set(formatRes.map((r) => r.format))];
+		const sizeKeys = [...new Set(formatRes.map((r) => r.sizeKey))];
+		md +=
+			"\n**Read by format** — calamine (xlsx/xlsb) · stdlib `csv` (csv). calamine rejects SheetJS's `.ods` output, so ods has no reference row here.\n\n";
+		const rows = sizeKeys.map((sk) => [
+			`\`${sk}\``,
+			...formats.map((f) => {
+				const r = formatRes.find((x) => x.format === f && x.sizeKey === sk);
+				return r ? `${fmtMs(r.timeMs)} · ${fmtBytes(r.peakRssMB * 1024 ** 2)}` : "—";
+			}),
+		]);
+		md += `${table(["Cells", ...formats], rows)}\n`;
+	}
 	return md;
 }
 
 /** Write docs/benchmarks.md from the collected results; returns the path written. */
 export function writeReport(results, { sizes, workloads, ops }) {
 	const date = new Date().toISOString().slice(0, 10);
-	const anyStyledWriteGap = results.some(
+	// The cross-format read results are tagged separately so they don't leak into the main xlsx matrix
+	// (which shares op/workload/label with the format phase's xlsx lane).
+	const matrix = results.filter((r) => r.section !== "format-read");
+	const formatReads = results.filter((r) => r.section === "format-read");
+	const anyStyledWriteGap = matrix.some(
 		(r) => r.op === "write" && r.workload === "styled" && r.label === "SheetJS" && !r.ok,
 	);
 
@@ -151,8 +233,12 @@ caveats are at the bottom.
 Libraries: **openjsxl** (this project), **ExcelJS** \`4.4.0\`, **SheetJS** \`xlsx@0.18.5\` (the last
 version on the public npm registry). Peak RSS is absolute and includes loading the library — the
 working set one call actually costs.
-${ops.includes("read") ? `\n## Read\n\nParse a real \`.xlsx\` and materialize every cell value.\n${section(results, "read", sizes, workloads)}` : ""}
-${ops.includes("write") ? `\n## Write\n\nSerialize N cells to \`.xlsx\` bytes. openjsxl's *streamed* column is fed a lazy row source (a\ngenerator) — the honest streaming case, where the full row array never exists in memory.\n${section(results, "write", sizes, workloads)}\n### Output file size\n${sizeSection(results, sizes, workloads)}` : ""}
+
+## Library size
+${sizesSection()}
+${ops.includes("read") ? `\n## Read\n\nParse a real \`.xlsx\` and materialize every cell value.\n${section(matrix, "read", sizes, workloads)}` : ""}
+${ops.includes("write") ? `\n## Write\n\nSerialize N cells to \`.xlsx\` bytes. openjsxl's *streamed* column is fed a lazy row source (a\ngenerator) — the honest streaming case, where the full row array never exists in memory.\n${section(matrix, "write", sizes, workloads)}\n### Output file size\n${sizeSection(matrix, sizes, workloads)}` : ""}
+${formatReads.length ? `\n## Read by format\n\nThe same \`numbers\` data authored in four container formats, each read by the libraries that support\nit and materialized cell-by-cell. xlsx reuses the ExcelJS-authored fixture; \`.xlsb\`/\`.ods\` are\nauthored by **SheetJS** (a real producer that writes those containers — the same author-then-read\nshape ExcelJS→xlsx already uses); \`.csv\` is written directly (plain text, no producer). ExcelJS reads\nonly xlsx/csv. python-calamine (below) independently anchors xlsx and xlsb; it **rejects SheetJS's\n\`.ods\` output** with a parse error, while openjsxl and SheetJS both read it — so the \`.ods\` lane has no\ncalamine anchor (an openjsxl-tolerance data point, not a benchmark gap).\n${formatSection(formatReads)}` : ""}
 
 ## Reference: Python
 ${pythonSection()}

@@ -7,7 +7,9 @@ import * as XLSX from "xlsx";
 
 export const capabilities = { read: true, write: true, writeStyled: false, stream: false };
 
-export async function read(bytes) {
+// SheetJS sniffs the container (xlsx / xlsb / ods / csv) from the bytes, so ONE read path serves
+// every format lane — the `format` argument is accepted for a uniform adapter signature but unused.
+export async function read(bytes, _format = "xlsx") {
 	const wb = XLSX.read(bytes, { type: "buffer" });
 	let sink = 0;
 	for (const name of wb.SheetNames) {

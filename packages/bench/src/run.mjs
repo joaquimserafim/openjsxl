@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ensureFormatFixture, FORMAT_READERS, FORMAT_WORKLOAD, FORMATS } from "./formats.mjs";
 import { writeReport } from "./report.mjs";
 import { COLS, SIZES, WORKLOADS } from "./workloads.mjs";
 
@@ -162,6 +163,43 @@ async function main() {
 					const res = await runCell(cfg);
 					res.label = r.label;
 					res.sizeKey = size.key;
+					results.push(res);
+					report(res);
+				}
+			}
+		}
+	}
+
+	// Cross-format READ phase: the same `numbers` data in xlsx/xlsb/ods/csv, read by each library
+	// that supports the format. Runs unless read is explicitly excluded. Tagged section:"format-read"
+	// so the reporter keeps it separate from the main xlsx read matrix.
+	if (ops.includes("read")) {
+		for (const size of sizes) {
+			const policy = ITER_POLICY[size.key] ?? { warmup: 1, iters: 3 };
+			const iters = opts.quick ? 1 : (opts.iters ?? policy.iters);
+			const warmup = opts.quick ? 0 : (opts.warmup ?? policy.warmup);
+			const xlsxFixture = await ensureFixture(FORMAT_WORKLOAD, size);
+			for (const format of FORMATS) {
+				const fixture = await ensureFormatFixture(CACHE, size, format, xlsxFixture);
+				for (const r of FORMAT_READERS[format]) {
+					const cfg = {
+						lib: r.id,
+						op: "read",
+						workload: FORMAT_WORKLOAD,
+						rows: size.rows,
+						iters,
+						warmup,
+						fixture,
+						format,
+					};
+					process.stdout.write(
+						`▶ read· ${format.padEnd(4)} · ${size.key.padEnd(4)} · ${r.label} … `,
+					);
+					const res = await runCell(cfg);
+					res.label = r.label;
+					res.sizeKey = size.key;
+					res.format = format;
+					res.section = "format-read";
 					results.push(res);
 					report(res);
 				}

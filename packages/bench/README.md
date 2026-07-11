@@ -9,6 +9,7 @@ libraries (ExcelJS, SheetJS) live as devDependencies, so the shipped packages (`
 ```sh
 pnpm bench            # full matrix (10k / 100k / 1M cells) → docs/benchmarks.md
 pnpm bench --quick    # 10k only, 1 iteration — a fast smoke test of the harness itself
+pnpm sizes            # library size matrix (clean npm installs) → .cache/sizes.json
 ```
 
 `pnpm bench` builds `openjsxl` first (so it benchmarks the real published bundle, not TS source),
@@ -25,6 +26,12 @@ Flags: `--sizes 10k,100k`, `--workloads numbers,strings,styled`, `--ops read,wri
 - **Workloads:** 10-column sheets of 10k / 100k / 1M cells, in three flavours — numbers-heavy,
   strings-heavy (realistic repetition, so shared-string tables matter), and styled.
 - **Operations:** read (parse → materialize every cell) and write (serialize N cells → bytes).
+- **Read by format:** the same `numbers` data as `.xlsx` / `.xlsb` / `.ods` / `.csv`, each read by
+  the libraries that support it. xlsx reuses the ExcelJS fixture; `.xlsb`/`.ods` are authored by
+  SheetJS (a real producer that writes those containers); `.csv` is written directly. `src/formats.mjs`.
+- **Library size:** `node src/sizes.mjs` does a clean `npm install --omit=dev` of each library and
+  records its transitive dependency count and on-disk footprint (`src/sizes.mjs` → `.cache/sizes.json`,
+  folded into the report). This is the cost openjsxl's zero-dependency design targets.
 - **Metrics:** median wall-time and peak process RSS.
 
 ## Why the numbers are trustworthy

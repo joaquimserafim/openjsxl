@@ -6,7 +6,8 @@
 	"type": "module",
 	"license": "MIT",
 	"scripts": {
-		"bench": "node src/run.mjs"
+		"bench": "node src/run.mjs",
+		"sizes": "node src/sizes.mjs"
 	},
 	"dependencies": {
 		"openjsxl": "workspace:*"

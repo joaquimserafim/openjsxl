@@ -10,7 +10,7 @@ import { median } from "./stats.mjs";
 import { buildDataset, datasetGenerator } from "./workloads.mjs";
 
 const cfg = JSON.parse(process.argv[2]);
-const { lib, op, workload, rows, iters, warmup, fixture } = cfg;
+const { lib, op, workload, rows, iters, warmup, fixture, format = "xlsx" } = cfg;
 
 function rss() {
 	return process.memoryUsage().rss;
@@ -36,7 +36,7 @@ async function main() {
 	// write-stream builds a fresh lazy generator per iteration (no materialized array by design).
 
 	const runOnce = async () => {
-		if (op === "read") return await adapter.read(bytes);
+		if (op === "read") return await adapter.read(bytes, format);
 		if (op === "write") return await adapter.write(dataset, workload);
 		return await adapter.writeStream(datasetGenerator(workload, rows));
 	};

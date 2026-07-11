@@ -1503,11 +1503,66 @@ fully inflated the mimetype/Content_Types part (a ~4.29 GB bomb DoS, contradicti
 typed-reject → pinned the (empty) reject set + key-fixture presence; (4) the equivalence test sampled
 9 fixed refs → now compares the full populated-cell set (catches an out-of-range cell). Probes stayed
 in the scratchpad.
-**Remaining for M7 (post-commit, owner's separate post-M7 ask):** re-run `pnpm bench` + add read lanes
-(csv vs Python `csv` is easy; **xlsb/ods at bench scale are constrained** — no local Excel/LibreOffice
-to author 1M-cell files, and a hand-built binary xlsb at that scale is high-risk to trust) + publish
-the library install/bundle-size matrix (openjsxl ~193 KB/0 deps · exceljs 20.8 MB/9 deps · xlsx
-7.15 MB/7 deps). Sequenced as its own commit; owner steer on the xlsb/ods-scale bench lanes.
+**Remaining for M7 (post-commit, owner's separate post-M7 ask):** the bench read lanes + library
+size matrix — scoped as its own section below, its own commit.
+
+---
+
+## Post-M7 — bench read lanes + library size matrix ☑
+
+The owner's post-M7 ask (2026-07-11): re-run `pnpm bench` on the M7 build and add (a) cross-format
+**read** lanes and (b) a **library size matrix**. Two owner decisions locked via AskUserQuestion:
+full-scale xlsb/ods lanes with **SheetJS-authored fixtures** (the same author-then-read methodology
+ExcelJS→xlsx already uses), and the size matrix covering the real competitors. Private `@openjsxl/bench`
+only — no shipped code changes, so the byte-identity / corpus / openpyxl gates are N/A; the standing
+gate (biome/tsc/vitest) still holds since nothing in `packages/core` moves.
+
+**Cross-format read benchmark.** One workload (`numbers`), the three existing sizes (10k/100k/1M),
+four container formats, each read by the libraries that support it:
+- **xlsx** — openjsxl · ExcelJS · SheetJS (reuse the ExcelJS-authored fixtures already cached).
+- **xlsb** — openjsxl · SheetJS (ExcelJS/openpyxl can't read it). Fixture authored by SheetJS.
+- **ods** — openjsxl · SheetJS. Fixture authored by SheetJS.
+- **csv** — openjsxl · ExcelJS · SheetJS. Fixture authored directly (csv is just text — no producer).
+Python reference (out-of-band, same as F5.5): **python-calamine** reads xlsx/xlsb/ods (the native
+speed bar); **Python stdlib `csv`** for csv. Equal-work rule unchanged: every reader materializes
+every cell into a checksum sink, and all readers of a format parse the identical file. **Caveat noted
+in the report:** SheetJS reads xlsb/ods files it also authored (the same self-authored shape ExcelJS
+already has for xlsx) — the numbers are throughput-indicative, and calamine (independent) anchors them.
+
+**Library size matrix.** openjsxl (facade) · @openjsxl/core · ExcelJS `4.4.0` · SheetJS `xlsx@0.18.5`,
+by three honest measures: **runtime dependency count** (direct + transitive), **installed footprint**
+(the package + its deps on disk), and **minified+gzipped bundle size** (esbuild bundle of the main
+entry — the browser/edge cost, where openjsxl's zero-dep story shows). Reproducible via a small
+`sizes.mjs` in the bench package; every published number comes from a measurement, never an estimate.
+
+**Tasks**
+- [x] Adapters: `read(bytes, format)` dispatch (openjsxl → open{Xlsx,Xlsb,Ods,Csv}; SheetJS auto-detects;
+      ExcelJS gains csv, declines xlsb/ods); worker passes `format`.
+- [x] `formats.mjs`: the per-format reader matrix + SheetJS/direct fixture authoring (cached).
+- [x] `run.mjs`: a format-read phase after the main matrix; `report.mjs`: a "Read by format" section.
+- [x] `bench_py.py`: calamine xlsb/ods read lanes + a Python stdlib `csv` lane; merge into the report.
+- [x] `sizes.mjs` + a "Library size" section in benchmarks.md; a size line in the three READMEs.
+- [x] Run it (JS lanes + a fresh calamine venv for the Python reference); refresh docs/benchmarks.md.
+**Acceptance.** benchmarks.md carries the cross-format read table + the size matrix, every number from
+a real run; READMEs cite the size comparison; the existing xlsx read/write numbers are refreshed on the
+M7 build. Own commit; 0.7 release prep + bump stay owner-gated (CLAUDE.md #4).
+
+**Landed (uncommitted, awaiting owner approval).** Adapters gained `read(bytes, format)` dispatch
+(openjsxl → the four typed openers; SheetJS auto-detects; ExcelJS reads csv, declines xlsb/ods typed);
+`worker.mjs` threads `format`. New `formats.mjs` (per-format reader matrix; `.xlsb`/`.ods` fixtures
+authored by SheetJS, `.csv` written directly — cached under `.cache/`); `run.mjs` runs a format-read
+phase after the main matrix; `report.mjs` renders **Library size** + **Read by format** sections and a
+Python by-format table. New `sizes.mjs` (`pnpm sizes` → clean `npm install --omit=dev` per lib →
+`.cache/sizes.json`). `bench_py.py` gained calamine xlsx/xlsb + stdlib-`csv` format lanes.
+**Numbers (M2 Pro, Node 24, 2026-07-11):** size — openjsxl **0 third-party deps / 0.2 MB installed**
+vs ExcelJS 97 pkgs / 34 MB vs SheetJS 9 pkgs / 14 MB. Read-by-format — openjsxl leads every format at
+every size; **`.xlsb` 1M in 0.18 s vs SheetJS 1.55 s (~8×)**, `.ods` 1.39 s vs 3.30 s, `.csv` 0.59 s
+vs 1.04 s. **Finding surfaced (not hidden):** python-calamine **rejects SheetJS's `.ods` output** with
+a parse error while openjsxl and SheetJS both read it — so the `.ods` lane has no calamine anchor (an
+openjsxl-tolerance data point). Docs: docs/benchmarks.md (size + format + Python-by-format sections),
+root README (refreshed 1M table + size mini-table + cross-format line), facade README (size line), bench
+README (`pnpm sizes` + the new lanes). Gate: biome 0 / tsc 0 / **603 tests** (no core code moved — bench
+is a private package). **M7 fully complete.**
 
 ---
 

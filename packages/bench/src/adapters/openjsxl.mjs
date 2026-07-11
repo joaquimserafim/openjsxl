@@ -1,4 +1,4 @@
-import { openXlsx, streamXlsx, writeXlsx } from "openjsxl";
+import { openCsv, openOds, openXlsb, openXlsx, streamXlsx, writeXlsx } from "openjsxl";
 
 // openjsxl adapter — the library under test. Read materializes every cell value (forcing the full
 // parse); buffered write returns the bytes; the streamed write drains a ReadableStream fed a LAZY
@@ -6,8 +6,14 @@ import { openXlsx, streamXlsx, writeXlsx } from "openjsxl";
 
 export const capabilities = { read: true, write: true, writeStyled: true, stream: true };
 
-export async function read(bytes) {
-	const wb = await openXlsx(bytes);
+// One explicit opener per container — the whole point of the multi-format read lanes is that each
+// format has its own typed entry point (no auto-dispatch cost in the shipped core).
+const OPENERS = { xlsx: openXlsx, xlsb: openXlsb, ods: openOds, csv: openCsv };
+
+export async function read(bytes, format = "xlsx") {
+	const open = OPENERS[format];
+	if (!open) throw new Error(`unsupported: openjsxl has no opener for ${format}`);
+	const wb = await open(bytes);
 	let sink = 0;
 	for (const info of wb.sheets) {
 		const sheet = wb.sheet(info.name);

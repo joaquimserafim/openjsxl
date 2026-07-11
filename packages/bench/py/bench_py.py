@@ -80,6 +80,7 @@ def read_openpyxl(path):
 def read_calamine(path):
     from python_calamine import CalamineWorkbook
 
+    # calamine sniffs the container from the file — one path reads xlsx / xlsb / ods alike.
     wb = CalamineWorkbook.from_path(path)
     sink = 0
     for name in wb.sheet_names:
@@ -90,6 +91,25 @@ def read_calamine(path):
                 elif isinstance(v, str):
                     sink += len(v)
     return sink
+
+
+def read_csv_py(path):
+    """Python's stdlib csv — the RFC 4180 reference — materializing every field into the sink."""
+    import csv
+
+    sink = 0
+    with open(path, newline="") as f:
+        for row in csv.reader(f):
+            for v in row:
+                try:
+                    sink += float(v)
+                except ValueError:
+                    sink += len(v)
+    return sink
+
+
+def format_fixture(cfg):
+    return os.path.join(CACHE, f"read-numbers-{cfg['sizeKey']}.{cfg['format']}")
 
 
 def write_openpyxl(kind, rows):
@@ -126,6 +146,17 @@ OPS = {
     ("read", "openpyxl"): lambda cfg: read_openpyxl(fixture_path(cfg["workload"], cfg["sizeKey"])),
     ("read", "python-calamine"): lambda cfg: read_calamine(fixture_path(cfg["workload"], cfg["sizeKey"])),
     ("write", "openpyxl"): lambda cfg: write_openpyxl(cfg["workload"], cfg["rows"]),
+    # Cross-format read: calamine reads xlsx/xlsb/ods; Python's stdlib csv reads csv.
+    ("read-format", "python-calamine"): lambda cfg: read_calamine(format_fixture(cfg)),
+    ("read-format", "python-csv"): lambda cfg: read_csv_py(format_fixture(cfg)),
+}
+
+# Which Python reader anchors each container in the cross-format table.
+FORMAT_READERS_PY = {
+    "xlsx": "python-calamine",
+    "xlsb": "python-calamine",
+    "ods": "python-calamine",
+    "csv": "python-csv",
 }
 
 
@@ -141,10 +172,13 @@ def run_worker(cfg):
         t0 = time.perf_counter()
         fn(cfg)
         times.append((time.perf_counter() - t0) * 1000)
-    print(json.dumps({
+    out = {
         "ok": True, "lib": cfg["lib"], "op": cfg["op"], "workload": cfg["workload"],
         "sizeKey": cfg["sizeKey"], "timeMs": statistics.median(times), "peakRssMB": peak_rss_mb(),
-    }))
+    }
+    if "format" in cfg:
+        out["format"] = cfg["format"]
+    print(json.dumps(out))
 
 
 def orchestrate(size_keys, workloads):
@@ -177,6 +211,35 @@ def orchestrate(size_keys, workloads):
                     results.append(res)
                 else:
                     print(f"n/a ({res.get('reason')})")
+    # Cross-format read reference: calamine for xlsx/xlsb/ods, stdlib csv for csv, on the SAME
+    # per-format fixtures the JS harness authored (so the comparison is like-for-like).
+    for size_key, rows in SIZES:
+        if size_key not in size_keys:
+            continue
+        iters = 5 if size_key == "10k" else 3 if size_key == "100k" else 2
+        for fmt, lib in FORMAT_READERS_PY.items():
+            if not os.path.exists(os.path.join(CACHE, f"read-numbers-{size_key}.{fmt}")):
+                print(f"  · skip read-format/{lib}/{fmt}/{size_key} — no fixture (run `pnpm bench` first)")
+                continue
+            cfg = {"op": "read-format", "lib": lib, "workload": "numbers", "sizeKey": size_key,
+                   "format": fmt, "rows": rows, "iters": iters, "warmup": 1}
+            sys.stdout.write(f"▶ format · {fmt:4} · {size_key:4} · {lib} … ")
+            sys.stdout.flush()
+            proc = subprocess.run(
+                [sys.executable, __file__, "--worker", json.dumps(cfg)],
+                capture_output=True, text=True,
+            )
+            line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+            try:
+                res = json.loads(line)
+            except Exception:
+                res = {"ok": False, "reason": (proc.stderr or "crash").strip().splitlines()[-1:]}
+            if res.get("ok"):
+                print(f"{res['timeMs']:.0f} ms · peak {res['peakRssMB']:.0f} MB")
+                results.append(res)
+            else:
+                print(f"n/a ({res.get('reason')})")
+
     out = {"machine": f"{sys.platform} · Python {sys.version.split()[0]}", "date": date.today().isoformat(), "results": results}
     os.makedirs(CACHE, exist_ok=True)
     with open(os.path.join(CACHE, "python.json"), "w") as f:
