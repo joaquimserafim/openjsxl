@@ -1687,7 +1687,7 @@ and verifies `"."` chunk-split neutrality.
 **Dependency order:** F8.1 parser → F8.2 evaluator core → F8.3 function library → F8.4
 integration + docs + oracle corpus. One feature per session, each proceed-gated.
 
-### F8.1 — Formula parser + the `openjsxl/formula` entry point ☐
+### F8.1 — Formula parser + the `openjsxl/formula` entry point ☑
 **Context.** The stored form is canonical en-US (ECMA-376 §18.17): `,` arg separators,
 `.` decimals, quoted sheet names with `''` doubling, TRUE/FALSE, array constants
 `{1,2;3,4}` (`,` = columns, `;` = rows, constants only). Full MS precedence table:
@@ -1706,19 +1706,42 @@ on both packages.
 **Scope (out — named).** No evaluation (F8.2); no R1C1; no locale variants (stored form
 only); no serializer back to text beyond what translateFormula already does.
 **Tasks**
-- [ ] Lexer + AST types + Pratt parser (explicit stack; depth/arg caps; typed errors).
-- [ ] `"./formula"` subpath: core tsup second entry + exports map; facade mirror; the
+- [x] Lexer + AST types + Pratt parser (explicit stack; depth/arg caps; typed errors).
+- [x] `"./formula"` subpath: core tsup second entry + exports map; facade mirror; the
       `"."` chunk-split neutrality check + tree-shake probe re-run.
-- [ ] Tests: precedence table pinned (incl. `-2^2`, `2^3^2`, `%`, `&`), every literal
+- [x] Tests: precedence table pinned (incl. `-2^2`, `2^3^2`, `%`, `&`), every literal
       form, sheet-name quoting, array constants, the 8,192-char paren bomb → typed error,
       255-arg cap, opaque structured/external nodes; parse–reprint round-trips where the
       grammar is unambiguous.
-- [ ] Oracle: token/shape agreement vs Python `formulas` `Parser().ast()` on a matrix of
+- [x] Oracle: token/shape agreement vs Python `formulas` `Parser().ast()` on a matrix of
       real-world formulas (incl. every F5.4 fixture formula).
-- [ ] Adversarial review (parser lens).
+- [x] Adversarial review (parser lens).
 **Acceptance.** Every formula in every corpus fixture parses to an AST (or a typed error);
 the paren bomb is a typed error in bounded time; the `"."` entry's bytes/behavior are
 untouched (size probe re-run); core stays zero-dep.
+
+**Landed (F8.1).** `src/formula/` = `lexer.ts` (hand-rolled scanner: cell/name/function
+disambiguation, `$`-partial refs, error literals, balanced brackets) + `parser.ts`
+(precedence-climbing; `MAX_DEPTH=256` recursion guard, `MAX_FUNCTION_DEPTH=64`,
+`MAX_ARGS=255`) + `ast.ts` (typed `FormulaAst`) + `errors.ts` (`FormulaError`, own code union
+`parse-error|depth-exceeded|too-many-args|unsupported` — core's `XlsxErrorCode` stays frozen)
++ `index.ts`. `openjsxl/formula` wired on both packages (tsup 2nd entry + `exports` map,
+`splitting:false`). **Byte-identity:** `dist/index.js` = `e678d0db…` UNCHANGED; zero parser
+symbols leak into it; formula bundle imports nothing external (16.4 KB); core `dependencies`
+still `{}`. **Oracle:** 92/92 real-world formulas agree with Python `formulas` 1.3.4 (Py3.14) —
+it surfaced the absolute whole-col/row-endpoint gap (`$A`/`$2`), fixed. **Review (parser lens,
+3 finders):** hostile-input = clean (200k random + curated inputs: every failure typed, all
+paths linear, nothing materialized, stack bounded). 2 CONFIRMED defects FIXED + PINNED —
+(1) spill `#` on a range's right endpoint wrapped the whole range (`A1:A5#` → `(A1:A5)#`);
+`SPILL_BP` was below the `:` range op → raised above it, so `#` binds to each endpoint;
+(2) deleted-sheet form `#REF!!A1` (Excel's stored form when a referenced sheet is deleted) was
+rejected while the deleted-cell form `Sheet1!#REF!` parsed → `#REF!` now accepted as a sheet
+name. Plus 1 robustness fix: quoted external detection widened to `[ ] / \` (all illegal in a
+real sheet name) so a drive/URL path (`https://…`) is not mis-split as a 3-D span.
+**Conscious scope boundary (owner call):** modern dynamic-array error literals `#SPILL!`,
+`#CALC!`, `#FIELD!` etc. are rejected — decision 4 froze the error set to the 8 `ST_CellErrorType`
+members; not widened here. Gate: biome 0 / tsc 0 / **716 tests** (+ lexer + parser suites).
+Probes stayed in scratchpad; repo swept clean.
 
 ### F8.2 — Evaluator core: dependency walk, coercion, errors, budgets ☐
 **Context.** One-shot, pull-based evaluation — not a reactive engine. Pull + memoization
