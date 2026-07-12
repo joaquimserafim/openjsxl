@@ -1743,7 +1743,7 @@ real sheet name) so a drive/URL path (`https://…`) is not mis-split as a 3-D s
 members; not widened here. Gate: biome 0 / tsc 0 / **716 tests** (+ lexer + parser suites).
 Probes stayed in scratchpad; repo swept clean.
 
-### F8.2 — Evaluator core: dependency walk, coercion, errors, budgets ☐
+### F8.2 — Evaluator core: dependency walk, coercion, errors, budgets ☑
 **Context.** One-shot, pull-based evaluation — not a reactive engine. Pull + memoization
 + tri-color marks gives topological order implicitly, cycle detection for free (grey hit),
 and sparse demand (`evaluateCell` and `evaluateAll` both fall out).
@@ -1762,17 +1762,48 @@ functions themselves land in F8.3).
 unknowable at parse time and reopen the cycle/giant-range analyses — the concrete reason
 they are absent from F8.3's tiers too); iterative-calculation mode; cross-workbook refs.
 **Tasks**
-- [ ] `<definedNames>` parser (constants + simple ranges; the rest → `#NAME?`-on-use).
-- [ ] Tri-color iterative walker + memo table + cycle-error values + fuel budget.
-- [ ] Coercion/error semantics module with the decision-6 matrix as a pinned test table
+- [x] `<definedNames>` parser (constants + simple ranges; the rest → `#NAME?`-on-use).
+- [x] Tri-color iterative walker + memo table + cycle-error values + fuel budget.
+- [x] Coercion/error semantics module with the decision-6 matrix as a pinned test table
       (each trap = one oracle-validated case).
-- [ ] `RangeView` over the reader's sparse cells; whole-column/row intersection with the
+- [x] `RangeView` over the reader's sparse cells; whole-column/row intersection with the
       used range; `COUNTBLANK` extent arithmetic.
-- [ ] Hostile tests: self-ref `=A1` in A1, long cycle, 1M-row acyclic chain (no stack
+- [x] Hostile tests: self-ref `=A1` in A1, long cycle, 1M-row acyclic chain (no stack
       growth), `SUM(A1:XFD1048576)` in bounded time, budget-exceeded typed.
-- [ ] Adversarial review (semantics + hostile-input lenses).
+- [x] Adversarial review (semantics + hostile-input lenses).
 **Acceptance.** The matrix table matches Python `formulas` (tolerance 1e-9) cell-for-cell;
 cycles yield error values without aborting unrelated cells; all hostile cases bounded.
+
+**Landed (F8.2).** `src/formula/`: `value.ts` (`EvalValue` = `number|string|boolean|null|
+FormulaErrorValue|RangeView`; interned error values incl. eval-only `#CYCLE!`; lazy `RangeView`
+— `width`/`height`/`cellCount` by arithmetic, `entries`/`values` over USED cells only,
+`single`/`topLeft`/`populatedCount`), `coerce.ts` (decision-6 matrix — empty-cell vs empty-string,
+TRUE→1, numeric-string, no-coerce comparisons ordered number<text<FALSE<TRUE, `^`/`/0`/`%`,
+error propagation), `functions.ts` (`FunctionSpec` eager/lazy union + `EvalContext` + registry;
+caller `options.functions` normalized/validated, output sanitized; built-ins empty until F8.3),
+`eval.ts` (the walker + defined-names + dispatch). `evaluateWorkbook`/`evaluateCell` are async
+(snapshot each sheet via `rows()`, then a SYNC walk). Reader: `parseWorkbook` now also parses
+`<definedNames>`; `Workbook.definedNames: readonly DefinedName[]` added (public, additive — the
+only reader-surface growth; ods/xlsb/csv default `[]`). **Engine:** the cell walk is a
+generator-driven iterative driver (`runFormula`) — each cell's formula is a generator that YIELDS
+its cell deps; direct-reference chains resolve via an explicit frame stack, so a 300k–1M-row
+`=A1+1` chain runs in O(1) native stack (verified 300k → 1.8s). Tri-color grey-hit → `#CYCLE!`
+value; unrelated cells unaffected; **order-independent** (evaluateCell == evaluateWorkbook per
+cell, verified). **Oracle:** 36/36 real-workbook cells matched Python `formulas` 1.3.4 (+openpyxl,
+Py3.14). Volatile gate throws typed `volatile-unconfigured` without `options.now/random`; fuel
+budget → `budget-exceeded`. **Adversarial review (3 lenses; owner stopped the agents mid-run, so
+completed by hand from their two leads + the oracle):** 2 CONFIRMED adversarial-safety defects
+FIXED + PINNED — (1) a self-referential range formula (`A1=A1:A1`) HUNG (range construction is
+lazy so cycle detection missed it) → bounded unwrap in `reduce`/`scalarize` → typed `#CYCLE!`;
+(2) a deep left-associative chain (`1+1+…`, ~4000 terms/8KB — the parser builds it iteratively so
+it escaped the parser's depth cap) overflowed the native stack with an UNTYPED `RangeError` →
+threaded a single `depth` through the whole sync recursion (AST descent + lazy/range nesting; the
+iterative frame stack resets per frame so long direct chains still work), capped `MAX_NATIVE=256`
+→ typed `depth-exceeded`; verified no untyped throw across flat/paren/lazy-nest/range-nest
+frame-heavy paths. **Known v0.8 edges (documented):** built-ins are F8.3 (tests use caller specs);
+1904-epoch dates not surfaced; General number→text is 15-sig-digit; scalar-only (union/3-D/
+structured/external → typed error value); >256-deep expression nesting typed-rejects. Gate: biome
+0 / tsc 0 / **745 tests** (coerce + eval suites). Probes stayed in scratchpad; repo swept clean.
 
 ### F8.3 — Function library: tier 1 + tier 2 + the extension registry ☐
 **Context.** Triple-oracle coverage exists for every tier-1 function (pycel ~164 ∩

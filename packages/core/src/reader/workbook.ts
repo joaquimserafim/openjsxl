@@ -1,6 +1,7 @@
 import { XlsxError } from "../errors";
 import {
 	type DecodeContext,
+	type DefinedName,
 	mimeForMediaPath,
 	parseDrawing,
 	parseRels,
@@ -368,6 +369,12 @@ export class XlsxWorksheet implements Worksheet {
 export class Workbook {
 	/** Sheets in tab order. */
 	readonly sheets: readonly SheetInfo[];
+	/**
+	 * Defined (named) ranges and constants declared in the workbook, in document order. Empty for
+	 * formats that don't carry them (ods/xlsb/csv today). The formula evaluator (`openjsxl/formula`)
+	 * resolves the constant and simple-range ones; see {@link DefinedName}.
+	 */
+	readonly definedNames: readonly DefinedName[];
 	readonly #byName: Map<string, Worksheet>;
 	readonly #themeXml: string | undefined;
 	// Note: `Worksheet` here is the public interface (../types), so this same `Workbook` class is
@@ -378,10 +385,16 @@ export class Workbook {
 	#theme: ThemeColors | undefined;
 	#themeParsed = false;
 
-	constructor(sheets: SheetInfo[], byName: Map<string, Worksheet>, themeXml?: string) {
+	constructor(
+		sheets: SheetInfo[],
+		byName: Map<string, Worksheet>,
+		themeXml?: string,
+		definedNames: readonly DefinedName[] = [],
+	) {
 		this.sheets = sheets;
 		this.#byName = byName;
 		this.#themeXml = themeXml;
+		this.definedNames = definedNames;
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
@@ -431,6 +444,8 @@ interface LoadedWorkbook {
 	readonly sheets: ReadonlyArray<{ readonly info: SheetInfo; readonly path: string }>;
 	/** Raw `xl/theme/theme1.xml`, when present — for color resolution and theme carry (F5.3). */
 	readonly themeXml: string | undefined;
+	/** Defined (named) ranges/constants from `<definedNames>`, in document order. */
+	readonly definedNames: readonly DefinedName[];
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -454,7 +469,11 @@ async function loadWorkbook(
 	const workbookDir = directoryOf(workbookPath);
 
 	// Workbook sheet list + date system + the workbook's own relationships.
-	const { sheets: workbookSheets, date1904 } = parseWorkbook(await readText(zip, workbookPath));
+	const {
+		sheets: workbookSheets,
+		date1904,
+		definedNames,
+	} = parseWorkbook(await readText(zip, workbookPath));
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
 
 	// Shared string table (optional — a workbook may use only inline strings).
@@ -507,7 +526,7 @@ async function loadWorkbook(
 		});
 	}
 
-	return { zip, context, sheets, themeXml };
+	return { zip, context, sheets, themeXml, definedNames };
 }
 
 /**
@@ -522,7 +541,7 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml } = await loadWorkbook(source, options);
+	const { zip, context, sheets, themeXml, definedNames } = await loadWorkbook(source, options);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = [];
@@ -558,7 +577,7 @@ export async function openXlsx(
 		}
 	}
 
-	return new Workbook(infos, byName, themeXml);
+	return new Workbook(infos, byName, themeXml, definedNames);
 }
 
 /**

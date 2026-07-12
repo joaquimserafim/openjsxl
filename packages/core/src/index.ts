@@ -6,6 +6,8 @@ export { XlsxError, type XlsxErrorCode } from "./errors";
 export type { CellRef } from "./ooxml/a1";
 export { columnToIndex, formatRef, indexToColumn, parseRef } from "./ooxml/a1";
 export { dateToSerial, serialToDate } from "./ooxml/dates";
+// Defined (named) ranges/constants read from the workbook (F8.2 — consumed by openjsxl/formula).
+export type { DefinedName } from "./ooxml/workbook";
 // CSV/TSV reader (F7.3) — open delimited text and read the SAME public Workbook surface.
 export { type CsvReadOptions, openCsv } from "./reader/csv";
 // Format detection (F7.4) — sniff bytes to route to the right open* function.

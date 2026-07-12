@@ -12,6 +12,8 @@ export type FormulaErrorCode =
 	| "parse-error" // the text is not a well-formed stored-form formula
 	| "depth-exceeded" // nesting (parens / unary chain / calls) passed the safety cap
 	| "too-many-args" // a function call carried more than the 255-argument maximum
+	| "budget-exceeded" // (evaluator) the fuel budget of cell visits was exhausted
+	| "volatile-unconfigured" // (evaluator) a volatile function was used without options.now/random
 	| "unsupported"; // a construct we recognize but do not yet handle at this layer
 
 export class FormulaError extends Error {
