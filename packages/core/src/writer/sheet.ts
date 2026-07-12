@@ -11,7 +11,16 @@ import {
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import type { ColumnProps, Comment, FreezePane, Hyperlink, RowProps, SheetImage } from "../types";
+import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
+import type {
+	ColumnProps,
+	Comment,
+	FreezePane,
+	Hyperlink,
+	RowProps,
+	SheetImage,
+	TableInfo,
+} from "../types";
 import type { MediaRegistry } from "./images";
 import type { StyleRegistry } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
@@ -661,6 +670,301 @@ function commentsParts(
 	return { commentsXml, vmlXml };
 }
 
+// ── Tables (F9.1) ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Workbook-wide state the per-sheet table builders share: a global table-number counter (table `id`
+ * and part path are workbook-global, so `id == part number`) and the set of display names claimed so
+ * far (uniqueness is case-insensitive across the whole workbook, like sheet names). One instance per
+ * `writeXlsx`/`streamXlsx` call, threaded through every sheet.
+ */
+export interface TableContext {
+	/** Reserve the next global table number (1-based) — used for both `id` and the part path. */
+	reserveNumber(): number;
+	/** Record a display name, rejecting a case-insensitive duplicate seen on any sheet. */
+	claimName(sheetName: string, name: string): void;
+}
+
+export function createTableContext(): TableContext {
+	let n = 0;
+	const names = new Set<string>();
+	return {
+		reserveNumber: () => ++n,
+		claimName: (sheetName, name) => {
+			const key = name.toLowerCase();
+			if (names.has(key)) {
+				sheetInvalid(
+					sheetName,
+					`table name "${shortened(name)}" is not unique across the workbook (names are compared case-insensitively)`,
+				);
+			}
+			names.add(key);
+		},
+	};
+}
+
+// A table name is a defined-name-style identifier (decision 8): non-empty, ≤255, no whitespace, must
+// start with a letter/underscore/backslash, and must NOT look like a cell reference or the reserved
+// bare `C`/`R`. Excel repair-prompts on a name that breaks these.
+const CELL_REF_NAME = /^[A-Za-z]{1,3}[0-9]+$/;
+function validateTableName(sheetName: string, what: string, name: string): void {
+	if (name.length === 0) sheetInvalid(sheetName, `${what}.name must be a non-empty string`);
+	if (name.length > MAX_TABLE_NAME_LEN) {
+		sheetInvalid(sheetName, `${what}.name exceeds ${MAX_TABLE_NAME_LEN} characters`);
+	}
+	if (!isXmlSafe(name)) {
+		sheetInvalid(sheetName, `${what}.name contains a character not allowed in XML`);
+	}
+	if (/\s/.test(name)) {
+		sheetInvalid(sheetName, `${what}.name "${shortened(name)}" must not contain whitespace`);
+	}
+	if (!/^[A-Za-z_\\]/.test(name)) {
+		sheetInvalid(
+			sheetName,
+			`${what}.name "${shortened(name)}" must start with a letter, underscore, or backslash`,
+		);
+	}
+	if (CELL_REF_NAME.test(name) || /^[CcRr]$/.test(name)) {
+		sheetInvalid(sheetName, `${what}.name "${name}" must not look like a cell reference`);
+	}
+}
+
+// The text value of a header cell: a bare string, or a `{ value: string }` / `{ value: string, style }`
+// object. Anything else (number, boolean, formula, blank) is not a valid header — `undefined` here.
+function headerCellText(cell: unknown): string | undefined {
+	if (typeof cell === "string") return cell;
+	if (isPlainRecord(cell) && typeof cell.value === "string") return cell.value;
+	return undefined;
+}
+
+function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): string {
+	if (raw === undefined) return "";
+	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what}.style must be an object`);
+	checkKeys(sheetName, what, raw, [
+		"name",
+		"showFirstColumn",
+		"showLastColumn",
+		"showRowStripes",
+		"showColumnStripes",
+	]);
+	let attrs = "";
+	const styleName = raw.name;
+	if (styleName !== undefined) {
+		if (typeof styleName !== "string")
+			sheetInvalid(sheetName, `${what}.style.name must be a string`);
+		if (!isXmlSafe(styleName)) {
+			sheetInvalid(sheetName, `${what}.style.name contains a character not allowed in XML`);
+		}
+		attrs += ` name="${escapeAttr(styleName)}"`;
+	}
+	for (const flag of [
+		"showFirstColumn",
+		"showLastColumn",
+		"showRowStripes",
+		"showColumnStripes",
+	] as const) {
+		const value = raw[flag];
+		if (value === undefined) continue;
+		if (typeof value !== "boolean")
+			sheetInvalid(sheetName, `${what}.style.${flag} must be a boolean`);
+		attrs += ` ${flag}="${value ? 1 : 0}"`;
+	}
+	return `<tableStyleInfo${attrs}/>`;
+}
+
+/**
+ * Validate and emit a sheet's tables (decision 8). Column names DERIVE from the header row when a
+ * `headerCell` resolver is supplied (the buffered writer, which has all rows); the streaming writer
+ * passes `undefined` and column names come from `tables[i].columns` instead (it can't read the header
+ * upfront). `ctx` assigns workbook-global ids and enforces cross-sheet name uniqueness. Returns
+ * `undefined` when the sheet has no tables so an unused feature emits nothing (byte-identity).
+ */
+export function buildTables(
+	sheetName: string,
+	tables: readonly TableInfo[] | undefined,
+	headerCell: ((row: number, col: number) => unknown) | undefined,
+	ctx: TableContext,
+): TablePart[] | undefined {
+	if (tables === undefined) return undefined;
+	if (!Array.isArray(tables)) sheetInvalid(sheetName, "tables must be an array");
+	if (tables.length === 0) return undefined;
+	const rects: { c1: number; r1: number; c2: number; r2: number; name: string }[] = [];
+	const parts: TablePart[] = [];
+
+	for (let i = 0; i < tables.length; i++) {
+		const raw = tables[i] as unknown;
+		const what = `tables[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, [
+			"name",
+			"ref",
+			"columns",
+			"headerRow",
+			"totalsRow",
+			"style",
+		]);
+
+		const name = raw.name;
+		if (typeof name !== "string") sheetInvalid(sheetName, `${what}.name must be a string`);
+		validateTableName(sheetName, what, name);
+		ctx.claimName(sheetName, name);
+
+		const ref = raw.ref;
+		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
+		const colon = ref.indexOf(":");
+		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon));
+		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1));
+		if (from === undefined || to === undefined || to.col < from.col || to.row < from.row) {
+			sheetInvalid(
+				sheetName,
+				`${what}.ref "${shortened(ref)}" is not a canonical A1 range like "A1:C5" within Excel's grid`,
+			);
+		}
+		const width = to.col - from.col + 1;
+
+		const headerRow = raw.headerRow !== false; // default true
+		const totalsRow = raw.totalsRow === true;
+
+		const columns = raw.columns;
+		if (columns !== undefined && !Array.isArray(columns)) {
+			sheetInvalid(sheetName, `${what}.columns must be an array`);
+		}
+		// An empty `columns` means "derive everything from the header row"; a non-empty one must have one
+		// entry per column (it supplies per-column totals metadata, aligned by position).
+		if (columns !== undefined && columns.length > 0 && columns.length !== width) {
+			sheetInvalid(
+				sheetName,
+				`${what}.columns has ${columns.length} entries but the ref width is ${width}`,
+			);
+		}
+
+		// Derive each column name, and collect the totals-row/calculated formulas carried per column.
+		const seen = new Set<string>();
+		const columnXmls: string[] = [];
+		for (let c = 0; c < width; c++) {
+			// Read the caller's column entry ONCE (single-read TOCTOU — a Proxy array must not return a
+			// different object between the isPlainRecord check and its use).
+			const rawColumn = columns !== undefined ? columns[c] : undefined;
+			const provided = isPlainRecord(rawColumn) ? rawColumn : undefined;
+			let columnName: string;
+			if (headerRow && headerCell !== undefined) {
+				const text = headerCellText(headerCell(from.row, from.col + c));
+				if (text === undefined || text === "") {
+					sheetInvalid(
+						sheetName,
+						`${what} header cell for column ${c + 1} must be non-empty text (table column names derive from the header row)`,
+					);
+				}
+				columnName = text;
+			} else {
+				const provName = provided !== undefined ? provided.name : undefined;
+				if (typeof provName === "string" && provName !== "") columnName = provName;
+				else if (headerRow) {
+					sheetInvalid(
+						sheetName,
+						`${what}.columns[${c}].name is required — the streaming writer can't read the header row to derive it`,
+					);
+				} else columnName = `Column${c + 1}`;
+			}
+			if (!isXmlSafe(columnName)) {
+				sheetInvalid(
+					sheetName,
+					`${what} column ${c + 1} name has a character not allowed in XML`,
+				);
+			}
+			const key = columnName.toLowerCase();
+			if (seen.has(key)) {
+				sheetInvalid(
+					sheetName,
+					`${what} has a duplicate column name "${shortened(columnName)}"`,
+				);
+			}
+			seen.add(key);
+			columnXmls.push(tableColumnXml(sheetName, what, c + 1, columnName, provided));
+		}
+
+		// Two tables on one sheet may not overlap (Excel repairs overlapping tables). Few tables per
+		// sheet, so an O(n²) pairwise check is fine.
+		for (const r of rects) {
+			if (from.col <= r.c2 && r.c1 <= to.col && from.row <= r.r2 && r.r1 <= to.row) {
+				sheetInvalid(sheetName, `tables "${r.name}" and "${name}" overlap`);
+			}
+		}
+		rects.push({ c1: from.col, r1: from.row, c2: to.col, r2: to.row, name });
+
+		// A totals row is the last row and must have at least one row above it — a single-row ref can't
+		// carry one (it would drive the auto-filter range negative). Reject typed, never bare-throw.
+		if (totalsRow && to.row === from.row) {
+			sheetInvalid(
+				sheetName,
+				`${what}.ref "${shortened(ref)}" has a totals row but only one row — a totals row needs at least one row above it`,
+			);
+		}
+		const number = ctx.reserveNumber();
+		// The auto-filter exists only for a table WITH a header (there's nothing to filter without header
+		// labels — Excel/openpyxl omit it otherwise); it covers the header + data rows, minus any totals row.
+		let autoFilter = "";
+		if (headerRow) {
+			const filterEnd = totalsRow ? to.row - 1 : to.row;
+			autoFilter = `<autoFilter ref="${formatRef({ col: from.col, row: from.row })}:${formatRef({ col: to.col, row: filterEnd })}"/>`;
+		}
+		const headerAttr = headerRow ? "" : ' headerRowCount="0"';
+		const totalsAttr = totalsRow ? ' totalsRowCount="1"' : ' totalsRowShown="0"';
+		const styleXml = tableStyleInfoXml(sheetName, what, raw.style);
+		const xml =
+			`${XML_DECL}\n<table xmlns="${NS_MAIN}" id="${number}" name="${escapeAttr(name)}" displayName="${escapeAttr(name)}" ref="${ref}"${headerAttr}${totalsAttr}>` +
+			`${autoFilter}<tableColumns count="${width}">${columnXmls.join("")}</tableColumns>${styleXml}</table>`;
+		parts.push({ number, xml });
+	}
+	return parts;
+}
+
+// One <tableColumn>. Names are validated by the caller; the optional totals-row label/function and the
+// totals/calculated formulas are carried from the caller's TableColumn verbatim (never evaluated).
+function tableColumnXml(
+	sheetName: string,
+	what: string,
+	id: number,
+	name: string,
+	provided: Record<string, unknown> | undefined,
+): string {
+	let attrs = ` id="${id}" name="${escapeAttr(name)}"`;
+	let children = "";
+	if (provided !== undefined) {
+		checkKeys(sheetName, `${what} column`, provided, [
+			"name",
+			"totalsRowLabel",
+			"totalsRowFunction",
+			"totalsRowFormula",
+			"calculatedColumnFormula",
+		]);
+		const label = provided.totalsRowLabel;
+		if (label !== undefined)
+			attrs += ` totalsRowLabel="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowLabel`, label))}"`;
+		const fn = provided.totalsRowFunction;
+		if (fn !== undefined)
+			attrs += ` totalsRowFunction="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowFunction`, fn))}"`;
+		const totalsFormula = provided.totalsRowFormula;
+		if (totalsFormula !== undefined) {
+			children += `<totalsRowFormula>${escapeText(requireXmlString(sheetName, `${what} totalsRowFormula`, totalsFormula))}</totalsRowFormula>`;
+		}
+		const calcFormula = provided.calculatedColumnFormula;
+		if (calcFormula !== undefined) {
+			children += `<calculatedColumnFormula>${escapeText(requireXmlString(sheetName, `${what} calculatedColumnFormula`, calcFormula))}</calculatedColumnFormula>`;
+		}
+	}
+	return children === ""
+		? `<tableColumn${attrs}/>`
+		: `<tableColumn${attrs}>${children}</tableColumn>`;
+}
+
+function requireXmlString(sheetName: string, what: string, value: unknown): string {
+	if (typeof value !== "string") sheetInvalid(sheetName, `${what} must be a string`);
+	if (!isXmlSafe(value))
+		sheetInvalid(sheetName, `${what} contains a character not allowed in XML`);
+	return value;
+}
+
 // ── Pictures (F6.3) ────────────────────────────────────────────────────────────────────────────
 // MAX_EMU and the mime allowlist come from ooxml/drawing.ts — the SAME constants the tolerant
 // reader clamps/derives with, so whatever the reader returns is writable here (shared bounds).
@@ -861,6 +1165,14 @@ export interface SheetSideParts {
 	readonly drawingXml?: string;
 	/** `xl/drawings/_rels/drawingN.xml.rels` — the picture blip → media relationships. */
 	readonly drawingRelsXml?: string;
+	/** `xl/tables/tableN.xml` parts owned by this sheet (F9.1) — present iff the sheet has tables. */
+	readonly tables?: readonly TablePart[];
+}
+
+/** One emitted table part: its workbook-global number (→ `xl/tables/table{number}.xml`) and its XML. */
+export interface TablePart {
+	readonly number: number;
+	readonly xml: string;
 }
 
 export interface WorksheetResult extends SheetSideParts {
@@ -879,7 +1191,8 @@ function sheetRelPlumbing(
 	hyperlinkTargets: readonly string[],
 	hasComments: boolean,
 	hasDrawing: boolean,
-): { rels: SheetRel[]; drawing: string; legacyDrawing: string; nsR: string } {
+	tableNumbers: readonly number[],
+): { rels: SheetRel[]; drawing: string; legacyDrawing: string; tableParts: string; nsR: string } {
 	const rels: SheetRel[] = hyperlinkTargets.map((target) => ({
 		type: `${NS_REL}/hyperlink`,
 		target,
@@ -912,13 +1225,29 @@ function sheetRelPlumbing(
 		});
 		legacyDrawing = `<legacyDrawing r:id="rId${rels.length}"/>`; // the vmlDrawing rel, just pushed
 	}
-	// xmlns:r is declared whenever the body references an rId — a hyperlink, drawing, or legacyDrawing.
-	// A sheet using none keeps the exact pre-F4.6 root element.
+	// Tables are the LAST child of CT_Worksheet (`<tableParts>` after `<legacyDrawing>`), so their rels
+	// take the highest rIds. One `<tablePart r:id>` per table; targets are workbook-global part paths.
+	let tableParts = "";
+	if (tableNumbers.length > 0) {
+		const partRefs = tableNumbers
+			.map((num) => {
+				rels.push({
+					type: `${NS_REL}/table`,
+					target: `../tables/table${num}.xml`,
+					external: false,
+				});
+				return `<tablePart r:id="rId${rels.length}"/>`;
+			})
+			.join("");
+		tableParts = `<tableParts count="${tableNumbers.length}">${partRefs}</tableParts>`;
+	}
+	// xmlns:r is declared whenever the body references an rId — a hyperlink, drawing, legacyDrawing, or
+	// tablePart. A sheet using none keeps the exact pre-F4.6 root element.
 	const nsR =
-		hyperlinkTargets.length > 0 || drawing !== "" || legacyDrawing !== ""
+		hyperlinkTargets.length > 0 || drawing !== "" || legacyDrawing !== "" || tableParts !== ""
 			? ` xmlns:r="${NS_REL}"`
 			: "";
-	return { rels, drawing, legacyDrawing, nsR };
+	return { rels, drawing, legacyDrawing, tableParts, nsR };
 }
 
 /**
@@ -932,6 +1261,7 @@ export function worksheetXml(
 	date1904: boolean,
 	styles: StyleRegistry,
 	media: MediaRegistry,
+	tableCtx: TableContext,
 ): WorksheetResult {
 	const rows = sheet.rows;
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
@@ -943,6 +1273,16 @@ export function worksheetXml(
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 	const pictures = imageParts(sheet.name, sheet.images, media);
+	// Column names derive from the header row — the buffered writer has every row, so it reads them.
+	const tables = buildTables(
+		sheet.name,
+		sheet.tables,
+		(row, col) => {
+			const rowCells = rows[row - 1];
+			return Array.isArray(rowCells) ? rowCells[col - 1] : undefined;
+		},
+		tableCtx,
+	);
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
 	let minRow = 0;
@@ -1015,22 +1355,25 @@ export function worksheetXml(
 				: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
 
 	// Relationships + the body plumbing that references them (shared with the streaming writer).
-	const { rels, drawing, legacyDrawing, nsR } = sheetRelPlumbing(
+	const { rels, drawing, legacyDrawing, tableParts, nsR } = sheetRelPlumbing(
 		sheetIndex,
 		links.targets,
 		comments !== undefined,
 		pictures !== undefined,
+		tables !== undefined ? tables.map((t) => t.number) : [],
 	);
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
-	// hyperlinks, drawing, legacyDrawing (CT_Worksheet sequence — drawing precedes legacyDrawing).
+	// hyperlinks, drawing, legacyDrawing, tableParts (CT_Worksheet sequence — tableParts is last).
 	// Every optional block is an empty string when unused, so a sheet using none of them emits the
-	// exact pre-F4.5/F4.6/F5.2 bytes.
+	// exact pre-F4.5/F4.6/F5.2/F9.1 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
-		.join("")}</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}</worksheet>`;
-	// Comment/drawing side parts are spread only when present so the optional properties stay truly
-	// absent (exactOptionalPropertyTypes).
+		.join(
+			"",
+		)}</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	// Comment/drawing/table side parts are spread only when present so the optional properties stay
+	// truly absent (exactOptionalPropertyTypes).
 	return {
 		xml,
 		rels,
@@ -1040,6 +1383,7 @@ export function worksheetXml(
 		...(pictures !== undefined
 			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
+		...(tables !== undefined ? { tables } : {}),
 	};
 }
 
@@ -1144,6 +1488,7 @@ export function streamWorksheet(
 	date1904: boolean,
 	styles: StyleRegistry,
 	media: MediaRegistry,
+	tableCtx: TableContext,
 ): StreamedWorksheet {
 	const cols = colsXml(sheet.name, sheet.columns);
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
@@ -1152,18 +1497,22 @@ export function streamWorksheet(
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 	const pictures = imageParts(sheet.name, sheet.images, media);
+	// The footer (which carries <tableParts>) is built BEFORE the rows stream, so the header row isn't
+	// available — column names come from `tables[i].columns` here (no header resolver).
+	const tables = buildTables(sheet.name, sheet.tables, undefined, tableCtx);
 
 	// Relationships + the body plumbing that references them — the SAME builder the buffered writer
 	// uses, so the two can't drift on rel order, rId allocation, or the drawing/legacyDrawing refs.
-	const { rels, drawing, legacyDrawing, nsR } = sheetRelPlumbing(
+	const { rels, drawing, legacyDrawing, tableParts, nsR } = sheetRelPlumbing(
 		sheetIndex,
 		links.targets,
 		comments !== undefined,
 		pictures !== undefined,
+		tables !== undefined ? tables.map((t) => t.number) : [],
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}</worksheet>`;
+	const footer = `</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,
@@ -1182,5 +1531,6 @@ export function streamWorksheet(
 		...(pictures !== undefined
 			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
+		...(tables !== undefined ? { tables } : {}),
 	};
 }

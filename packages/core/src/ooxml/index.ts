@@ -8,5 +8,6 @@ export * from "./formula";
 export * from "./rels";
 export * from "./shared-strings";
 export * from "./styles";
+export * from "./table";
 export * from "./theme";
 export * from "./workbook";

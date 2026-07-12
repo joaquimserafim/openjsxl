@@ -119,6 +119,7 @@ export function contentTypesXml(
 	commentSheets: readonly number[],
 	drawingSheets: readonly number[] = [],
 	mediaExtensions: readonly string[] = [],
+	tablePartNumbers: readonly number[] = [],
 ): string {
 	const needVml = commentSheets.length > 0;
 	const overrides = [
@@ -143,6 +144,10 @@ export function contentTypesXml(
 		...drawingSheets.map(
 			(i) =>
 				`<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
+		),
+		...tablePartNumbers.map(
+			(n) =>
+				`<Override PartName="/xl/tables/table${n}.xml" ContentType="${CT_BASE}.table+xml"/>`,
 		),
 	].join("");
 	const vmlDefault = needVml
@@ -258,6 +263,12 @@ export function sheetSideParts(
 			name: `xl/drawings/_rels/drawing${n}.xml.rels`,
 			xml: side.drawingRelsXml,
 		});
+	}
+	// Table parts are numbered workbook-globally (not by sheet), so each carries its own number.
+	if (side.tables !== undefined) {
+		for (const table of side.tables) {
+			parts.push({ name: `xl/tables/table${table.number}.xml`, xml: table.xml });
+		}
 	}
 	return parts;
 }

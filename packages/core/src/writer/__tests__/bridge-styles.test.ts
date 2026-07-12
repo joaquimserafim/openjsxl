@@ -57,6 +57,8 @@ async function styleSnapshot(wb: Workbook) {
 			state: info.state,
 			// Comments (F5.2) round-trip too — ref, resolved author, and plain text.
 			comments: sheet.comments,
+			// Tables (F9.1): name, ref, columns, header/totals flags, and style carry across.
+			tables: sheet.tables,
 			// Pictures (F6.4): anchor + mime + name + a content digest (not raw bytes).
 			images: (await sheet.images()).map((img) => ({
 				anchor: img.anchor,

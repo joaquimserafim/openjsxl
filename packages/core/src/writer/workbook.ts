@@ -11,7 +11,7 @@ import {
 	workbookRelsXml,
 	workbookXml,
 } from "./parts";
-import { worksheetXml } from "./sheet";
+import { createTableContext, worksheetXml } from "./sheet";
 import { createStyleRegistry } from "./styles";
 import type { SheetInput, WorkbookInput, WriteOptions } from "./types";
 import { writeZip, type ZipInput } from "./zip";
@@ -75,7 +75,12 @@ export async function writeXlsx(
 	// Pictures (F6.3) intern their bytes into one workbook-level media registry as sheets render, so
 	// identical images are written as a single shared media part.
 	const media = createMediaRegistry();
-	const worksheets = sheets.map((sheet, i) => worksheetXml(sheet, i, date1904, styles, media));
+	// Tables (F9.1) get workbook-global ids/part numbers and workbook-wide unique names, so one shared
+	// context threads through every sheet.
+	const tableCtx = createTableContext();
+	const worksheets = sheets.map((sheet, i) =>
+		worksheetXml(sheet, i, date1904, styles, media, tableCtx),
+	);
 	const needStyles = styles.needed();
 	const needTheme = styles.usesTheme();
 
@@ -84,6 +89,8 @@ export async function writeXlsx(
 	// derived inside contentTypesXml, so an imageless/commentless workbook stays byte-identical.
 	const commentSheets = worksheets.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
 	const drawingSheets = worksheets.flatMap((w, i) => (w.drawingXml !== undefined ? [i] : []));
+	// Every table part number across the workbook, for the content-type Overrides.
+	const tablePartNumbers = worksheets.flatMap((w) => (w.tables ?? []).map((t) => t.number));
 
 	const parts: ZipInput[] = [];
 	const add = (name: string, xml: string): void => {
@@ -99,6 +106,7 @@ export async function writeXlsx(
 			commentSheets,
 			drawingSheets,
 			media.extensions(),
+			tablePartNumbers,
 		),
 	);
 	add("_rels/.rels", packageRelsXml());

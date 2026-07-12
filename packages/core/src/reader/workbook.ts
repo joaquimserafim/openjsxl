@@ -7,6 +7,7 @@ import {
 	parseRels,
 	parseSharedStrings,
 	parseStyles,
+	parseTable,
 	parseTheme,
 	parseWorkbook,
 	type Relationship,
@@ -27,6 +28,7 @@ import type {
 	SheetImage,
 	SheetInfo,
 	SheetState,
+	TableInfo,
 	Worksheet,
 } from "../types";
 import { openZip, type ZipArchive } from "../zip";
@@ -64,6 +66,7 @@ const REL_THEME = "/theme";
 // The drawingML rel; note this does NOT match "/vmlDrawing" (the char before "drawing" there is a
 // letter, not the "/"), so the legacy comment drawing is never mistaken for a picture drawing.
 const REL_DRAWING = "/drawing";
+const REL_TABLE = "/table";
 
 function directoryOf(path: string): string {
 	const slash = path.lastIndexOf("/");
@@ -155,6 +158,7 @@ export class XlsxWorksheet implements Worksheet {
 	readonly #context: DecodeContext;
 	readonly #rels: Map<string, Relationship> | undefined;
 	readonly #commentsXml: string | undefined;
+	readonly #tablesXml: readonly string[];
 	// Lazy picture loader (F6.2): reading media bytes needs async decompression, so images are
 	// resolved on first `images()` call, not at open — a sheet whose pictures you never touch costs
 	// nothing. The promise is cached so concurrent calls share one resolution.
@@ -169,6 +173,7 @@ export class XlsxWorksheet implements Worksheet {
 	#dimension: string | undefined;
 	#dimensionRead = false;
 	#comments: readonly Comment[] | undefined;
+	#tables: readonly TableInfo[] | undefined;
 	#columns: readonly ColumnProps[] | undefined;
 	#rowProps: ReadonlyMap<number, RowProps> | undefined;
 	#freeze: FreezePane | undefined;
@@ -181,6 +186,7 @@ export class XlsxWorksheet implements Worksheet {
 		rels?: Map<string, Relationship>,
 		commentsXml?: string,
 		loadImages?: () => Promise<readonly SheetImage[]>,
+		tablesXml?: readonly string[],
 	) {
 		this.name = info.name;
 		this.#info = info;
@@ -189,6 +195,7 @@ export class XlsxWorksheet implements Worksheet {
 		this.#rels = rels;
 		this.#commentsXml = commentsXml;
 		this.#loadImages = loadImages;
+		this.#tablesXml = tablesXml ?? [];
 	}
 
 	/** Workbook-relative part path, e.g. `xl/worksheets/sheet1.xml`. */
@@ -272,6 +279,23 @@ export class XlsxWorksheet implements Worksheet {
 				this.#commentsXml === undefined ? [] : parseComments(this.#commentsXml);
 		}
 		return this.#comments;
+	}
+
+	/**
+	 * The defined tables on this sheet (`xl/tables/tableN.xml`), in document order — each with its
+	 * `name`, `ref`, `columns`, header/totals flags, and built-in `style`. Empty when the sheet has
+	 * no table parts. Parsed lazily on first access.
+	 */
+	get tables(): readonly TableInfo[] {
+		if (this.#tables === undefined) {
+			const parsed: TableInfo[] = [];
+			for (const xml of this.#tablesXml) {
+				const table = parseTable(xml);
+				if (table !== undefined) parsed.push(table);
+			}
+			this.#tables = parsed;
+		}
+		return this.#tables;
 	}
 
 	/**
@@ -563,6 +587,16 @@ export async function openXlsx(
 			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath));
 		}
 
+		// Tables are one part each (a sheet may own several), linked from the worksheet rels.
+		const tablesXml: string[] = [];
+		if (rels !== undefined) {
+			for (const rel of rels.values()) {
+				if (!rel.type.endsWith(REL_TABLE) || rel.targetMode === "External") continue;
+				const tablePath = resolveTarget(directoryOf(path), rel.target);
+				if (zip.has(tablePath)) tablesXml.push(decoder.decode(await zip.read(tablePath)));
+			}
+		}
+
 		infos.push(info);
 		// First definition wins if two sheets somehow share a name.
 		if (!byName.has(info.name)) {
@@ -572,7 +606,7 @@ export async function openXlsx(
 				loadSheetImages(zip, path, rels);
 			byName.set(
 				info.name,
-				new XlsxWorksheet(info, xml, context, rels, commentsXml, loadImages),
+				new XlsxWorksheet(info, xml, context, rels, commentsXml, loadImages, tablesXml),
 			);
 		}
 	}

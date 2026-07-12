@@ -67,6 +67,56 @@ export interface Hyperlink {
 	readonly display?: string;
 }
 
+// ── Tables (F9.1) ────────────────────────────────────────────────────────────────────────────
+// One shared model: what `Worksheet.tables` returns IS what `SheetInput.tables` accepts, so a table
+// round-trips through the bridge as a structural pass-through. The numeric table `id` and any raw
+// dxf indexes are internal (auto-assigned / interned on write), never surfaced.
+
+/** A single column of a {@link TableInfo}. */
+export interface TableColumn {
+	/** The column's name — must equal its header-row cell text (Excel repair-prompts otherwise). */
+	readonly name: string;
+	/** A literal label shown in the totals row, if the producer set one (carried verbatim). */
+	readonly totalsRowLabel?: string;
+	/** A built-in totals-row function (e.g. `"sum"`, `"count"`), if any (carried verbatim). */
+	readonly totalsRowFunction?: string;
+	/** A custom totals-row formula, if any — element text, carried verbatim, never evaluated. */
+	readonly totalsRowFormula?: string;
+	/** A calculated-column formula, if any — element text, carried verbatim, never evaluated. */
+	readonly calculatedColumnFormula?: string;
+}
+
+/** The built-in table-style banding for a {@link TableInfo} (`<tableStyleInfo>`). */
+export interface TableStyleInfo {
+	/** A built-in table-style name, e.g. `"TableStyleMedium9"`. */
+	readonly name?: string;
+	readonly showFirstColumn?: boolean;
+	readonly showLastColumn?: boolean;
+	readonly showRowStripes?: boolean;
+	readonly showColumnStripes?: boolean;
+}
+
+/**
+ * A defined table (`xl/tables/tableN.xml`) — a named, structured range with a header row. The reader
+ * surfaces the producer's values; the writer derives column names from the header row and auto-assigns
+ * the numeric id. Table-level dxf highlight indexes are dropped in F9.1 (they return as inline styles
+ * once conditional formatting / dxfs land).
+ */
+export interface TableInfo {
+	/** The table's display name — a workbook-unique identifier (no spaces, not a cell reference). */
+	readonly name: string;
+	/** The table's range in A1 notation, e.g. `"A1:C5"` (includes the header and any totals row). */
+	readonly ref: string;
+	/** The columns, left to right; `columns.length` equals the width of `ref`. */
+	readonly columns: readonly TableColumn[];
+	/** Whether the table has a header row (default true; `headerRowCount="0"` turns it off). */
+	readonly headerRow: boolean;
+	/** Whether the table shows a totals row (default false). */
+	readonly totalsRow: boolean;
+	/** The built-in style banding, or `undefined` when the producer set none. */
+	readonly style?: TableStyleInfo;
+}
+
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
 // One shared model, like styles: what the reader's accessors return IS what the writer accepts.
 
@@ -296,6 +346,8 @@ export interface Worksheet {
 	readonly dimension: string | undefined;
 	/** The comments anchored to cells on this sheet. Empty when none (or unsupported by the format). */
 	readonly comments: readonly Comment[];
+	/** The defined tables on this sheet, in document order. Empty when none (or unsupported). */
+	readonly tables: readonly TableInfo[];
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */

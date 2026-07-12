@@ -2038,7 +2038,7 @@ output AND the in-tree `inventory-table.xlsx`).
 **Dependency order:** F9.1 tables → F9.2 data validation → F9.3 conditional formatting +
 dxfs (largest; consumes the dxf index rules) → F9.4 fuzzing + corpus + milestone review.
 
-### F9.1 — Tables: read + write + bridge ☐
+### F9.1 — Tables: read + write + bridge ☑
 **Scope (in).** Read: `xl/tables/tableN.xml` (`@ref @displayName @headerRowCount
 @totalsRowCount`, `autoFilter`, `tableColumns` (+`@totalsRowFunction/@totalsRowLabel`,
 `totalsRowFormula` for custom), `tableStyleInfo`) via the sheet's `tableParts` rels;
@@ -2051,14 +2051,40 @@ become inline `DxfStyle` fields on `TableInfo` columns, additively.
 CELL formulas (Excel writes SUBTOTAL(109,…) cells — we write the table part only,
 documented); structured-ref formula rewriting.
 **Tasks**
-- [ ] Table part parser + `TableInfo` + degrade pins (xlsb/ods/csv).
-- [ ] Writer: derivation/validation rules, part/rel/CT wiring, order pin, byte-identity.
-- [ ] Bridge + corpus snapshot extension; fixtures `openpyxl-tables.xlsx` + crafted edge
-      (header mismatch → typed reject; duplicate displayName; overlap).
-- [ ] Oracle both ways (openpyxl); owner opens output in real Excel (repair-prompt check).
-- [ ] Adversarial review.
+- [x] Table part parser (`ooxml/table.ts` `parseTable`) + `TableInfo`/`TableColumn`/
+      `TableStyleInfo` (types.ts) + `Worksheet.tables` accessor + degrade pins (ods/xlsb/csv → `[]`).
+- [x] Writer: header-derived column names, workbook-global id/name context, part/rel/CT wiring,
+      `<tableParts>` order pin (after `<legacyDrawing>`), byte-identity, BOTH writers (decision 11).
+- [x] Bridge + corpus snapshot extension; fixtures `openpyxl-tables.xlsx` + crafted edge cases
+      (header mismatch → typed reject; duplicate displayName; overlap — all in table-write.test.ts).
+- [~] Oracle both ways (openpyxl reads OUR output warnings-as-errors clean + we read openpyxl- and
+      Excel-authored tables). **Owner opens output in real Excel (repair-prompt check) — owner-side,
+      decision 12, named dependency not silently dropped.**
+- [x] Adversarial review (4 lenses + refuting verifiers, openpyxl-oracle-wired).
 **Acceptance.** inventory-table.xlsx reads verbatim; write→openpyxl clean; no-table
 workbooks byte-identical; every decision-8 rejection typed + named.
+
+**Landed (F9.1, uncommitted — awaiting owner approval).** `ooxml/table.ts` (tolerant `parseTable`)
++ `TableInfo`/`TableColumn`/`TableStyleInfo` (shared model) + `Worksheet.tables` (reader accessor,
+lazy; ods/xlsb/csv degrade to `[]`). Writer: `buildTables` (sheet.ts) validates + emits per decision
+8 — column names DERIVE from the header row (buffered) or `columns[].name` (streaming, which can't
+read the streamed header); workbook-global id/part-number + case-insensitive-unique display names via
+`createTableContext`; ref width == column count; overlapping ranges rejected; typed `XlsxError` on
+every violation. `<tableParts>` slots LAST in CT_Worksheet (after `<legacyDrawing>`); part + rel +
+content-type Override emitted only when a sheet has tables. **Both writers** (`writeXlsx` +
+`streamXlsx`) wired; the bridge carries tables; corpus property test extended → both real fixtures
+round-trip **deep-equal**. Fixtures: `inventory-table.xlsx` (Excel, read verbatim) +
+`openpyxl-tables.xlsx` (new, openpyxl-authored). Oracle both ways: openpyxl reads our output
+warnings-as-errors clean; our reader reads openpyxl/Excel tables.
+- **Adversarial review — 11 findings, 4 CONFIRMED (0 unverified), all fixed + pinned:** a
+  `totalsRow` on a too-short ref drove the auto-filter end row below the start row → a **bare**
+  `Error("invalid row index: 0")` (violating the typed-rejection + corpus-property contract) or a
+  reversed `<autoFilter>` range (3 findings, one root cause) → now a typed `XlsxError` reject; and
+  `<autoFilter>` was emitted for header-LESS tables, which Excel/openpyxl never do → now omitted when
+  `headerRow` is false. Also proactively closed a single-read TOCTOU on `columns[c]`.
+**Gate:** biome 0 / tsc 0 / **803 tests** (32 new across table.test.ts + table-write.test.ts +
+corpus). No-table workbooks byte-identical (golden pins green); the `.xlsx` writer's pre-F9.1 output
+is unchanged for input not using tables.
 
 ### F9.2 — Data validation: read + write + bridge ☐
 **Scope (in).** `<dataValidations>` between mergeCells and hyperlinks. All 8 types +

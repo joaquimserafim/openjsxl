@@ -10,6 +10,7 @@ import type {
 	RowProps,
 	SheetImage,
 	SheetState,
+	TableInfo,
 	Worksheet,
 } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
@@ -141,6 +142,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			state?: SheetState;
 			comments?: readonly Comment[];
 			images?: readonly SheetImage[];
+			tables?: readonly TableInfo[];
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -160,6 +162,10 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// writer input. Attach only when non-empty: an imageless workbook keeps the byte-identity path.
 		const images = await worksheet.images();
 		if (images.length > 0) sheet.images = images;
+		// Tables (F9.1) — structural pass-through; the writer re-derives column names from the header
+		// row (which the bridge also carries), so a read table rewrites cleanly.
+		const tables = worksheet.tables;
+		if (tables.length > 0) sheet.tables = tables;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

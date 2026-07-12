@@ -10,7 +10,7 @@ import {
 	workbookRelsXml,
 	workbookXml,
 } from "./parts";
-import { streamWorksheet } from "./sheet";
+import { createTableContext, streamWorksheet } from "./sheet";
 import { type StreamPart, streamZip } from "./stream-zip";
 import { createStyleRegistry } from "./styles";
 import type { StreamSheetInput, StreamWorkbookInput, WriteOptions } from "./types";
@@ -57,16 +57,20 @@ async function* buildStreamParts(
 	const carriedTheme = workbook.themeXml;
 	const styles = createStyleRegistry();
 	const media = createMediaRegistry();
+	const tableCtx = createTableContext();
 
 	// Prepare every sheet upfront — this validates geometry/metadata and builds each header/footer +
 	// rel/comment/drawing parts (interning any image bytes into `media`) — while the rows stay lazy
 	// inside each `chunks` generator. So `media` is fully populated before any byte streams.
-	const prepared = sheets.map((sheet, i) => streamWorksheet(sheet, i, date1904, styles, media));
+	const prepared = sheets.map((sheet, i) =>
+		streamWorksheet(sheet, i, date1904, styles, media, tableCtx),
+	);
 
 	// Which sheets carry comments / drawings — derived upfront from the prepared results, so the
 	// content-type map at the end knows without tracking it mid-loop.
 	const commentSheets = prepared.flatMap((w, i) => (w.commentsXml !== undefined ? [i] : []));
 	const drawingSheets = prepared.flatMap((w, i) => (w.drawingXml !== undefined ? [i] : []));
+	const tablePartNumbers = prepared.flatMap((w) => (w.tables ?? []).map((t) => t.number));
 
 	// Worksheets stream first, each followed by its own side parts (rels/comments/VML/drawing) — names
 	// owned by sheetSideParts, shared with the buffered writer. streamZip consumes each part fully
@@ -101,6 +105,7 @@ async function* buildStreamParts(
 				commentSheets,
 				drawingSheets,
 				media.extensions(),
+				tablePartNumbers,
 			),
 		),
 	};

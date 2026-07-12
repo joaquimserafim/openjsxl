@@ -13,6 +13,7 @@ import type {
 	SheetImage,
 	SheetInfo,
 	SheetState,
+	TableInfo,
 	Worksheet,
 } from "../types";
 import { openZip } from "../zip";
@@ -32,6 +33,7 @@ const decoder = new TextDecoder();
 const MIMETYPE_SPREADSHEET = "application/vnd.oasis.opendocument.spreadsheet";
 
 const NO_COMMENTS: readonly Comment[] = [];
+const NO_TABLES: readonly TableInfo[] = [];
 const NO_COLUMNS: readonly ColumnProps[] = [];
 const NO_IMAGES: readonly SheetImage[] = [];
 const NO_ROW_PROPS: ReadonlyMap<number, RowProps> = new Map();
@@ -91,6 +93,10 @@ class OdsWorksheet implements Worksheet {
 	// ── Accessors ODS does not carry: degrade to the shared empties (F7.1 drop-list). ──
 	get comments(): readonly Comment[] {
 		return NO_COMMENTS;
+	}
+
+	get tables(): readonly TableInfo[] {
+		return NO_TABLES;
 	}
 
 	get columns(): readonly ColumnProps[] {

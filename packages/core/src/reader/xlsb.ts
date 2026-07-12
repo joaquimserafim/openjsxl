@@ -12,6 +12,7 @@ import type {
 	SheetImage,
 	SheetInfo,
 	SheetState,
+	TableInfo,
 	Worksheet,
 } from "../types";
 import {
@@ -40,6 +41,7 @@ const REL_HYPERLINK = "/hyperlink";
 
 const NO_MERGES: readonly string[] = [];
 const NO_COMMENTS: readonly Comment[] = [];
+const NO_TABLES: readonly TableInfo[] = [];
 const NO_COLUMNS: readonly ColumnProps[] = [];
 const NO_IMAGES: readonly SheetImage[] = [];
 const NO_ROW_PROPS: ReadonlyMap<number, RowProps> = new Map();
@@ -123,6 +125,10 @@ class XlsbWorksheet implements Worksheet {
 
 	get comments(): readonly Comment[] {
 		return NO_COMMENTS;
+	}
+
+	get tables(): readonly TableInfo[] {
+		return NO_TABLES;
 	}
 
 	get columns(): readonly ColumnProps[] {

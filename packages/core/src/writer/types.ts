@@ -12,6 +12,7 @@ import type {
 	RowProps,
 	SheetImage,
 	SheetState,
+	TableInfo,
 } from "../types";
 
 /**
@@ -95,6 +96,13 @@ export interface SheetInput {
 	 * Identical bytes are written once as a shared media part; EMU offsets/extents are used verbatim.
 	 */
 	readonly images?: readonly SheetImage[];
+	/**
+	 * Defined tables on this sheet (F9.1) — the same records `Worksheet.tables` returns. Column names
+	 * DERIVE from the header row (the single source of truth), the numeric id is auto-assigned, and
+	 * `name` must be a workbook-unique identifier (no spaces, not a cell reference). A table whose
+	 * `ref` overlaps another, or whose header cells aren't non-empty text, is rejected.
+	 */
+	readonly tables?: readonly TableInfo[];
 }
 
 export interface WorkbookInput {
@@ -139,6 +147,12 @@ export interface StreamSheetInput {
 	readonly comments?: readonly Comment[];
 	/** Pictures anchored on this sheet (F6.3) — see {@link SheetInput.images}. */
 	readonly images?: readonly SheetImage[];
+	/**
+	 * Defined tables on this sheet (F9.1) — see {@link SheetInput.tables}. The streaming writer can't
+	 * read the header row upfront, so each table's column names come from `columns[i].name` here rather
+	 * than being derived from the header cells.
+	 */
+	readonly tables?: readonly TableInfo[];
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */
