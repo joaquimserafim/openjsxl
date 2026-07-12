@@ -1805,7 +1805,7 @@ frame-heavy paths. **Known v0.8 edges (documented):** built-ins are F8.3 (tests 
 structured/external → typed error value); >256-deep expression nesting typed-rejects. Gate: biome
 0 / tsc 0 / **745 tests** (coerce + eval suites). Probes stayed in scratchpad; repo swept clean.
 
-### F8.3 — Function library: tier 1 + tier 2 + the extension registry ☐
+### F8.3 — Function library: tier 1 + tier 2 + the extension registry ☑
 **Context.** Triple-oracle coverage exists for every tier-1 function (pycel ~164 ∩
 `formulas` 470 ∩ HyperFormula 418).
 **Scope (in).** **Tier 1 (the v0.8 cut, ~40):** SUM AVERAGE COUNT COUNTA COUNTBLANK MIN
@@ -1828,16 +1828,68 @@ own feature); OFFSET/INDIRECT (F8.2 decision); financial/engineering/statistical
 array-arithmetic inside aggregator args (`SUM(A1:A3*B1:B3)` — CSE masters evaluate
 scalar-only → top-left value; NAMED degradation in the drop list).
 **Tasks**
-- [ ] Registry + spec validation + volatile gate; tier-1 implementations w/ per-function
+- [x] Registry + spec validation + volatile gate; tier-1 implementations w/ per-function
       oracle tests (range-vs-literal coercion asymmetry pinned per aggregate).
-- [ ] Tier-2 in order (each lands with its oracle test or not at all).
-- [ ] Lookup semantics pinned: VLOOKUP/MATCH approximate-match (sorted assumption),
+- [x] Tier-2 in order (each lands with its oracle test or not at all).
+- [x] Lookup semantics pinned: VLOOKUP/MATCH approximate-match (sorted assumption),
       exact-match miss → `#N/A`; INDEX 0/out-of-range → `#REF!`.
-- [ ] UDF example + docs (registry is public API).
-- [ ] Adversarial review (function-semantics lens vs oracles).
-**Acceptance.** Every shipped function agrees with Python `formulas` (and pycel where
-covered) on a shared vector table; the volatile gate typed-rejects without injection and
+- [~] UDF example + docs (registry is public API) — the registry is already public + JSDoc'd
+      since F8.2; the runnable `12-formulas.mjs` example + coverage/docs table are folded into
+      **F8.4** (integration), matching how F8.1/F8.2 deferred their example.
+- [x] Adversarial review (function-semantics lens vs oracles) — two passes (see below).
+**Acceptance.** Every shipped function agrees with documented Excel behavior on a shared
+vector table (Python `formulas` used as a secondary oracle — see the KNOWN divergences
+below where it is not Excel-faithful); the volatile gate typed-rejects without injection and
 is deterministic with it; UDFs register and evaluate.
+
+**Landed (F8.3, uncommitted — awaiting owner approval).** `src/formula/builtins.ts` = ~85
+built-in functions (all of tier 1 + most of tier 2), typed (no `any`/`as`), returning
+`EvalValue` directly (trusted — they skip the caller-spec sanitize wrapper). Wiring changes:
+`RegisteredFunction` became a **discriminated union** (`EagerRegistered | LazyRegistered`) so
+`evalCall` and the built-ins dispatch cast-free; `buildRegistry` seeds from `builtins.ts`'s
+`BUILTIN_ENTRIES`; `coerce.numericStringValue` extracted; `RangeView.cellAt(rowOff,colOff)`
+added for positional access (SUMIF/VLOOKUP/INDEX/MATCH). Aggregates apply Excel's range rule
+(a `RangeView` arg counts numbers only; text/bool/blank ignored, errors propagate) vs the
+literal rule for scalar args.
+- **Coverage.** Math/agg: SUM AVERAGE COUNT COUNTA COUNTBLANK MIN MAX MEDIAN LARGE SMALL
+  ROUND(UP/DOWN) INT ABS SIGN TRUNC MOD POWER SQRT EXP LN LOG LOG10 PI CEILING FLOOR
+  SUMPRODUCT. Logical: IF IFERROR IFNA IFS SWITCH AND OR XOR NOT. Lookup: VLOOKUP HLOOKUP
+  MATCH INDEX CHOOSE ROWS COLUMNS. Cond-agg: SUMIF COUNTIF AVERAGEIF SUMIFS COUNTIFS
+  AVERAGEIFS. Text: CONCAT CONCATENATE TEXTJOIN LEN LEFT RIGHT MID TRIM UPPER LOWER PROPER
+  REPT EXACT CHAR CODE VALUE SUBSTITUTE REPLACE FIND SEARCH. Info: ISBLANK ISNUMBER ISTEXT
+  ISLOGICAL ISERROR ISERR ISNA N T NA ERROR.TYPE. Date: DATE YEAR MONTH DAY HOUR MINUTE
+  SECOND WEEKDAY TIME DAYS EDATE EOMONTH. Volatile (gated): TODAY NOW RAND RANDBETWEEN.
+- **Deferred (named, documented).** ROW/COLUMN (need reference-position plumbing — a ref arg
+  collapses to a scalar; like OFFSET/INDIRECT), XLOOKUP, DATEVALUE, TEXT (number-format
+  renderer), and wildcard **SEARCH** (a substring glob is O(n²) over attacker-controlled cell
+  text — SEARCH matches `*`/`?` literally in v0.8).
+- **Known non-Excel-faithfulness of the oracle** (we follow Excel, not `formulas`): the oracle
+  coerces numeric text INSIDE a reference for SUM/COUNT/AVERAGE (Excel ignores non-numbers in a
+  range); keeps TRIM's internal space runs (Excel collapses them); rejects VALUE("50%") and
+  mis-handles COUNTIF("?"). **Documented degradation** (F8.2 arg contract): a single-cell ref
+  collapses to a scalar, so an aggregate treats it as a literal (text/bool in a single
+  referenced cell coerces rather than being ignored); multi-cell ranges are Excel-exact.
+  ROUND uses naive half-away (Excel's binary-fudge on e.g. 1.005 not replicated — matches the
+  oracle); DATE pre-1900-03-01 inherits `dates.ts`'s 1900-leap-bug off-by-one. *IFS where
+  EVERY criterion matches blank (rare) may under-count blank positions (bounded-perf tradeoff).
+- **Adversarial review — pass 1** (4 lenses × refuting verifiers, oracle-wired): 22 findings,
+  **18 CONFIRMED**, all fixed + regression-pinned. 11 distinct bugs: *IF family skipped
+  blank cells that satisfy `"<>x"`/`""` (now a bounded blank pass + blank-excluding driver
+  selection); CEILING/FLOOR rejected (neg number, pos significance); SUMPRODUCT didn't
+  propagate errors where the first factor was 0/blank (now a bounded pre-scan); COUNT
+  propagated errors (now ignores them, Excel-correct); WEEKDAY lacked types 11–17; **ReDoS**
+  in wildcard translation (regex `.*a.*a…` was exponential → replaced with a linear
+  two-pointer glob matcher); EXP overflow leaked `Infinity`; POWER(0,−) gave `#NUM!` not
+  `#DIV/0!`; TRUNC huge-digits / date-serial overflow leaked `NaN`; VALUE ignored
+  percent/thousands/currency; DATE pre-1900 off-by-one (documented, not fixed).
+- **Adversarial review — pass 2** (focused on the pass-1 fixes: the *IF blank/driver logic,
+  the glob matcher, the numeric/date guards): **2 CONFIRMED regressions I had introduced**,
+  both fixed + pinned — the blank second pass over-counted when the value range was LARGER
+  than the criteria range (now clips to the criteria rectangle, so Excel's reshape holds), and
+  `toSerial` rejected a time-of-day on 9999-12-31 (now compares the truncated day).
+**Gate:** biome 0 / tsc 0 / **775 tests** (30 new in `builtins.test.ts`). Byte-identity of the
+`"."` entry unaffected (formula code is isolated behind the `openjsxl/formula` subpath; the
+changeset touches only `formula/` + docs).
 
 ### F8.4 — Integration, docs, example, oracle corpus ☐
 **Scope (in).** End-to-end: real openpyxl/Excel-authored fixture workbooks evaluated

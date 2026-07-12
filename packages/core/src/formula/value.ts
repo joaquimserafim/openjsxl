@@ -161,4 +161,16 @@ export class RangeView {
 	topLeft(): EvalValue {
 		return this.resolve(this.startCol, this.startRow);
 	}
+
+	/**
+	 * The value at a 0-based offset within the view (`[rowOffset, colOffset]` from the top-left), or
+	 * `null` (blank) when the offset falls outside the rectangle. The positional accessor the function
+	 * library uses to align a criteria range with a sum range and to index INDEX/VLOOKUP/MATCH results.
+	 */
+	cellAt(rowOffset: number, colOffset: number): EvalValue {
+		if (rowOffset < 0 || colOffset < 0 || rowOffset >= this.height || colOffset >= this.width) {
+			return null;
+		}
+		return this.resolve(this.startCol + colOffset, this.startRow + rowOffset);
+	}
 }

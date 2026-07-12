@@ -1,10 +1,10 @@
+import { BUILTIN_ENTRIES } from "./builtins";
 import { FormulaError } from "./errors";
 import { type EvalValue, errorValue, isErrorValue, isRangeView } from "./value";
 
-// The function-dispatch machinery (F8.2). The evaluator calls into a registry of functions; the
-// built-in library (SUM, IF, …) is registered here in F8.3 — F8.2 ships the interface, the lazy/eager
-// argument protocol, and the volatile gate, proven by test-only specs. A caller extends the registry
-// through `options.functions`, the same mechanism the built-ins use.
+// The function-dispatch machinery (F8.2 interface, F8.3 library). The evaluator calls into a registry
+// of functions; the built-in library (SUM, IF, …) lives in `builtins.ts` and is pre-registered here. A
+// caller extends the registry through `options.functions`, the same mechanism the built-ins use.
 
 /**
  * Context passed to a function's `evaluate`. The volatile sources are the caller's injected
@@ -46,27 +46,34 @@ export interface LazyFunctionSpec extends FunctionSpecBase {
 /** A function callers register via `options.functions`, or a built-in ships as. */
 export type FunctionSpec = EagerFunctionSpec | LazyFunctionSpec;
 
-/**
- * Normalized internal form. `invoke` accepts whichever argument shape `lazyArgs` selects and always
- * returns a sanitized {@link EvalValue}, so a stray return from an untyped caller function cannot
- * poison the evaluator.
- */
-export interface RegisteredFunction {
+interface RegisteredBase {
 	readonly minArgs: number;
 	readonly maxArgs: number;
 	readonly volatile: boolean;
-	readonly lazyArgs: boolean;
-	invoke(args: readonly EvalValue[] | readonly ArgThunk[], ctx: EvalContext): EvalValue;
 }
+
+/** An eager registered function: the dispatcher hands it already-evaluated argument values. */
+export interface EagerRegistered extends RegisteredBase {
+	readonly lazyArgs: false;
+	invoke(args: readonly EvalValue[], ctx: EvalContext): EvalValue;
+}
+
+/** A lazy registered function: the dispatcher hands it thunks so untaken arguments never evaluate. */
+export interface LazyRegistered extends RegisteredBase {
+	readonly lazyArgs: true;
+	invoke(args: readonly ArgThunk[], ctx: EvalContext): EvalValue;
+}
+
+/**
+ * Normalized internal form — a discriminated union on `lazyArgs`, so the dispatcher and the built-ins
+ * are fully typed with no cast: the eager branch sees `EvalValue[]`, the lazy branch sees `ArgThunk[]`.
+ * A caller spec's `invoke` additionally sanitizes its result, so a stray return from an untyped caller
+ * function cannot poison the evaluator (the built-ins are typed and return {@link EvalValue} directly).
+ */
+export type RegisteredFunction = EagerRegistered | LazyRegistered;
 
 /** The effective function table, keyed by UPPER-CASE name (functions are case-insensitive). */
 export type FunctionRegistry = ReadonlyMap<string, RegisteredFunction>;
-
-// The built-in library. Empty in F8.2 — the engine and its tests stand on caller-registered specs;
-// the ~40 tier-1 functions land in F8.3 as entries here.
-export function builtinFunctions(): Map<string, RegisteredFunction> {
-	return new Map();
-}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null) return false;
@@ -113,15 +120,30 @@ function normalizeSpec(name: string, raw: unknown): RegisteredFunction {
 		);
 	}
 	// `evaluate` is a Function; calling it yields `any`, which we immediately narrow back to `unknown`
-	// and sanitize — no `any` escapes, and a hostile return can't corrupt the value domain.
-	const invoke = (
-		args: readonly EvalValue[] | readonly ArgThunk[],
-		ctx: EvalContext,
-	): EvalValue => {
-		const result: unknown = evaluate(args, ctx);
-		return sanitizeResult(result);
+	// and sanitize — no `any` escapes, and a hostile return can't corrupt the value domain. The lazy and
+	// eager branches build the matching union member so the dispatcher stays cast-free.
+	if (lazyArgs) {
+		return {
+			minArgs,
+			maxArgs,
+			volatile,
+			lazyArgs: true,
+			invoke: (args: readonly ArgThunk[], ctx: EvalContext): EvalValue => {
+				const result: unknown = evaluate(args, ctx);
+				return sanitizeResult(result);
+			},
+		};
+	}
+	return {
+		minArgs,
+		maxArgs,
+		volatile,
+		lazyArgs: false,
+		invoke: (args: readonly EvalValue[], ctx: EvalContext): EvalValue => {
+			const result: unknown = evaluate(args, ctx);
+			return sanitizeResult(result);
+		},
 	};
-	return { minArgs, maxArgs, volatile, lazyArgs, invoke };
 }
 
 /**
@@ -130,7 +152,7 @@ function normalizeSpec(name: string, raw: unknown): RegisteredFunction {
  * configuration failure, never a silent no-op.
  */
 export function buildRegistry(callerFunctions: unknown): FunctionRegistry {
-	const registry = builtinFunctions();
+	const registry = new Map<string, RegisteredFunction>(BUILTIN_ENTRIES);
 	if (callerFunctions === undefined) return registry;
 	if (!isPlainRecord(callerFunctions)) {
 		throw new FormulaError("unsupported", "options.functions must be a plain object");

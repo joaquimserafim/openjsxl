@@ -21,6 +21,20 @@ import {
 const EN_US_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 /**
+ * The numeric value of a string that is a plain en-US number literal, or `undefined` when it is not
+ * one. Locale-invariant (no thousands separators, no currency). Shared by {@link toNumber} and the
+ * function library's COUNT/criteria logic, which must decide "is this text numeric?" without coercing.
+ */
+export function numericStringValue(s: string): number | undefined {
+	const t = s.trim();
+	if (t !== "" && EN_US_NUMBER.test(t)) {
+		const n = Number(t);
+		if (Number.isFinite(n)) return n;
+	}
+	return undefined;
+}
+
+/**
  * Reduce a value to a scalar: a single-cell range yields that cell; a wider range is `#VALUE!`. A
  * cell can itself evaluate to a range (`=A1:A3`), so this unwraps repeatedly until non-range.
  */
@@ -46,12 +60,8 @@ export function toNumber(v: EvalValue): number | FormulaErrorValue {
 	if (typeof s === "number") return s;
 	if (typeof s === "boolean") return s ? 1 : 0;
 	// A string: only a plain en-US numeric literal coerces; "" and anything else is #VALUE!.
-	const t = s.trim();
-	if (t !== "" && EN_US_NUMBER.test(t)) {
-		const n = Number(t);
-		if (Number.isFinite(n)) return n;
-	}
-	return errorValue("#VALUE!");
+	const n = numericStringValue(s);
+	return n === undefined ? errorValue("#VALUE!") : n;
 }
 
 /** Coerce a scalar to text for concatenation. Never fails except by propagating an error value. */
