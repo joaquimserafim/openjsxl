@@ -1,6 +1,6 @@
 {
 	"name": "openjsxl-monorepo",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"private": true,
 	"description": "openjsxl monorepo — a fast, zero-dependency, TypeScript-first Excel (.xlsx) library for JavaScript runtimes.",
 	"type": "module",

@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.7.0` (already set) — skip this step. For a later
+For the current release the version is `0.8.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -133,6 +133,15 @@ git push -f origin v<version>
   `detectSpreadsheetFormat`, `SpreadsheetFormat`/`CsvReadOptions` types, and `Worksheet`/`Row` are now
   structural interfaces (the xlsx implementation is `XlsxWorksheet` — `instanceof Worksheet`, never
   documented, no longer applies).
+- **`0.8.0`** — formulas: an opt-in, zero-dependency **evaluation engine** behind the new
+  `openjsxl/formula` entry point. `parseFormula` (typed AST), `evaluateWorkbook`/`evaluateCell`
+  (pull-based, memoizing, cycle-safe — circular references resolve to a `#CYCLE!` value, deep chains
+  don't grow the JS stack), and ~97 built-in functions (SUM/IF/VLOOKUP/INDEX/MATCH/SUMIF(S)/text/
+  date/…) plus caller-registered UDFs via `options.functions`. Evaluation is read-only (it can
+  supersede a stale cache), and volatile functions (`TODAY`/`RAND`) require an injected clock/RNG so
+  results stay deterministic. The entry is module-graph-isolated: importing it never changes the
+  core `"."` bundle, and the writer is untouched, so `.xlsx` output stays byte-identical. Additive
+  and opt-in — the reader/writer API is unchanged.
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes
