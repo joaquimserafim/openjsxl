@@ -109,6 +109,12 @@ Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `write
   `CellRef`, `SheetImage`, `ImageAnchor`, `AnchorPoint`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`,
   `dateToSerial`
+- **Formulas (opt-in, `@openjsxl/core/formula`):** `parseFormula`, `evaluateWorkbook`,
+  `evaluateCell`, `FormulaError` (+ `FormulaErrorCode`), `EvaluateOptions`, `FunctionSpec`
+  (+ `EagerFunctionSpec`/`LazyFunctionSpec`/`EvalContext`/`ArgThunk`), `EvalValue`/`ScalarValue`,
+  `FormulaErrorValue`/`ErrorCode`/`errorValue`/`isErrorValue`, `RangeView`/`isRangeView`, and the
+  AST node types. A separate entry point — importing it never changes the core `"."` bundle. ~90
+  built-in functions; register your own through `options.functions`.
 
 Full guide, design notes, and roadmap: <https://github.com/joaquimserafim/openjsxl>
 

@@ -518,6 +518,24 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		expect(g("C1")).toEqual(err("#NUM!")); // absurd month count → non-finite
 	});
 
+	it("IFERROR/IFNA pass a multi-cell range through (not mistaken for an error)", async () => {
+		// Milestone-review regression: scalarize reduces a range to a #VALUE! sentinel, which IFERROR
+		// must NOT read as a genuine error — an aggregator around it still needs the whole range.
+		const g = await evalSheet([
+			[1, 2, 3],
+			[
+				f("SUM(IFERROR(A1:C1,0))"),
+				f("MAX(IFERROR(A1:C1,99))"),
+				f("IFERROR(A1:C1,-1)"),
+				f("SUM(IFNA(A1:C1,0))"),
+			],
+		]);
+		expect(g("A2")).toBe(6); // was 0 (fallback), now the summed range
+		expect(g("B2")).toBe(3); // was 99
+		expect(g("C2")).toBe(1); // scalar context → top-left of the range
+		expect(g("D2")).toBe(6);
+	});
+
 	it("accepts a time-of-day on the last valid day (9999-12-31), rejecting only the next day", async () => {
 		// Second-pass-review regression: the serial cap must compare the truncated DAY, so a datetime
 		// like 2958465.5 (9999-12-31 noon) is valid while 2958466 (year 10000) is out of range.

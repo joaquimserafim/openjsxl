@@ -16,7 +16,8 @@
 		"fidelity": "node 09-comments-formulas-theme.mjs",
 		"images": "node 10-images.mjs",
 		"formats": "node 11-other-formats.mjs",
-		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs && node 07-styles-and-layout.mjs && node 08-streaming-write.mjs && node 09-comments-formulas-theme.mjs && node 10-images.mjs && node 11-other-formats.mjs"
+		"formulas": "node 12-formulas.mjs",
+		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs && node 07-styles-and-layout.mjs && node 08-streaming-write.mjs && node 09-comments-formulas-theme.mjs && node 10-images.mjs && node 11-other-formats.mjs && node 12-formulas.mjs"
 	},
 	"dependencies": {
 		"openjsxl": "workspace:*"

@@ -16,7 +16,8 @@ runtimes — Node, Deno, Bun, the browser, and edge.
 > them with `sheet.images()`, write them via `images` on a sheet, and they round-trip through
 > the bridge byte-exact (png, jpeg, gif, bmp, tiff, webp, emf, wmf). **New in 0.7:** it now
 > *reads* more than it writes — `.xlsb`, `.ods`, and `.csv`/`.tsv` open into the same `Workbook`,
-> with `detectSpreadsheetFormat` to route by content.
+> with `detectSpreadsheetFormat` to route by content. **New in 0.8:** the opt-in `openjsxl/formula`
+> entry *evaluates* formulas — `evaluateWorkbook`/`evaluateCell` over 90+ built-ins, plus your own.
 > Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
 > [implementation plan](./IMPLEMENTATION.md).
 
@@ -319,6 +320,61 @@ Each reader returns the shared model; features a format can't express **degrade*
 are identified by their package; **CSV has no magic bytes**, so any non-zip input that decodes as
 UTF-8 text classifies as `'csv'` — a documented best-effort heuristic, not a guarantee. Encrypted
 `.ods` and other unreadable inputs fail with a typed `XlsxError`.
+
+## Formulas (0.8)
+
+The reader keeps a formula's **text** and its cached value; the opt-in `openjsxl/formula` entry adds
+a zero-dependency **engine** that recomputes them. It's a separate import so a consumer who never
+touches formulas never loads a byte of the parser or evaluator, and the core `openjsxl` bundle is
+byte-for-byte unchanged whether or not it exists.
+
+```ts
+import { openXlsx } from 'openjsxl';
+import { evaluateWorkbook, evaluateCell, parseFormula } from 'openjsxl/formula';
+
+const wb = await openXlsx(bytes);
+const result = await evaluateWorkbook(wb);   // every formula cell, recomputed
+result.get('Sheet1', 'B2');                  // e.g. 84  (a number | string | boolean | error value)
+
+await evaluateCell(wb, 'Sheet1', 'B2');      // or just one cell (+ its dependencies)
+parseFormula('SUM(A1:A9)*2');                // …or just the typed AST, no evaluation
+```
+
+Evaluation is **read-only** — the workbook and its stored `<v>` caches are never mutated, so a
+recomputed value can (correctly) supersede a stale cache. Deep dependency chains don't grow the JS
+stack, and **circular references resolve to a dedicated `#CYCLE!` value** rather than hanging — the
+cycle's cells become `#CYCLE!` while every unrelated cell still evaluates.
+
+**Bring your own functions.** `options.functions` registers user-defined functions with the same
+shape the 90+ built-ins use (case-insensitive, eager or lazy):
+
+```ts
+await evaluateWorkbook(wb, {
+  functions: { MILESTOKM: { minArgs: 1, maxArgs: 1, evaluate: ([mi]) => Number(mi) * 1.60934 } },
+});
+```
+
+**Determinism is enforced.** Volatile functions have no ambient source: `TODAY`/`NOW` and
+`RAND`/`RANDBETWEEN` throw a typed `FormulaError` unless you inject `options.now` / `options.random`,
+so the same inputs always produce the same output.
+
+**Built-in coverage (90+).** Math/stats (`SUM` `AVERAGE` `COUNT*` `MIN` `MAX` `MEDIAN` `LARGE`
+`SMALL` `ROUND*` `INT` `ABS` `MOD` `POWER` `SQRT` `EXP` `LN` `LOG*` `SIGN` `TRUNC` `CEILING` `FLOOR`
+`SUMPRODUCT`), logical (`IF` `IFERROR` `IFNA` `IFS` `SWITCH` `AND` `OR` `XOR` `NOT`), lookup
+(`VLOOKUP` `HLOOKUP` `INDEX` `MATCH` `CHOOSE` `ROWS` `COLUMNS`), conditional aggregates (`SUMIF(S)`
+`COUNTIF(S)` `AVERAGEIF(S)`), text (`CONCAT` `TEXTJOIN` `LEN` `LEFT` `RIGHT` `MID` `TRIM` `UPPER`
+`LOWER` `PROPER` `SUBSTITUTE` `REPLACE` `FIND` `SEARCH` `VALUE` `REPT` `EXACT` `CHAR` `CODE`),
+information (`IS*` `N` `T` `NA` `ERROR.TYPE`), and date/time (`DATE` `YEAR` `MONTH` `DAY` `HOUR`
+`MINUTE` `SECOND` `WEEKDAY` `TIME` `DAYS` `EDATE` `EOMONTH`).
+
+**Not evaluated in 0.8** (documented, never silently wrong — an unknown function is `#NAME?`, an
+unsupported reference a typed error value): `ROW`/`COLUMN`, `XLOOKUP`, `DATEVALUE`, `TEXT`, wildcard
+`SEARCH` (matched literally), array arithmetic inside an aggregator (`SUM(A1:A3*B1:B3)` → a typed
+`#VALUE!`, not an element-wise array), 3-D references (`Sheet1:Sheet3!A1` → `#REF!`),
+`OFFSET`/`INDIRECT`, R1C1, cross-workbook references, and iterative-calculation mode. Semantics
+follow documented Excel; a single-cell reference passed to an aggregate is treated as a literal (so
+text/booleans in one referenced cell coerce rather than being ignored — multi-cell ranges are
+Excel-exact).
 
 ## Why
 

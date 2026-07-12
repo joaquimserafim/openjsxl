@@ -1891,7 +1891,7 @@ literal rule for scalar args.
 `"."` entry unaffected (formula code is isolated behind the `openjsxl/formula` subpath; the
 changeset touches only `formula/` + docs).
 
-### F8.4 — Integration, docs, example, oracle corpus ☐
+### F8.4 — Integration, docs, example, oracle corpus ☑
 **Scope (in).** End-to-end: real openpyxl/Excel-authored fixture workbooks evaluated
 against (a) Python `formulas` whole-workbook results and (b) their own stored `<v>` caches
 (with the stale-cache caveat documented); evaluation-vs-cache divergence NAMED. Example
@@ -1903,6 +1903,40 @@ outs), function coverage table. Bench lane: evaluate-1M-SUM-chains vs HyperFormu
 **Acceptance.** Corpus formulas evaluate to oracle-agreed values or NAMED degradations;
 docs enumerate the exclusions exactly; `pnpm check`/tsc/vitest green; core `"."` bytes +
 writeXlsx bytes untouched; 0.8 release prep owner-gated as always.
+**Tasks**
+- [x] Integration/oracle-corpus tests (`formula/__tests__/integration.test.ts`): a realistic
+      multi-function workbook evaluated whole (12 cells, oracle-cross-checked out-of-tree);
+      cross-sheet; evaluation-vs-cache AGREEMENT on the real `basic.xlsx` + `shared-formula.xlsx`
+      producer fixtures; the stale-cache supersession contract (decision 2).
+- [x] Example `12-formulas.mjs` (parseFormula AST → evaluateWorkbook → evaluateCell → a UDF →
+      error propagation → `#CYCLE!` → volatile gate + injection) + examples README/package wiring.
+- [x] Docs: root README `## Formulas (0.8)` (entry point, read-only/stale-cache, cycles, UDFs,
+      determinism/volatile gate, 90+ coverage list, exact drop list) + status-line note; facade
+      README paragraph; core README `## Exports` formula bullet. Coverage list verified against the
+      registry (97 fns); every drop-list item verified absent (→ `#NAME?`).
+- [x] Bench probe (indicative, scratchpad): 100k-deep ref chain ~0.76s, `SUM` over 100k ~0.37s
+      (incl. write+read). HyperFormula head-to-head DEFERRED pending the owner's GPLv3 dev-oracle
+      call. Size: core `dist/formula.js` ≈ 86 KB (the formula chunk); core `dist/index.js` (the
+      `"."` entry) ≈ 195 KB, unchanged by F8.x (formula code is subpath-isolated).
+- [x] Full-milestone adversarial review (M7-style): 3 lenses (holistic-semantics, cross-feature,
+      docs-accuracy) + refuting verifiers → 7 findings, **3 CONFIRMED**, all fixed + pinned:
+      (1) IFERROR/IFNA misread a MULTI-cell range arg as an error — `scalarize` reduces a range to a
+      `#VALUE!` sentinel, so `SUM(IFERROR(A1:A3,0))` returned 0 not 6 (now the range passes through);
+      (2) **3-D references** (`Sheet1:Sheet3!A1`) silently evaluated against only the first sheet —
+      the parser carried `SheetSpec.toName` but eval dropped it → now a typed `#REF!` (decision 5,
+      never silent); (3) README drop-list misstated `SUM(A1:A3*B1:B3)` as "→ top-left" when the
+      engine returns a typed `#VALUE!` (doc corrected). Cross-feature bugs the per-feature passes
+      couldn't see (they surface only when F8.2 ranges compose with F8.3 IFERROR / the parser's 3-D
+      AST meets the evaluator).
+
+**Landed (F8.4, uncommitted — awaiting owner approval).** Changeset = the two new files above + the
+5 docs/example-wiring files + the two milestone-review source fixes (`formula/builtins.ts` IFERROR/
+IFNA range pass-through, `formula/eval.ts` 3-D `toName` → `#REF!`) and their regression tests. All
+changes are within the `formula/` subpath, so the `"."` entry and writer bytes stay untouched.
+Oracle corpus: the committed integration test pins a 12-cell realistic workbook (all 12 agree with
+Python `formulas` out-of-tree) AND asserts our re-evaluation equals openpyxl's cached `<v>` on two
+real producer fixtures — the cross-engine corpus check, in-tree and reproducible. **Gate:** biome 0
+/ tsc 0 / **782 tests**. **M8 (formulas) is feature-complete → 0.8 release prep is owner-gated.**
 
 ---
 

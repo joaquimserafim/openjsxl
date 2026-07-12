@@ -83,6 +83,14 @@ never throw — `.xlsb`/`.ods` carry values, dates, merges (ods) and hyperlinks;
 numbers & booleans only (never dates). So "a user uploaded a spreadsheet" is one code path, and any
 reader converts to `.xlsx` through the bridge.
 
+**Formulas (0.8):** the reader keeps a formula's text and cached value; the opt-in
+`openjsxl/formula` entry adds a zero-dependency engine that recomputes them —
+`evaluateWorkbook(wb)` / `evaluateCell(wb, sheet, ref)` over 90+ built-in functions, plus your own
+via `options.functions`. It's a separate import (the core bundle is unchanged whether or not you
+use it); evaluation is read-only (it can supersede a stale cache), circular references resolve to a
+`#CYCLE!` value instead of hanging, and volatile functions (`TODAY`/`RAND`) require an injected
+clock/RNG so results stay deterministic.
+
 See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
 design notes, and roadmap.
 

@@ -583,11 +583,17 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	}),
 	IFERROR: lazy(2, 2, (thunks) => {
 		const v = thunks[0]?.() ?? null;
+		// A MULTI-cell range is not itself an error — pass it through so an aggregator around IFERROR
+		// still sees the range (`SUM(IFERROR(A1:A3,0))`). `scalarize` reduces a multi-cell range to a
+		// `#VALUE!` sentinel, which must NOT be mistaken for a genuine computation error. Element-wise
+		// error replacement inside a range is array behaviour, out of scope for v0.8.
+		if (isRangeView(v) && v.single() === undefined) return v;
 		if (isErrorValue(scalarize(v))) return thunks[1]?.() ?? null;
 		return v;
 	}),
 	IFNA: lazy(2, 2, (thunks) => {
 		const v = thunks[0]?.() ?? null;
+		if (isRangeView(v) && v.single() === undefined) return v; // same range pass-through as IFERROR
 		const s = scalarize(v);
 		if (isErrorValue(s) && s.code === "#N/A") return thunks[1]?.() ?? null;
 		return v;
