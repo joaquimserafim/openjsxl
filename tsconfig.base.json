@@ -21,6 +21,7 @@
 		"forceConsistentCasingInFileNames": true,
 		"paths": {
 			"@openjsxl/core": ["./packages/core/src/index.ts"],
+			"@openjsxl/core/formula": ["./packages/core/src/formula/index.ts"],
 			"openjsxl": ["./packages/openjsxl/src/index.ts"]
 		}
 	}
