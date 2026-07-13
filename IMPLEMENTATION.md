@@ -2284,16 +2284,17 @@ happily write empty / cell-ref-shaped table names, so such files exist in the wi
 - **Single-source the name rules** so the reader and writer share ONE definition (like
   `isCanonicalSqrefToken` does for DV ranges) — that's what stops them drifting apart again.
 **Tasks**
-- [ ] Extract the table-name/identifier rules into ONE shared, single-sourced check used by both
+- [x] Extract the table-name/identifier rules into ONE shared, single-sourced check used by both
       `ooxml/table.ts` (reader) and `writer/sheet.ts` (writer).
-- [ ] Reader (`ooxml/table.ts`) degrades a table to writer-legal: normalize name, reconcile column
+- [x] Reader (`ooxml/table.ts`) degrades a table to writer-legal: normalize name, reconcile column
       count to ref width, clear an impossible totals row.
-- [ ] Writer prefers carried column names over grid re-derivation (fixes the non-text-header abort).
-- [ ] Fixtures + tests: a foreign/hand-crafted table file with a bad name/shape, plus a
+- [x] Writer prefers carried column names over grid re-derivation (fixes the non-text-header abort).
+- [x] Fixtures + tests: a foreign/hand-crafted table file with a bad name/shape, plus a
       read→write→read regression proving it now round-trips (and a byte-identity check that clean
       Excel tables are unaffected).
-- [ ] Adversarial review (round-trip/bridge + hostile-input lenses) + openpyxl cross-validation both
-      ways; fix confirmed findings + pin.
+- [x] Adversarial review (round-trip/bridge + hostile-input lenses) + openpyxl cross-validation both
+      ways; fix confirmed findings + pin. **HIGH (duplicate-collapse) fixed via bridge dedup;
+      MEDIUM/LOW residuals documented above.**
 **Acceptance.** A table from openpyxl/LibreOffice/hand-crafted XML with an odd name/shape opens AND
 re-saves without error; Excel-authored tables are byte-identical (unaffected); reader-output ⊆
 writer-input for tables is enforced by a shared, single-sourced rule.
