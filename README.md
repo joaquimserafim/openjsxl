@@ -252,7 +252,7 @@ await writeFile('out.xlsx', await writeXlsx(input));
 ```
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
-pictures, geometry, and structural metadata**:
+pictures, geometry, structural metadata, tables, data validation, and conditional formatting**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
@@ -269,13 +269,18 @@ pictures, geometry, and structural metadata**:
 | merged ranges & hyperlinks | |
 | sheet visibility (hidden / veryHidden) | |
 | sheet names & tab order | |
+| tables (name, range, columns, header/totals, style) | |
+| data validations (dropdowns & input rules) | |
+| conditional formatting (highlights, scales, bars, icon sets) | |
 
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
 formulas re-emit as per-cell plain formulas (the same text Excel shows in each cell — data-table
 formulas keep only their cached value); a tolerated non-canonical cell ref spelling (e.g.
-lowercase `a1`) re-emits canonically (`A1`); and media parts renumber with alternate extension
-spellings normalized (`tif` → `tiff`, `jpg` → `jpeg` — the image bytes themselves are untouched).
+lowercase `a1`) re-emits canonically (`A1`); a foreign producer's out-of-spec table name (a space,
+a cell-reference shape, empty) normalizes into a legal identifier so the table re-saves rather than
+aborting; and media parts renumber with alternate extension spellings normalized (`tif` → `tiff`,
+`jpg` → `jpeg` — the image bytes themselves are untouched).
 
 ## Reading other formats (0.7)
 
