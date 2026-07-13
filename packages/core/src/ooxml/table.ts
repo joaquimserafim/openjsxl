@@ -1,6 +1,7 @@
 import type { DxfStyle, TableColumn, TableInfo, TableStyleInfo } from "../types";
-import { localName } from "../utils";
+import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
+import { parseRef } from "./a1";
 
 // Table part parser (F9.1). Reads `xl/tables/tableN.xml` into the shared {@link TableInfo} model. The
 // reader is TOLERANT: absent attributes degrade to Excel's defaults (header on, totals off), and a
@@ -11,6 +12,88 @@ import { tokenize } from "../xml";
  * an over-long name here; the strict writer rejects one with a typed error.
  */
 export const MAX_TABLE_NAME_LEN = 255;
+
+// A defined-name-shaped token that looks like a cell reference (`A1`, `ABC12`) — forbidden as a table
+// name, along with the reserved bare `C`/`R`.
+const CELL_REF_NAME = /^[A-Za-z]{1,3}[0-9]+$/;
+
+/**
+ * The ways a table display name can be illegal, in the order the writer checks them. A table name is a
+ * defined-name-style identifier (decision 8): non-empty, ≤ {@link MAX_TABLE_NAME_LEN}, XML-safe, no
+ * whitespace, starts with a letter/underscore/backslash, and doesn't look like a cell reference (or the
+ * reserved bare `C`/`R`). Excel repair-prompts on a name that breaks these.
+ */
+export type TableNameProblem =
+	| "empty"
+	| "too-long"
+	| "not-xml-safe"
+	| "whitespace"
+	| "bad-start"
+	| "cell-ref";
+
+/**
+ * The FIRST rule a table display name breaks, or `undefined` when it is a legal identifier. Single-
+ * sourced so the tolerant reader and the strict writer share ONE definition of "legal table name": the
+ * reader normalizes a name that has a problem (F9.5), the writer rejects one — they cannot drift apart.
+ */
+export function tableNameProblem(name: string): TableNameProblem | undefined {
+	if (name.length === 0) return "empty";
+	if (name.length > MAX_TABLE_NAME_LEN) return "too-long";
+	if (!isXmlSafe(name)) return "not-xml-safe";
+	if (/\s/.test(name)) return "whitespace";
+	if (!/^[A-Za-z_\\]/.test(name)) return "bad-start";
+	if (CELL_REF_NAME.test(name) || /^[CcRr]$/.test(name)) return "cell-ref";
+	return undefined;
+}
+
+/**
+ * Rewrite a table display name into a legal identifier ({@link tableNameProblem} of the result is
+ * `undefined`) — F9.5's normalize-and-keep degradation, so a foreign table with an odd name survives a
+ * read→write round-trip instead of aborting the save. An already-legal name is returned UNCHANGED (a
+ * clean file stays byte-identical); an illegal one is repaired deterministically: non-XML-safe chars
+ * dropped, whitespace runs collapsed to `_`, a non-letter start prefixed with `_`, a cell-reference
+ * shape broken with a trailing `_`, clamped to length — and `"Table"` if nothing legal survives.
+ */
+export function normalizeTableName(name: string): string {
+	if (tableNameProblem(name) === undefined) return name; // already legal — never touch it
+	let s = "";
+	for (const ch of name) {
+		if (/\s/.test(ch)) {
+			if (!s.endsWith("_")) s += "_";
+		} else if (isXmlSafe(ch)) {
+			s += ch;
+		}
+	}
+	if (s.length > MAX_TABLE_NAME_LEN) s = s.slice(0, MAX_TABLE_NAME_LEN);
+	if (!/^[A-Za-z_\\]/.test(s)) s = `_${s}`.slice(0, MAX_TABLE_NAME_LEN);
+	if (CELL_REF_NAME.test(s) || /^[CcRr]$/.test(s)) {
+		s = s.length < MAX_TABLE_NAME_LEN ? `${s}_` : `_${s.slice(1)}`;
+	}
+	return tableNameProblem(s) === undefined ? s : "Table";
+}
+
+/**
+ * The width/height (in cells) of an A1 range like `"A1:C5"` — or a single cell `"A1"` — or `undefined`
+ * when the ref doesn't parse. Used to reconcile a table's column count and totals row to the strict
+ * writer's rules (F9.5). `parseRef` throws on a malformed token, so it is shielded here.
+ */
+function rangeExtent(ref: string): { width: number; height: number } | undefined {
+	const parts = ref.split(":");
+	if (parts.length > 2) return undefined;
+	const a = parts[0];
+	if (a === undefined) return undefined;
+	const b = parts[1] ?? a; // a single cell "A1" has no ":" — both ends are the same
+	try {
+		const start = parseRef(a);
+		const end = parseRef(b);
+		return {
+			width: Math.abs(end.col - start.col) + 1,
+			height: Math.abs(end.row - start.row) + 1,
+		};
+	} catch {
+		return undefined;
+	}
+}
 
 // OOXML booleans are `1`/`0` (or `true`/`false`); anything else — or an absent attribute — is undefined.
 function bool01(v: string | undefined): boolean | undefined {
@@ -137,7 +220,7 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 	}
 
 	if (name === undefined || ref === undefined) return undefined;
-	const clamped = name.length > MAX_TABLE_NAME_LEN ? name.slice(0, MAX_TABLE_NAME_LEN) : name;
+	const legalName = normalizeTableName(name); // F9.5: degrade an odd name to a writer-legal identifier
 	// Resolve each column's highlight dxf indexes to inline styles (F9.3 retrofit).
 	const outColumns: TableColumn[] = columns.map((c) => {
 		const col: {
@@ -166,12 +249,22 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 	const tHeader = resolveDxf(tableHeaderDxfId, dxfs);
 	const tData = resolveDxf(tableDataDxfId, dxfs);
 	const tTotals = resolveDxf(tableTotalsDxfId, dxfs);
+	// F9.5: reconcile shape to the strict writer's rules. A NON-EMPTY `columns` must have one entry per
+	// ref column — on a mismatch, clear it so the writer derives names from the header row. A totals row
+	// needs a data row above it — a single-row ref can't carry one, so clear it.
+	const extent = rangeExtent(ref);
+	const reconciledColumns =
+		extent !== undefined && outColumns.length > 0 && outColumns.length !== extent.width
+			? []
+			: outColumns;
+	const wantsTotals = totalsRowCount !== undefined && totalsRowCount !== "0";
+	const totalsRow = wantsTotals && !(extent !== undefined && extent.height === 1);
 	const info: TableInfo = {
-		name: clamped,
+		name: legalName,
 		ref,
-		columns: outColumns,
+		columns: reconciledColumns,
 		headerRow: headerRowCount !== "0",
-		totalsRow: totalsRowCount !== undefined && totalsRowCount !== "0",
+		totalsRow,
 		...(style !== undefined ? { style } : {}),
 		...(tHeader !== undefined ? { headerRowStyle: tHeader } : {}),
 		...(tData !== undefined ? { dataStyle: tData } : {}),

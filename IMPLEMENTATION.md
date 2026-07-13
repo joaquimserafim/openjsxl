@@ -2184,7 +2184,7 @@ canonical-digits gate (+ the CF `intAttr` sibling, for consistency). Hostile len
 (API error killed its verifier) — streaming path, out-of-range/negative/malformed `*DxfId`, and
 non-plain/bad dxf all degrade or reject typed. **Gate: biome 0 / tsc 0 / 864 tests** (+4).
 
-### F9.4 — Fuzzing harness, corpus expansion, milestone hardening review ☐
+### F9.4 — Fuzzing harness, corpus expansion, milestone hardening review ☑
 **Context.** jazzer.js (libFuzzer) needs native bindings — out. **fast-check** (MIT, pure
 TS, seeded + shrinking, runs inside vitest) is the property-based half; a hand-rolled
 seeded mutation engine (~200 lines, xorshift PRNG — zero deps) is the corpus half. No
@@ -2255,7 +2255,7 @@ corpus property covers tables/DV/CF; M9 done = 0.9 release prep, owner-gated.
 
 ---
 
-### F9.5 — Table round-trip hardening (shared bounds) ☐
+### F9.5 — Table round-trip hardening (shared bounds) ☑
 **The problem, plainly.** openjsxl's rule is: *anything the reader hands back, the writer must be
 able to write.* That's what makes "open a file → tweak it → save it" safe. Data validation (F9.2)
 and conditional formatting (F9.3) follow this rule; **tables (F9.1) do not.** So a table made by
@@ -2297,6 +2297,24 @@ happily write empty / cell-ref-shaped table names, so such files exist in the wi
 **Acceptance.** A table from openpyxl/LibreOffice/hand-crafted XML with an odd name/shape opens AND
 re-saves without error; Excel-authored tables are byte-identical (unaffected); reader-output ⊆
 writer-input for tables is enforced by a shared, single-sourced rule.
+**Landed** (uncommitted → owner approval): `ooxml/table.ts` (`tableNameProblem` single-sourced rule +
+`normalizeTableName` + `rangeExtent` + finish reconciliation), `writer/sheet.ts` (delegates to the
+shared rule; carried-column-name fallback on a non-text header), `writer/from-workbook.ts`
+(`uniquifyTableName` — workbook-wide dedup so two normalized-collision names don't hit the writer's
+duplicate rejection). Fixture `openpyxl-table-oddname.xlsx` (cell-ref name "A1" → normalized). Tests:
+reader-degradation units, writer fallback, bridge round-trip + corpus property, dedup unit. openpyxl
+3.1.5 cross-validated both ways (warnings-as-errors clean). Adversarial review (hostile-input + round-
+trip lenses): `normalizeTableName` fuzzed 500k hostile strings — always-legal + idempotent; HIGH
+duplicate-collapse fixed (bridge dedup).
+**Known residuals (named, not dropped — all fail TYPED `invalid-input`, within the "round-trips OR
+fails typed" contract; only reachable from synthetic/hand-crafted files, never a real producer):**
+(a) a table whose `columns` count mismatches AND whose header cells are non-text — the reader clears
+columns, leaving the writer no name to fall back to; (b) a non-canonical table `ref` (lowercase,
+out-of-grid, absolute `$`) — F9.5 hardened name/columns/totals but not the ref (closing it needs the
+writer's canonical-ref rule single-sourced into the reader, like the name rule); (c) the cell-ref name
+rule flags out-of-grid A1-shapes (e.g. `"ZZZ1"`, col > XFD) that Excel would actually allow — reader
+and writer agree (no round-trip break), a latent byte-identity edge for an implausible name. Candidate
+follow-ups if a real file ever surfaces one.
 
 ---
 

@@ -3,11 +3,12 @@ import { fileURLToPath } from "node:url";
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { XlsxError } from "../../errors";
+import { tableNameProblem } from "../../ooxml/table";
 import { openCsv } from "../../reader/csv";
 import { openOds } from "../../reader/ods";
 import { openXlsx, type Workbook } from "../../reader/workbook";
 import { openXlsb } from "../../reader/xlsb";
-import { workbookToInput } from "../from-workbook";
+import { uniquifyTableName, workbookToInput } from "../from-workbook";
 import { writeXlsx } from "../workbook";
 
 // F4.4 — the bridge carries styles. Contract: read → workbookToInput → writeXlsx → read gives a
@@ -373,5 +374,39 @@ describe("bridge — hostile files (review regressions)", () => {
 		expect(wb.sheet("S").cell("A1").value).toBe(1); // reader's own answer is last-wins
 		const rewritten = await openXlsx(await writeXlsx(await workbookToInput(wb)));
 		expect(rewritten.sheet("S").cell("A1").value).toBe(1); // bridge agrees
+	});
+});
+
+describe("bridge — F9.5 table round-trip hardening", () => {
+	it("normalizes a foreign table's illegal name so it re-saves (openpyxl cell-ref name 'A1')", async () => {
+		const before = await openXlsx(await loadFixture("openpyxl-table-oddname.xlsx"));
+		const table = before.sheet("Sheet1").tables[0];
+		// The reader normalized the cell-ref-shaped displayName "A1" into a legal identifier ON READ —
+		// so what it returns is already something the strict writer accepts.
+		expect(table?.name).not.toBe("A1");
+		expect(tableNameProblem(table?.name ?? "")).toBeUndefined();
+		expect(table?.ref).toBe("A1:C4");
+		expect(table?.columns.map((c) => c.name)).toEqual(["Item", "Qty", "City"]);
+		// The point of F9.5: the whole file now RE-SAVES (this threw invalid-input before) and re-reads,
+		// and the normalized name is a stable fixpoint.
+		const after = await openXlsx(await rewrite(before));
+		const t2 = after.sheet("Sheet1").tables[0];
+		expect(t2?.name).toBe(table?.name);
+		expect(t2?.ref).toBe("A1:C4");
+		expect(t2?.columns.map((c) => c.name)).toEqual(["Item", "Qty", "City"]);
+	});
+
+	// The reader's name normalization (F9.5) can map two DISTINCT illegal names to the SAME legal string
+	// (e.g. "" and control-chars both → "_"); the bridge dedupes so the writer doesn't reject the
+	// duplicate (review HIGH). A unique name passes through unchanged (byte-identity).
+	it("dedupes table names that collide after normalization (bridge, workbook-wide)", () => {
+		const seen = new Set<string>();
+		expect(uniquifyTableName("Sales", seen)).toBe("Sales"); // first: unchanged
+		expect(uniquifyTableName("_", seen)).toBe("_"); // first collision-prone name: unchanged
+		expect(uniquifyTableName("_", seen)).toBe("__2"); // second "_" → suffixed
+		expect(uniquifyTableName("_", seen)).toBe("__3"); // third → next suffix
+		expect(uniquifyTableName("sales", seen)).toBe("sales_2"); // case-insensitive collision with "Sales"
+		expect(tableNameProblem("__2")).toBeUndefined(); // suffixed names stay legal
+		expect(tableNameProblem("sales_2")).toBeUndefined();
 	});
 });

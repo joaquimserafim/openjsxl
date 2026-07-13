@@ -390,3 +390,41 @@ describe("writeXlsx — table dxf highlights (F9.3 retrofit)", () => {
 		});
 	});
 });
+
+// F9.5 — the buffered writer prefers a carried column name when the header cell isn't plain text (a
+// foreign table with numeric/blank headers) instead of aborting the whole save.
+describe("writeXlsx — tables: carried column name fallback (F9.5)", () => {
+	it("uses the provided column name when the header cell is a number, not text", async () => {
+		const sheet: SheetInput = {
+			name: "S",
+			rows: [
+				[2020, 2021], // numeric header cells — headerCellText() can't derive names from these
+				[1, 2],
+			],
+			tables: [
+				{
+					name: "Yearly",
+					ref: "A1:B2",
+					columns: [{ name: "2020" }, { name: "2021" }],
+					headerRow: true,
+					totalsRow: false,
+				},
+			],
+		};
+		const ws = await roundTrip(sheet); // previously threw invalid-input; now writes + re-reads
+		expect(ws.tables[0]?.columns.map((c) => c.name)).toEqual(["2020", "2021"]);
+	});
+
+	it("still requires a name when the header cell is non-text AND no column name is carried", async () => {
+		await rejects({
+			name: "S",
+			rows: [
+				[2020, 2021],
+				[1, 2],
+			],
+			tables: [
+				{ name: "Yearly", ref: "A1:B2", columns: [], headerRow: true, totalsRow: false },
+			],
+		});
+	});
+});

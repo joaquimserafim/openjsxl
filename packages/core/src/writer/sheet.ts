@@ -29,7 +29,7 @@ import {
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
+import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
 import type {
 	ColumnProps,
 	Comment,
@@ -1244,28 +1244,20 @@ export function createTableContext(): TableContext {
 
 // A table name is a defined-name-style identifier (decision 8): non-empty, ≤255, no whitespace, must
 // start with a letter/underscore/backslash, and must NOT look like a cell reference or the reserved
-// bare `C`/`R`. Excel repair-prompts on a name that breaks these.
-const CELL_REF_NAME = /^[A-Za-z]{1,3}[0-9]+$/;
+// bare `C`/`R`. The rules themselves live in ooxml/table.ts (`tableNameProblem`), single-sourced so
+// the reader normalizes exactly what the writer here rejects; this only maps each problem to a message.
 function validateTableName(sheetName: string, what: string, name: string): void {
-	if (name.length === 0) sheetInvalid(sheetName, `${what}.name must be a non-empty string`);
-	if (name.length > MAX_TABLE_NAME_LEN) {
-		sheetInvalid(sheetName, `${what}.name exceeds ${MAX_TABLE_NAME_LEN} characters`);
-	}
-	if (!isXmlSafe(name)) {
-		sheetInvalid(sheetName, `${what}.name contains a character not allowed in XML`);
-	}
-	if (/\s/.test(name)) {
-		sheetInvalid(sheetName, `${what}.name "${shortened(name)}" must not contain whitespace`);
-	}
-	if (!/^[A-Za-z_\\]/.test(name)) {
-		sheetInvalid(
-			sheetName,
-			`${what}.name "${shortened(name)}" must start with a letter, underscore, or backslash`,
-		);
-	}
-	if (CELL_REF_NAME.test(name) || /^[CcRr]$/.test(name)) {
-		sheetInvalid(sheetName, `${what}.name "${name}" must not look like a cell reference`);
-	}
+	const problem = tableNameProblem(name);
+	if (problem === undefined) return;
+	const messages: Record<TableNameProblem, string> = {
+		empty: `${what}.name must be a non-empty string`,
+		"too-long": `${what}.name exceeds ${MAX_TABLE_NAME_LEN} characters`,
+		"not-xml-safe": `${what}.name contains a character not allowed in XML`,
+		whitespace: `${what}.name "${shortened(name)}" must not contain whitespace`,
+		"bad-start": `${what}.name "${shortened(name)}" must start with a letter, underscore, or backslash`,
+		"cell-ref": `${what}.name "${name}" must not look like a cell reference`,
+	};
+	sheetInvalid(sheetName, messages[problem]);
 }
 
 // The text value of a header cell: a bare string, or a `{ value: string }` / `{ value: string, style }`
@@ -1392,13 +1384,20 @@ export function buildTables(
 			let columnName: string;
 			if (headerRow && headerCell !== undefined) {
 				const text = headerCellText(headerCell(from.row, from.col + c));
-				if (text === undefined || text === "") {
+				const provName = provided !== undefined ? provided.name : undefined;
+				if (text !== undefined && text !== "") {
+					// Header text is authoritative — Excel requires the column name to match the header cell.
+					columnName = text;
+				} else if (typeof provName === "string" && provName !== "") {
+					// F9.5: a non-text/blank header cell (a foreign table with numeric/empty headers) would
+					// otherwise abort; fall back to the name the reader carried from `<tableColumn name>`.
+					columnName = provName;
+				} else {
 					sheetInvalid(
 						sheetName,
 						`${what} header cell for column ${c + 1} must be non-empty text (table column names derive from the header row)`,
 					);
 				}
-				columnName = text;
 			} else {
 				const provName = provided !== undefined ? provided.name : undefined;
 				if (typeof provName === "string" && provName !== "") columnName = provName;

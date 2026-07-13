@@ -1,5 +1,6 @@
 import { XlsxError } from "../errors";
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1";
+import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
 import type { Workbook } from "../reader/workbook";
 import type {
 	Cell,
@@ -16,6 +17,28 @@ import type {
 	Worksheet,
 } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
+
+/**
+ * Return `name` if unseen (case-insensitively), else a suffixed variant (`name_2`, `name_3`, …) that
+ * stays within {@link MAX_TABLE_NAME_LEN}; records whatever it returns in `seen`. A suffixed legal name
+ * stays legal (appends `_<digits>` — no whitespace, no cell-ref shape, letter-first preserved).
+ * Exported for unit testing; the bridge uses it so the reader's F9.5 name normalization (which can map
+ * two distinct illegal names to one legal string) can't produce a duplicate the writer rejects.
+ */
+export function uniquifyTableName(name: string, seen: Set<string>): string {
+	if (!seen.has(name.toLowerCase())) {
+		seen.add(name.toLowerCase());
+		return name;
+	}
+	for (let n = 2; ; n++) {
+		const suffix = `_${n}`;
+		const candidate = `${name.slice(0, MAX_TABLE_NAME_LEN - suffix.length)}${suffix}`;
+		if (!seen.has(candidate.toLowerCase())) {
+			seen.add(candidate.toLowerCase());
+			return candidate;
+		}
+	}
+}
 
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
 // so a file can be read, optionally tweaked, and written back. This closes the round trip (F3.3);
@@ -84,6 +107,10 @@ function cellToInput(worksheet: Worksheet, cell: Cell): CellInput {
  */
 export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput> {
 	const sheets: SheetInput[] = [];
+	// Table names must be workbook-unique (case-insensitively) or the writer rejects them. The tolerant
+	// reader's name normalization (F9.5) can map two DISTINCT illegal names to the SAME legal string, so
+	// dedupe here — suffixing a collision — instead of aborting the whole save on the duplicate.
+	const seenTableNames = new Set<string>();
 	for (const info of workbook.sheets) {
 		const worksheet = workbook.sheet(info.name);
 		const rows: CellInput[][] = [];
@@ -167,9 +194,16 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		const images = await worksheet.images();
 		if (images.length > 0) sheet.images = images;
 		// Tables (F9.1) — structural pass-through; the writer re-derives column names from the header
-		// row (which the bridge also carries), so a read table rewrites cleanly.
+		// row (which the bridge also carries), so a read table rewrites cleanly. Names are deduped
+		// workbook-wide (F9.5) — a unique name is passed through UNCHANGED (byte-identity), a collision
+		// gets a suffix.
 		const tables = worksheet.tables;
-		if (tables.length > 0) sheet.tables = tables;
+		if (tables.length > 0) {
+			sheet.tables = tables.map((t) => {
+				const unique = uniquifyTableName(t.name, seenTableNames);
+				return unique === t.name ? t : { ...t, name: unique };
+			});
+		}
 		// Data validations (F9.2) — structural pass-through; the reader's rules ARE writer input.
 		const dataValidations = worksheet.dataValidations;
 		if (dataValidations.length > 0) sheet.dataValidations = dataValidations;

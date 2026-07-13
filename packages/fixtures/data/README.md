@@ -152,6 +152,15 @@ git-ignored [`../local/`](../local) directory and are never committed.
   test round-trips it through the bridge. The in-tree `inventory-table.xlsx` is the Microsoft-Excel
   producer variant.
 
+- **`openpyxl-table-oddname.xlsx`** — authored by **openpyxl 3.1.5** to exercise table round-trip
+  hardening (F9.5): a `Sheet1` with a defined table whose `displayName` is the **cell-reference-shaped
+  `"A1"`** over `A1:C4` (header `Item`/`Qty`/`City`, three data rows, `TableStyleMedium9`). openpyxl
+  writes such a name without complaint, but Excel repair-prompts on it and openjsxl's strict writer
+  rejects it — so before F9.5 a read→write of this file aborted the save. The tolerant reader now
+  **normalizes** the name into a legal identifier on read (`ooxml/table.ts` `normalizeTableName`), so
+  the file re-saves and re-reads; `writer/__tests__/bridge-styles.test.ts` pins that round-trip and the
+  corpus property covers it.
+
 - **`openpyxl-datavalidation.xlsx`** — authored by **openpyxl 3.1.5** to exercise data-validation read
   (F9.2): a `Rules` sheet with nine `<dataValidation>` rules covering all eight types + an
   input-message-only rule — `whole`/between (with a full prompt + error alert), `decimal`/≥ over a
