@@ -31,6 +31,7 @@ node examples/09-comments-formulas-theme.mjs # comments, live formulas, resolveC
 node examples/10-images.mjs          # anchored pictures: write, read back, round-trip (0.6)
 node examples/11-other-formats.mjs   # detect + read .xlsb/.ods/.csv into the same Workbook API (0.7)
 node examples/12-formulas.mjs        # parse + evaluate formulas: built-ins, UDFs, errors, cycles (0.8)
+node examples/13-tables-validation-formatting.mjs # tables, data validation, conditional formatting (0.9)
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.

@@ -10,7 +10,7 @@ runtimes — Node, Deno, Bun, the browser, and edge. This is the package to inst
 the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
 "Fast" is measured, not asserted — on a 1M-cell sheet, ~2–3× the read throughput of ExcelJS/SheetJS
-at a fraction of the memory, and it installs in **~0.3 MB with zero third-party dependencies** (vs
+at a fraction of the memory, and it installs in **~0.45 MB with zero third-party dependencies** (vs
 ExcelJS's 34 MB / 96 packages and SheetJS's 14 MB / 8)
 ([benchmarks](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md)).
 
@@ -39,17 +39,19 @@ for await (const row of wb.sheet(wb.sheets[0].name).rows()) {
 
 For very large sheets use `streamSheetRows` (constant memory); a worksheet also exposes
 `style(ref)`, `numberFormat`, `formula(ref)`, `dimension`, `mergedCells`, `hyperlinks`,
-`comments`, `columns`, `rowProperties`, `freeze`, `state`/`visible`, and async `images()`
-(anchored pictures — raw bytes, media type, and cell + EMU anchor); the workbook resolves
-theme colors to ARGB with `resolveColor`; and the reader throws a typed `XlsxError` (with a
-discriminating `code`) on malformed input.
+`comments`, `columns`, `rowProperties`, `freeze`, `state`/`visible`, async `images()`
+(anchored pictures — raw bytes, media type, and cell + EMU anchor), and `tables`,
+`dataValidations`, `conditionalFormatting` (0.9); the workbook resolves theme colors to ARGB
+with `resolveColor`; and the reader throws a typed `XlsxError` (with a discriminating `code`)
+on malformed input.
 
 **Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
 inferred from the JS values. Cells can carry styles (`{ value, style }` — the same shape
 `style(ref)` returns) or formulas (`{ formula, value? }`), and sheets take column widths, row
 heights, frozen panes, merged ranges, hyperlinks, comments (Excel-visible), a visibility
-state, and `images` (the same records `images()` returns — png, jpeg, gif, bmp, tiff, webp,
-emf, wmf). For exports too big to buffer, `streamXlsx` streams the same input shape from lazy
+state, `images` (the same records `images()` returns — png, jpeg, gif, bmp, tiff, webp,
+emf, wmf), and `tables` / `dataValidations` / `conditionalFormatting` (0.9). For exports too big
+to buffer, `streamXlsx` streams the same input shape from lazy
 (sync or async) row sources with roughly constant memory — constant in *rows*; embedded image
 bytes are held until the media parts flush at stream end:
 
@@ -73,7 +75,7 @@ const bytes = await writeXlsx({
 
 `workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —
 values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
-hyperlinks, and sheet visibility all round-trip.
+hyperlinks, sheet visibility, tables, data validations, and conditional formatting all round-trip.
 
 **Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
 Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
@@ -90,6 +92,14 @@ via `options.functions`. It's a separate import (the core bundle is unchanged wh
 use it); evaluation is read-only (it can supersede a stale cache), circular references resolve to a
 `#CYCLE!` value instead of hanging, and volatile functions (`TODAY`/`RAND`) require an injected
 clock/RNG so results stay deterministic.
+
+**Tables, data validation & conditional formatting (0.9):** three structural features that read
+AND write, each as the same record on both sides. `tables` (name, range, columns, header/totals
+flags, style banding), `dataValidations` (dropdowns and input rules — all eight types, operators,
+prompt/error text, intuitive `showDropDown`), and `conditionalFormatting` (highlight rules with an
+inline differential style, color scales, data bars, icon sets). They round-trip through
+`workbookToInput`, and the tolerant reader normalizes a foreign producer's out-of-spec table into
+something the strict writer accepts, so a table file from another tool re-saves instead of aborting.
 
 See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
 design notes, and roadmap.

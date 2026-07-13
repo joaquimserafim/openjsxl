@@ -376,6 +376,42 @@ follow documented Excel; a single-cell reference passed to an aggregate is treat
 text/booleans in one referenced cell coerce rather than being ignored — multi-cell ranges are
 Excel-exact).
 
+## Tables, data validation & conditional formatting (0.9)
+
+Three structural features that read AND write, each as the same record on both sides — so
+read → modify → write carries them across untouched:
+
+- **Tables** (`Worksheet.tables` ↔ `SheetInput.tables`) — a defined table's name, range, columns
+  (with totals-row label/function and formulas), header/totals flags, and style banding. On write,
+  column names derive from the header row; the numeric id and part number are assigned for you.
+- **Data validation** (`Worksheet.dataValidations` ↔ `SheetInput.dataValidations`) — dropdowns and
+  input rules: all eight types (`list`/`whole`/`decimal`/`date`/`time`/`textLength`/`custom`/`none`),
+  the comparison operator, operand text, prompt/error messages, and `showDropDown` in its intuitive
+  sense (`true` = arrow shown; the file's inverted attribute is translated for you).
+- **Conditional formatting** (`Worksheet.conditionalFormatting` ↔ `SheetInput.conditionalFormatting`)
+  — highlight rules (`cellIs`/`expression`/`top10`/text/… with an inline differential style), color
+  scales, data bars, and icon sets. Rule priorities are renumbered densely on write.
+
+```ts
+const bytes = await writeXlsx({
+	sheets: [{
+		name: 'Inventory',
+		rows: [['Item', 'Qty', 'Status'], ['Pears', 8, 'Low']],
+		tables: [{ name: 'Stock', ref: 'A1:C2', columns: [], headerRow: true, totalsRow: false }],
+		dataValidations: [{ sqref: ['C2'], type: 'list', formula1: '"In stock,Low,Out"', showDropDown: true }],
+		conditionalFormatting: [{
+			sqref: ['B2'],
+			rules: [{ type: 'cellIs', priority: 1, operator: 'lessThan', formulas: ['10'],
+				dxf: { fill: { bgColor: { rgb: 'FFFFC7CE' } } } }],
+		}],
+	}],
+});
+```
+
+Consistent with the whole library, the tolerant reader normalizes a foreign producer's out-of-spec
+table (an odd name, a mismatched column count, a totals row with nowhere to go) into something the
+strict writer accepts, so a table file from another tool re-saves instead of aborting.
+
 ## Why
 
 JavaScript has no Excel library that is, all at once, maintained, permissively licensed,
@@ -410,7 +446,7 @@ runtime dependency on disk:
 | | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
 | --- | --- | --- | --- |
 | runtime deps | **0 third-party** (1 pkg — its own core) | 96 packages | 8 packages |
-| installed | **~0.3 MB** | 34 MB | 14 MB |
+| installed | **~0.45 MB** | 34 MB | 14 MB |
 
 The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write), the four-format
 read lanes, the library-size table, the methodology, and out-of-band **openpyxl** /

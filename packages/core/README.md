@@ -34,6 +34,9 @@ sheet.mergedCells; // ["A1:B1", …]
 sheet.freeze; // { rows?, cols? } | undefined — plus columns, rowProperties, comments, state, …
 await sheet.images(); // [{ anchor, bytes, mime, name? }, …] — anchored pictures (lazy; media
 // bytes decompress on first call, once per drawing part)
+sheet.tables; // [{ name, ref, columns, headerRow, totalsRow, style? }, …] — defined tables (0.9)
+sheet.dataValidations; // [{ sqref, type, operator?, formula1?, … }, …] — dropdowns/input rules (0.9)
+sheet.conditionalFormatting; // [{ sqref, rules }, …] — highlight/colorScale/dataBar/iconSet (0.9)
 wb.resolveColor({ theme: 4, tint: 0.4 }); // "FF96B4D8" — theme color → ARGB, per this file's theme
 
 // Constant-memory streaming for large sheets — one row at a time.
@@ -74,8 +77,9 @@ Cells can carry styles (`{ value, style }` — the same shape `style(ref)` retur
 (`{ formula, value? }` — the cached value is what non-recalculating readers see), and sheets
 take `columns` (widths), `rowProperties` (heights), `freeze`, `merges`, `hyperlinks`,
 `comments` (written with the legacy VML part Excel needs to display them), a visibility
-`state`, and `images` (the same `{ anchor, bytes, mime, name? }` records `images()` returns —
-png, jpeg, gif, bmp, tiff, webp, emf, wmf; identical bytes dedupe into one media part). For
+`state`, `images` (the same `{ anchor, bytes, mime, name? }` records `images()` returns —
+png, jpeg, gif, bmp, tiff, webp, emf, wmf; identical bytes dedupe into one media part), and
+`tables` / `dataValidations` / `conditionalFormatting` (0.9). For
 huge exports, `streamXlsx` accepts the same input shape with each sheet's `rows` as any
 sync/async iterable and returns a `ReadableStream` — roughly constant memory at any row count
 (constant in *rows*; embedded image bytes are held, by reference, until the media parts flush
@@ -83,7 +87,7 @@ at stream end). Output is deterministic; unrepresentable input (no sheets, bad/d
 name, non-finite number, invalid `Date`, XML-illegal characters, malformed or overlapping
 merges) throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossless for values,
 types, sheet names/order, styles, formulas, comments, pictures, custom themes, geometry,
-merges, hyperlinks, and visibility.
+merges, hyperlinks, visibility, tables, data validations, and conditional formatting.
 
 ## Other formats (read-only)
 
@@ -106,7 +110,10 @@ Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `write
 - **Errors:** `XlsxError`, `XlsxErrorCode`
 - **Types:** `Row`, `Cell`, `CellType`, `CellStyle` (+ font/fill/border/alignment/color parts),
   `ColumnProps`, `RowProps`, `FreezePane`, `Comment`, `Hyperlink`, `SheetInfo`, `SheetState`,
-  `CellRef`, `SheetImage`, `ImageAnchor`, `AnchorPoint`
+  `CellRef`, `SheetImage`, `ImageAnchor`, `AnchorPoint`, `TableInfo`, `TableColumn`,
+  `TableStyleInfo`, `DataValidation` (+ `DataValidationType`/`DataValidationOperator`/
+  `DataValidationErrorStyle`), `ConditionalFormatting`, `ConditionalFormattingRule`, `DxfStyle`,
+  `DxfFill`, `Cfvo`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`,
   `dateToSerial`
 - **Formulas (opt-in, `@openjsxl/core/formula`):** `parseFormula`, `evaluateWorkbook`,

@@ -232,6 +232,8 @@ describe("xlsb — cell style field is masked to 24-bit iStyleRef (adversarial-r
 		]);
 		const a1 = parseXlsbSheet(sheet, [], styles, false).cells.get("A1");
 		expect(a1?.type).toBe("date");
-		expect((a1?.value as Date).getTime()).toBe(Date.UTC(2020, 0, 1));
+		const value = a1?.value;
+		expect(value).toBeInstanceOf(Date);
+		expect((value as Date).getTime()).toBe(Date.UTC(2020, 0, 1));
 	});
 });

@@ -1,6 +1,6 @@
 {
 	"name": "openjsxl-monorepo",
-	"version": "0.8.0",
+	"version": "0.9.0",
 	"private": true,
 	"description": "openjsxl monorepo — a fast, zero-dependency, TypeScript-first Excel (.xlsx) library for JavaScript runtimes.",
 	"type": "module",
@@ -22,10 +22,10 @@
 		"bench": "pnpm -r build && pnpm --filter @openjsxl/bench bench"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.1.0",
-		"@types/node": "^24.0.0",
-		"tsup": "^8.3.0",
-		"typescript": "^5.7.0",
-		"vitest": "^3.0.0"
+		"@biomejs/biome": "^2.5.3",
+		"@types/node": "^24.13.3",
+		"tsup": "^8.5.1",
+		"typescript": "^5.9.3",
+		"vitest": "^3.2.7"
 	}
 }
