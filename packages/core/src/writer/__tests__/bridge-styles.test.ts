@@ -61,6 +61,8 @@ async function styleSnapshot(wb: Workbook) {
 			tables: sheet.tables,
 			// Data validations (F9.2): sqref, type, operands, prompts/errors carry across.
 			dataValidations: sheet.dataValidations,
+			// Conditional formatting (F9.3): sqref, rules, inline dxf carry across.
+			conditionalFormatting: sheet.conditionalFormatting,
 			// Pictures (F6.4): anchor + mime + name + a content digest (not raw bytes).
 			images: (await sheet.images()).map((img) => ({
 				anchor: img.anchor,

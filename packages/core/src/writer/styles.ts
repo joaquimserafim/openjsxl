@@ -16,6 +16,8 @@ import type {
 	BorderStyle,
 	CellStyle,
 	Color,
+	DxfFill,
+	DxfStyle,
 	FillStyle,
 	FontStyle,
 	HorizontalAlignment,
@@ -69,6 +71,11 @@ function invalid(ref: string, message: string): never {
 	throw new XlsxError("invalid-input", `cell ${ref}: ${message}`);
 }
 
+// The component validators below throw through a `fail` callback rather than a fixed `cell ${ref}`
+// prefix, so the SAME validation serves both cell styles (F4.2) and differential styles (F9.3, whose
+// errors name the conditional-formatting rule, not a cell). Exported for the CF writer's colors.
+export type Fail = (message: string) => never;
+
 // STRICTLY plain objects: prototype null or Object.prototype. A Map/Set/Date/class instance has
 // no own enumerable keys, so it would sail through checkKeys while property access then walks its
 // PROTOTYPE (adversarial review: a Map's .size getter validated as font size 2) — reject the
@@ -80,13 +87,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function checkKeys(
-	ref: string,
+	fail: Fail,
 	what: string,
 	obj: Record<string, unknown>,
 	allowed: readonly string[],
 ): void {
 	for (const key of Object.keys(obj)) {
-		if (!allowed.includes(key)) invalid(ref, `${what} has an unknown property "${key}"`);
+		if (!allowed.includes(key)) fail(`${what} has an unknown property "${key}"`);
 	}
 }
 
@@ -99,18 +106,18 @@ function checkKeys(
 // normalized object is built from the locals. A getter (or Proxy) could otherwise return a valid
 // value for the check reads and something else — up to raw markup — for the emission read
 // (adversarial review demonstrated attribute injection into styles.xml that way).
-function validateColor(ref: string, what: string, raw: unknown): Color {
-	if (!isPlainObject(raw)) invalid(ref, `${what} must be a color object`);
+export function validateColor(fail: Fail, what: string, raw: unknown): Color {
+	if (!isPlainObject(raw)) fail(`${what} must be a color object`);
 	if ("rgb" in raw) {
-		checkKeys(ref, what, raw, ["rgb"]);
+		checkKeys(fail, what, raw, ["rgb"]);
 		const rgb = raw.rgb;
 		if (typeof rgb !== "string" || !HEX_COLOR.test(rgb)) {
-			invalid(ref, `${what}.rgb must be 6- or 8-digit hex (got ${JSON.stringify(rgb)})`);
+			fail(`${what}.rgb must be 6- or 8-digit hex (got ${JSON.stringify(rgb)})`);
 		}
 		return { rgb };
 	}
 	if ("theme" in raw) {
-		checkKeys(ref, what, raw, ["theme", "tint"]);
+		checkKeys(fail, what, raw, ["theme", "tint"]);
 		const theme = raw.theme;
 		if (
 			typeof theme !== "number" ||
@@ -118,17 +125,17 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 			theme < 0 ||
 			theme > MAX_COLOR_INDEX
 		) {
-			invalid(ref, `${what}.theme must be an integer between 0 and ${MAX_COLOR_INDEX}`);
+			fail(`${what}.theme must be an integer between 0 and ${MAX_COLOR_INDEX}`);
 		}
 		const tint = raw.tint;
 		if (tint === undefined) return { theme };
 		if (typeof tint !== "number" || !Number.isFinite(tint)) {
-			invalid(ref, `${what}.tint must be a finite number`);
+			fail(`${what}.tint must be a finite number`);
 		}
 		return { theme, tint };
 	}
 	if ("indexed" in raw) {
-		checkKeys(ref, what, raw, ["indexed"]);
+		checkKeys(fail, what, raw, ["indexed"]);
 		const indexed = raw.indexed;
 		if (
 			typeof indexed !== "number" ||
@@ -136,21 +143,21 @@ function validateColor(ref: string, what: string, raw: unknown): Color {
 			indexed < 0 ||
 			indexed > MAX_COLOR_INDEX
 		) {
-			invalid(ref, `${what}.indexed must be an integer between 0 and ${MAX_COLOR_INDEX}`);
+			fail(`${what}.indexed must be an integer between 0 and ${MAX_COLOR_INDEX}`);
 		}
 		return { indexed };
 	}
 	if ("auto" in raw) {
-		checkKeys(ref, what, raw, ["auto"]);
-		if (raw.auto !== true) invalid(ref, `${what}.auto must be true`);
+		checkKeys(fail, what, raw, ["auto"]);
+		if (raw.auto !== true) fail(`${what}.auto must be true`);
 		return { auto: true };
 	}
-	invalid(ref, `${what} needs one of rgb / theme / indexed / auto`);
+	fail(`${what} needs one of rgb / theme / indexed / auto`);
 }
 
-function validateFont(ref: string, raw: unknown): FontStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, "style.font must be an object");
-	checkKeys(ref, "style.font", raw, [
+function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
+	if (!isPlainObject(raw)) fail("style.font must be an object");
+	checkKeys(fail, "style.font", raw, [
 		"name",
 		"size",
 		"bold",
@@ -173,11 +180,10 @@ function validateFont(ref: string, raw: unknown): FontStyle | undefined {
 		// The one free-form string in the whole style path — gate it like cell strings and sheet
 		// names, or a control character / lone surrogate would corrupt styles.xml itself.
 		if (typeof name !== "string" || name.length === 0) {
-			invalid(ref, "style.font.name must be a non-empty string");
+			fail("style.font.name must be a non-empty string");
 		}
 		if (!isXmlSafe(name)) {
-			invalid(
-				ref,
+			fail(
 				"style.font.name contains a character not allowed in XML (a control character or lone surrogate)",
 			);
 		}
@@ -186,49 +192,48 @@ function validateFont(ref: string, raw: unknown): FontStyle | undefined {
 	const size = raw.size;
 	if (size !== undefined) {
 		if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
-			invalid(ref, "style.font.size must be a positive number");
+			fail("style.font.size must be a positive number");
 		}
 		out.size = size;
 	}
 	for (const flag of ["bold", "italic", "strike"] as const) {
 		const value = raw[flag];
 		if (value !== undefined) {
-			if (typeof value !== "boolean") invalid(ref, `style.font.${flag} must be a boolean`);
+			if (typeof value !== "boolean") fail(`style.font.${flag} must be a boolean`);
 			if (value) out[flag] = true; // false is the default — normalizes away
 		}
 	}
 	const underline = raw.underline;
 	if (underline !== undefined) {
 		if (underline !== "single" && underline !== "double") {
-			invalid(
-				ref,
+			fail(
 				`style.font.underline must be "single" or "double" (accounting variants are not supported)`,
 			);
 		}
 		out.underline = underline;
 	}
 	const color = raw.color;
-	if (color !== undefined) out.color = validateColor(ref, "style.font.color", color);
+	if (color !== undefined) out.color = validateColor(fail, "style.font.color", color);
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function validateFill(ref: string, raw: unknown): FillStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, "style.fill must be an object");
-	checkKeys(ref, "style.fill", raw, ["patternType", "fgColor", "bgColor"]);
+function validateFill(fail: Fail, raw: unknown): FillStyle | undefined {
+	if (!isPlainObject(raw)) fail("style.fill must be an object");
+	checkKeys(fail, "style.fill", raw, ["patternType", "fgColor", "bgColor"]);
 	const patternType = raw.patternType;
 	if (typeof patternType !== "string" || !PATTERN_TYPES.has(patternType as never)) {
-		invalid(ref, `style.fill.patternType must be one of the OOXML pattern types`);
+		fail(`style.fill.patternType must be one of the OOXML pattern types`);
 	}
 	const rawFg = raw.fgColor;
 	const fgColor =
-		rawFg === undefined ? undefined : validateColor(ref, "style.fill.fgColor", rawFg);
+		rawFg === undefined ? undefined : validateColor(fail, "style.fill.fgColor", rawFg);
 	const rawBg = raw.bgColor;
 	const bgColor =
-		rawBg === undefined ? undefined : validateColor(ref, "style.fill.bgColor", rawBg);
+		rawBg === undefined ? undefined : validateColor(fail, "style.fill.bgColor", rawBg);
 	if (patternType === "none") {
 		// "none" paints nothing; colors on it would be silently dead — reject rather than pretend.
 		if (fgColor !== undefined || bgColor !== undefined) {
-			invalid(ref, 'style.fill with patternType "none" cannot carry colors');
+			fail('style.fill with patternType "none" cannot carry colors');
 		}
 		return undefined; // no fill at all — interns to the reserved fill 0
 	}
@@ -240,37 +245,37 @@ function validateFill(ref: string, raw: unknown): FillStyle | undefined {
 	return out;
 }
 
-function validateEdge(ref: string, what: string, raw: unknown): BorderEdge {
-	if (!isPlainObject(raw)) invalid(ref, `${what} must be an object`);
-	checkKeys(ref, what, raw, ["style", "color"]);
+function validateEdge(fail: Fail, what: string, raw: unknown): BorderEdge {
+	if (!isPlainObject(raw)) fail(`${what} must be an object`);
+	checkKeys(fail, what, raw, ["style", "color"]);
 	const style = raw.style;
 	if (typeof style !== "string" || !BORDER_LINE_STYLES.has(style as never)) {
-		invalid(ref, `${what}.style must be one of the OOXML border line styles`);
+		fail(`${what}.style must be one of the OOXML border line styles`);
 	}
 	const color = raw.color;
 	if (color === undefined) return { style: style as BorderLineStyle };
 	return {
 		style: style as BorderLineStyle,
-		color: validateColor(ref, `${what}.color`, color),
+		color: validateColor(fail, `${what}.color`, color),
 	};
 }
 
-function validateBorder(ref: string, raw: unknown): BorderStyle | undefined {
-	if (!isPlainObject(raw)) invalid(ref, "style.border must be an object");
+function validateBorder(fail: Fail, raw: unknown): BorderStyle | undefined {
+	if (!isPlainObject(raw)) fail("style.border must be an object");
 	// Diagonal borders are deferred (they need diagonalUp/Down flags the model doesn't carry).
-	checkKeys(ref, "style.border", raw, ["top", "right", "bottom", "left"]);
+	checkKeys(fail, "style.border", raw, ["top", "right", "bottom", "left"]);
 	const out: { top?: BorderEdge; right?: BorderEdge; bottom?: BorderEdge; left?: BorderEdge } =
 		{};
 	for (const edge of ["top", "right", "bottom", "left"] as const) {
 		const value = raw[edge];
-		if (value !== undefined) out[edge] = validateEdge(ref, `style.border.${edge}`, value);
+		if (value !== undefined) out[edge] = validateEdge(fail, `style.border.${edge}`, value);
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
-	if (!isPlainObject(raw)) invalid(ref, "style.alignment must be an object");
-	checkKeys(ref, "style.alignment", raw, [
+function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
+	if (!isPlainObject(raw)) fail("style.alignment must be an object");
+	checkKeys(fail, "style.alignment", raw, [
 		"horizontal",
 		"vertical",
 		"wrapText",
@@ -289,22 +294,21 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 	const horizontal = raw.horizontal;
 	if (horizontal !== undefined) {
 		if (typeof horizontal !== "string" || !H_ALIGNMENTS.has(horizontal as never)) {
-			invalid(ref, "style.alignment.horizontal is not a valid value");
+			fail("style.alignment.horizontal is not a valid value");
 		}
 		out.horizontal = horizontal as HorizontalAlignment;
 	}
 	const vertical = raw.vertical;
 	if (vertical !== undefined) {
 		if (typeof vertical !== "string" || !V_ALIGNMENTS.has(vertical as never)) {
-			invalid(ref, "style.alignment.vertical is not a valid value");
+			fail("style.alignment.vertical is not a valid value");
 		}
 		out.vertical = vertical as VerticalAlignment;
 	}
 	for (const flag of ["wrapText", "shrinkToFit"] as const) {
 		const value = raw[flag];
 		if (value !== undefined) {
-			if (typeof value !== "boolean")
-				invalid(ref, `style.alignment.${flag} must be a boolean`);
+			if (typeof value !== "boolean") fail(`style.alignment.${flag} must be a boolean`);
 			if (value) out[flag] = true;
 		}
 	}
@@ -316,7 +320,7 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 			indent < 0 ||
 			indent > MAX_INDENT
 		) {
-			invalid(ref, `style.alignment.indent must be an integer between 0 and ${MAX_INDENT}`);
+			fail(`style.alignment.indent must be an integer between 0 and ${MAX_INDENT}`);
 		}
 		if (indent > 0) out.indent = indent;
 	}
@@ -328,10 +332,31 @@ function validateAlignment(ref: string, raw: unknown): Alignment | undefined {
 			textRotation < 0 ||
 			textRotation > 180
 		) {
-			invalid(ref, "style.alignment.textRotation must be an integer between 0 and 180");
+			fail("style.alignment.textRotation must be an integer between 0 and 180");
 		}
 		if (textRotation > 0) out.textRotation = textRotation;
 	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+// A differential FILL (F9.3) — validated RAW: patternType is OPTIONAL, and a `bgColor`-only fill (the
+// common solid highlight) is allowed. Unlike a cell fill, colors are NOT rejected without a pattern —
+// the components are carried exactly as given (decision 3).
+function validateDxfFill(fail: Fail, raw: unknown): DxfFill | undefined {
+	if (!isPlainObject(raw)) fail("dxf.fill must be an object");
+	checkKeys(fail, "dxf.fill", raw, ["patternType", "fgColor", "bgColor"]);
+	const out: { patternType?: PatternType; fgColor?: Color; bgColor?: Color } = {};
+	const patternType = raw.patternType;
+	if (patternType !== undefined) {
+		if (typeof patternType !== "string" || !PATTERN_TYPES.has(patternType as never)) {
+			fail("dxf.fill.patternType must be one of the OOXML pattern types");
+		}
+		out.patternType = patternType as PatternType;
+	}
+	const rawFg = raw.fgColor;
+	if (rawFg !== undefined) out.fgColor = validateColor(fail, "dxf.fill.fgColor", rawFg);
+	const rawBg = raw.bgColor;
+	if (rawBg !== undefined) out.bgColor = validateColor(fail, "dxf.fill.bgColor", rawBg);
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -343,7 +368,7 @@ const keyOf = (o: object | undefined): string => (o === undefined ? "" : JSON.st
 
 // ── XML emission ───────────────────────────────────────────────────────────────────────────────
 
-function colorXml(tag: string, color: Color): string {
+export function colorXml(tag: string, color: Color): string {
 	if ("rgb" in color) return `<${tag} rgb="${color.rgb}"/>`;
 	if ("theme" in color) {
 		const tint = color.tint !== undefined ? ` tint="${String(color.tint)}"` : "";
@@ -376,6 +401,16 @@ function fillXml(fill: FillStyle): string {
 		return `<fill><patternFill patternType="${fill.patternType}"/></fill>`;
 	}
 	return `<fill><patternFill patternType="${fill.patternType}">${fg}${bg}</patternFill></fill>`;
+}
+
+// A differential fill (F9.3): patternType is OPTIONAL (emitted only when present), matching how a
+// solid CF highlight carries just a bgColor.
+function dxfFillXml(fill: DxfFill): string {
+	const pt = fill.patternType !== undefined ? ` patternType="${fill.patternType}"` : "";
+	const fg = fill.fgColor !== undefined ? colorXml("fgColor", fill.fgColor) : "";
+	const bg = fill.bgColor !== undefined ? colorXml("bgColor", fill.bgColor) : "";
+	if (fg === "" && bg === "") return `<fill><patternFill${pt}/></fill>`;
+	return `<fill><patternFill${pt}>${fg}${bg}</patternFill></fill>`;
 }
 
 function borderXml(border: BorderStyle): string {
@@ -427,7 +462,14 @@ export interface StyleRegistry {
 	 * the caller omits the `s` attribute entirely.
 	 */
 	xfIndexFor(style: CellStyle | undefined, isDate: boolean, ref: string): number;
-	/** True when any cell interned a non-default format — i.e. styles.xml must be emitted. */
+	/**
+	 * Intern a differential ("dxf") style (F9.3) into the shared `<dxfs>` table and return its
+	 * `dxfId` — a conditional-formatting rule's highlight look. Identical dxfs collapse to one slot.
+	 * `where` names the offending rule in any validation error. Returns `undefined` for an absent dxf.
+	 * Takes `unknown` — the dxf shape is validated here (the CF writer passes the caller's value raw).
+	 */
+	internDxf(dxf: unknown, where: string): number | undefined;
+	/** True when any cell interned a non-default format, or any dxf exists — styles.xml must be emitted. */
 	needed(): boolean;
 	/** True when any written color is theme-based — i.e. theme1.xml must be emitted. */
 	usesTheme(): boolean;
@@ -463,6 +505,12 @@ export function createStyleRegistry(): StyleRegistry {
 	// Custom number formats (F4.3): code → id from 164 up, deduped, in first-encounter order.
 	// Codes exactly matching a built-in reuse its id instead and never appear here.
 	const customFormats = new Map<string, number>();
+
+	// Differential styles (F9.3): the `<dxfs>` table, one emitted `<dxf>` per slot, deduped by
+	// canonical key. Empty unless a conditional-formatting rule interns a highlight — so a
+	// dxf-free workbook emits no `<dxfs>` element at all (byte-identity).
+	const dxfs: string[] = [];
+	const dxfIndex = new Map<string, number>();
 
 	let themeUsed = false;
 
@@ -518,6 +566,87 @@ export function createStyleRegistry(): StyleRegistry {
 		return index;
 	};
 
+	// One <dxf>: children in the schema order font, numFmt, fill, alignment, border (decision 3;
+	// protection is not modelled). The numFmt shares the workbook's format-id space, so its code also
+	// appears in <numFmts> — harmless, and keeps ids consistent.
+	function dxfXml(dxf: DxfStyle): string {
+		let out = "<dxf>";
+		if (dxf.font !== undefined) out += fontXml(dxf.font);
+		if (dxf.numberFormat !== undefined) {
+			out += `<numFmt numFmtId="${numFmtIdFor(dxf.numberFormat)}" formatCode="${escapeAttr(dxf.numberFormat)}"/>`;
+		}
+		if (dxf.fill !== undefined) out += dxfFillXml(dxf.fill);
+		if (dxf.alignment !== undefined) out += alignmentXml(dxf.alignment);
+		if (dxf.border !== undefined) out += borderXml(dxf.border);
+		return `${out}</dxf>`;
+	}
+
+	function internDxf(dxf: unknown, where: string): number | undefined {
+		if (dxf === undefined) return undefined;
+		const fail: Fail = (message) => {
+			throw new XlsxError("invalid-input", `${where}: ${message}`);
+		};
+		if (!isPlainObject(dxf)) fail("dxf must be an object");
+		const record = dxf;
+		checkKeys(fail, "dxf", record, ["numberFormat", "font", "fill", "border", "alignment"]);
+		// Validate + normalize each component (single-read TOCTOU, like the cell-style path).
+		const normalized: {
+			numberFormat?: string;
+			font?: FontStyle;
+			fill?: DxfFill;
+			border?: BorderStyle;
+			alignment?: Alignment;
+		} = {};
+		const rawCode = record.numberFormat;
+		if (rawCode !== undefined) {
+			if (typeof rawCode !== "string" || rawCode.length === 0) {
+				fail("dxf.numberFormat must be a non-empty format code string");
+			}
+			if (!isXmlSafe(rawCode)) {
+				fail("dxf.numberFormat contains a character not allowed in XML");
+			}
+			normalized.numberFormat = rawCode;
+		}
+		const font = record.font;
+		if (font !== undefined) {
+			const v = validateFont(fail, font);
+			if (v !== undefined) normalized.font = v;
+		}
+		const fill = record.fill;
+		if (fill !== undefined) {
+			const v = validateDxfFill(fail, fill);
+			if (v !== undefined) {
+				normalized.fill = v;
+				if (colorUsesTheme(v.fgColor) || colorUsesTheme(v.bgColor)) themeUsed = true;
+			}
+		}
+		const border = record.border;
+		if (border !== undefined) {
+			const v = validateBorder(fail, border);
+			if (v !== undefined) {
+				normalized.border = v;
+				for (const edge of [v.top, v.right, v.bottom, v.left]) {
+					if (edge !== undefined && colorUsesTheme(edge.color)) themeUsed = true;
+				}
+			}
+		}
+		const alignment = record.alignment;
+		if (alignment !== undefined) {
+			const v = validateAlignment(fail, alignment);
+			if (v !== undefined) normalized.alignment = v;
+		}
+		if (colorUsesTheme(normalized.font?.color)) themeUsed = true;
+
+		const key = keyOf(normalized);
+		let index = dxfIndex.get(key);
+		if (index === undefined) {
+			index = dxfs.length;
+			dxfs.push(dxfXml(normalized));
+			dxfIndex.set(key, index);
+		}
+		return index;
+	}
+
 	function xfIndexFor(style: CellStyle | undefined, isDate: boolean, ref: string): number {
 		let fontId = 0;
 		let fillId = 0;
@@ -526,7 +655,8 @@ export function createStyleRegistry(): StyleRegistry {
 		let numFmtCode: string | undefined;
 		if (style !== undefined) {
 			if (!isPlainObject(style)) invalid(ref, "style must be an object");
-			checkKeys(ref, "style", style as Record<string, unknown>, [
+			const fail: Fail = (message) => invalid(ref, message);
+			checkKeys(fail, "style", style as Record<string, unknown>, [
 				"font",
 				"fill",
 				"border",
@@ -550,13 +680,15 @@ export function createStyleRegistry(): StyleRegistry {
 				numFmtCode = rawCode;
 			}
 			const font = style.font;
-			fontId = internFont(font === undefined ? undefined : validateFont(ref, font));
+			fontId = internFont(font === undefined ? undefined : validateFont(fail, font));
 			const fill = style.fill;
-			fillId = internFill(fill === undefined ? undefined : validateFill(ref, fill));
+			fillId = internFill(fill === undefined ? undefined : validateFill(fail, fill));
 			const border = style.border;
-			borderId = internBorder(border === undefined ? undefined : validateBorder(ref, border));
+			borderId = internBorder(
+				border === undefined ? undefined : validateBorder(fail, border),
+			);
 			const align = style.alignment;
-			alignment = align === undefined ? undefined : validateAlignment(ref, align);
+			alignment = align === undefined ? undefined : validateAlignment(fail, align);
 		}
 		// A user code wins even on a Date — the implicit date format (id 14) applies only when the
 		// caller didn't choose one. 'General' reverse-maps to id 0, i.e. no format.
@@ -601,6 +733,10 @@ export function createStyleRegistry(): StyleRegistry {
 								`<numFmt numFmtId="${id}" formatCode="${escapeAttr(code)}"/>`,
 						)
 						.join("")}</numFmts>`;
+		// <dxfs> (F9.3) slots after <cellStyles> (CT_Stylesheet order) — emitted only when non-empty,
+		// so a dxf-free workbook keeps its exact pre-F9.3 stylesheet bytes.
+		const dxfsXml =
+			dxfs.length === 0 ? "" : `<dxfs count="${dxfs.length}">${dxfs.join("")}</dxfs>`;
 		return (
 			`${XML_DECL}\n<styleSheet xmlns="${NS_MAIN}">${numFmts}` +
 			`<fonts count="${fonts.length}">${fonts.join("")}</fonts>` +
@@ -608,13 +744,15 @@ export function createStyleRegistry(): StyleRegistry {
 			`<borders count="${borders.length}">${borders.join("")}</borders>` +
 			'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
 			`<cellXfs count="${xfs.length}">${xfs.map(xfXml).join("")}</cellXfs>` +
-			'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+			'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+			`${dxfsXml}</styleSheet>`
 		);
 	}
 
 	return {
 		xfIndexFor,
-		needed: () => xfs.length > 1,
+		internDxf,
+		needed: () => xfs.length > 1 || dxfs.length > 0,
 		usesTheme: () => themeUsed,
 		stylesXml,
 	};

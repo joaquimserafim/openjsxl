@@ -128,8 +128,9 @@ export function isDateFormatCode(formatCode: string): boolean {
 
 // OOXML boolean attributes: an element like <b/> asserts true by presence; an explicit
 // val="0"/"false" negates it. Anything else (including absence of the element) is handled by the
-// caller — this decides only what a PRESENT element with this `val` means.
-function boolAttr(val: string | undefined): boolean {
+// caller — this decides only what a PRESENT element with this `val` means. Exported so the dxf
+// parser (F9.3) shares the exact same semantics.
+export function boolAttr(val: string | undefined): boolean {
 	return val !== "0" && val !== "false";
 }
 
@@ -149,7 +150,7 @@ export const MAX_INDENT = 250;
 // exactly one addressing mode per element; if a producer emits several, precedence follows what
 // consumers (and openpyxl) do: rgb > theme > indexed > auto. Malformed values — bad numerics,
 // non-hex rgb, out-of-range indexes — yield undefined (no color) rather than an unwritable record.
-function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color | undefined {
+export function parseColor(attrs: Readonly<Record<string, string | undefined>>): Color | undefined {
 	if (attrs.rgb !== undefined) {
 		return HEX_COLOR.test(attrs.rgb) ? { rgb: attrs.rgb } : undefined;
 	}
@@ -231,7 +232,7 @@ export const V_ALIGNMENTS = new Set<VerticalAlignment>([
 // tokens like <fills> or <xf> — see the dispatch chain below.
 const FONT_CHILDREN = new Set(["name", "sz", "b", "i", "u", "strike", "color"]);
 
-function parseAlignment(
+export function parseAlignment(
 	attrs: Readonly<Record<string, string | undefined>>,
 ): Alignment | undefined {
 	const out: {

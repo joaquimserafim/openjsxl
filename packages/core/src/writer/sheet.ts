@@ -9,6 +9,12 @@ import {
 	parseRef,
 } from "../ooxml/a1";
 import {
+	colorScaleCountsOk,
+	dataBarCountsOk,
+	iconSetCount,
+	iconSetCountsOk,
+} from "../ooxml/conditional-formatting";
+import {
 	DATA_VALIDATION_ERROR_STYLES,
 	DATA_VALIDATION_OPERATORS,
 	DATA_VALIDATION_TYPES,
@@ -27,6 +33,7 @@ import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
 import type {
 	ColumnProps,
 	Comment,
+	ConditionalFormatting,
 	DataValidation,
 	DataValidationType,
 	FreezePane,
@@ -36,7 +43,7 @@ import type {
 	TableInfo,
 } from "../types";
 import type { MediaRegistry } from "./images";
-import type { StyleRegistry } from "./styles";
+import { colorXml, type Fail, type StyleRegistry, validateColor } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
 import { escapeAttr, escapeText, isXmlSafe, preserveAttr } from "./xml";
 
@@ -764,6 +771,327 @@ function dataValidationsXml(
 	return `<dataValidations count="${entries.length}">${entries.join("")}</dataValidations>`;
 }
 
+// ── Conditional formatting (F9.3) ──────────────────────────────────────────────────────────────
+// `<conditionalFormatting>` blocks slot between <mergeCells> and <dataValidations> (CT_Worksheet
+// order, decision 1). A highlight rule's look is a DxfStyle interned into styles.xml's `<dxfs>` via the
+// shared StyleRegistry (the numeric dxfId is assigned here, never public). Priorities are renumbered
+// densely 1..n by ascending caller priority with document order as the tie-break (decision 6) — NEVER
+// by position, which would silently swap which overlapping rule wins. Empty ⇒ "" (byte-identity).
+
+const CF_HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
+	"cellIs",
+	"expression",
+	"top10",
+	"aboveAverage",
+	"uniqueValues",
+	"duplicateValues",
+	"containsText",
+	"notContainsText",
+	"beginsWith",
+	"endsWith",
+	"containsBlanks",
+	"notContainsBlanks",
+	"containsErrors",
+	"notContainsErrors",
+	"timePeriod",
+]);
+
+// A validated rule ready to emit — everything except its (renumbered) priority.
+interface BuiltCfRule {
+	readonly block: number;
+	readonly doc: number;
+	readonly priority: number; // the caller's priority, for the sort
+	readonly open: string; // `<cfRule type=... dxfId?=...` (priority inserted at emit)
+	readonly rest: string; // remaining attributes
+	readonly children: string;
+}
+
+function conditionalFormattingXml(
+	sheetName: string,
+	cfs: readonly ConditionalFormatting[] | undefined,
+	styles: StyleRegistry,
+): string {
+	if (cfs === undefined) return "";
+	if (!Array.isArray(cfs)) sheetInvalid(sheetName, "conditionalFormatting must be an array");
+	if (cfs.length === 0) return "";
+
+	const built: BuiltCfRule[] = [];
+	const blockSqref: string[][] = [];
+	let doc = 0;
+
+	for (let b = 0; b < cfs.length; b++) {
+		const rawBlock = cfs[b] as unknown;
+		const wb = `conditionalFormatting[${b}]`;
+		if (!isPlainRecord(rawBlock)) sheetInvalid(sheetName, `${wb} must be an object`);
+		checkKeys(sheetName, wb, rawBlock, ["sqref", "rules"]);
+
+		const sqref = rawBlock.sqref;
+		if (!Array.isArray(sqref))
+			sheetInvalid(sheetName, `${wb}.sqref must be an array of A1 ranges`);
+		if (sqref.length === 0)
+			sheetInvalid(sheetName, `${wb}.sqref must cover at least one range`);
+		if (sqref.length > MAX_SQREF_RANGES) {
+			sheetInvalid(sheetName, `${wb}.sqref has more than ${MAX_SQREF_RANGES} ranges`);
+		}
+		const tokens: string[] = [];
+		for (let s = 0; s < sqref.length; s++) {
+			const tok = sqref[s] as unknown;
+			if (typeof tok !== "string")
+				sheetInvalid(sheetName, `${wb}.sqref[${s}] must be a string`);
+			if (!isCanonicalSqrefToken(tok)) {
+				sheetInvalid(
+					sheetName,
+					`${wb}.sqref[${s}] "${shortened(tok)}" is not a canonical A1 cell or range within Excel's grid`,
+				);
+			}
+			tokens.push(tok);
+		}
+		blockSqref[b] = tokens;
+
+		const rules = rawBlock.rules;
+		if (!Array.isArray(rules)) sheetInvalid(sheetName, `${wb}.rules must be an array`);
+		if (rules.length === 0) sheetInvalid(sheetName, `${wb}.rules must have at least one rule`);
+		for (let r = 0; r < rules.length; r++) {
+			built.push(buildCfRule(sheetName, `${wb}.rules[${r}]`, rules[r], styles, b, doc++));
+		}
+	}
+
+	// Renumber priorities densely 1..n by (caller priority asc, document order asc) — decision 6.
+	const order = [...built].sort((a, z) => a.priority - z.priority || a.doc - z.doc);
+	const assigned = new Map<number, number>();
+	for (let i = 0; i < order.length; i++) {
+		const rule = order[i];
+		if (rule !== undefined) assigned.set(rule.doc, i + 1);
+	}
+
+	let out = "";
+	for (let b = 0; b < cfs.length; b++) {
+		let rulesXml = "";
+		for (const rule of built) {
+			if (rule.block !== b) continue;
+			const p = assigned.get(rule.doc) ?? 1;
+			const head = `${rule.open} priority="${p}"${rule.rest}`;
+			rulesXml +=
+				rule.children === ""
+					? `<cfRule ${head}/>`
+					: `<cfRule ${head}>${rule.children}</cfRule>`;
+		}
+		const tokens = blockSqref[b] ?? [];
+		out += `<conditionalFormatting sqref="${tokens.join(" ")}">${rulesXml}</conditionalFormatting>`;
+	}
+	return out;
+}
+
+// Validate one <cfRule> and return its emit-ready pieces. Discriminates on `type`.
+function buildCfRule(
+	sheetName: string,
+	what: string,
+	raw: unknown,
+	styles: StyleRegistry,
+	block: number,
+	doc: number,
+): BuiltCfRule {
+	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+	const fail: Fail = (message) => sheetInvalid(sheetName, `${what}: ${message}`);
+
+	const type = raw.type;
+	if (typeof type !== "string" || !isXmlSafe(type)) {
+		sheetInvalid(sheetName, `${what}.type must be an XML-safe string`);
+	}
+	const priority = raw.priority;
+	if (typeof priority !== "number" || !Number.isInteger(priority) || priority < 1) {
+		sheetInvalid(sheetName, `${what}.priority must be an integer ≥ 1`);
+	}
+
+	// Shared attributes across every variant.
+	let rest = "";
+	const stopIfTrue = raw.stopIfTrue;
+	if (stopIfTrue !== undefined) {
+		if (typeof stopIfTrue !== "boolean")
+			sheetInvalid(sheetName, `${what}.stopIfTrue must be a boolean`);
+		rest += ` stopIfTrue="${stopIfTrue ? 1 : 0}"`;
+	}
+
+	const finish = (open: string, extraRest: string, children: string): BuiltCfRule => ({
+		block,
+		doc,
+		priority,
+		open,
+		rest: rest + extraRest,
+		children,
+	});
+
+	if (type === "colorScale") {
+		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "cfvo", "colors"]);
+		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
+		const colors = cfColorsXml(fail, `${what}.colors`, raw.colors);
+		// Excel repair-prompts on an out-of-count scale — reject (the reader drops it; shared bound).
+		if (!colorScaleCountsOk(cfvos.count, colors.count)) {
+			sheetInvalid(
+				sheetName,
+				`${what} colorScale needs 2 or 3 cfvo and the same number of colors`,
+			);
+		}
+		return finish(
+			'type="colorScale"',
+			"",
+			`<colorScale>${cfvos.xml}${colors.xml}</colorScale>`,
+		);
+	}
+	if (type === "dataBar") {
+		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "cfvo", "color"]);
+		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
+		if (!dataBarCountsOk(cfvos.count)) {
+			sheetInvalid(sheetName, `${what} dataBar needs exactly 2 cfvo`);
+		}
+		const color = colorXml("color", validateColor(fail, `${what}.color`, raw.color));
+		return finish('type="dataBar"', "", `<dataBar>${cfvos.xml}${color}</dataBar>`);
+	}
+	if (type === "iconSet") {
+		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "iconSet", "cfvo"]);
+		let attrs = "";
+		const iconSet = raw.iconSet;
+		if (iconSet !== undefined) {
+			if (typeof iconSet !== "string" || !isXmlSafe(iconSet)) {
+				sheetInvalid(sheetName, `${what}.iconSet must be an XML-safe string`);
+			}
+			attrs += ` iconSet="${escapeAttr(iconSet)}"`;
+		}
+		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
+		const iconName = typeof iconSet === "string" ? iconSet : undefined;
+		if (!iconSetCountsOk(iconName, cfvos.count)) {
+			sheetInvalid(
+				sheetName,
+				`${what} iconSet needs one cfvo per icon (${iconSetCount(iconName) ?? "3–5"})`,
+			);
+		}
+		return finish('type="iconSet"', "", `<iconSet${attrs}>${cfvos.xml}</iconSet>`);
+	}
+	if (CF_HIGHLIGHT_TYPES.has(type)) {
+		checkKeys(sheetName, what, raw, [
+			"type",
+			"priority",
+			"stopIfTrue",
+			"dxf",
+			"operator",
+			"text",
+			"timePeriod",
+			"rank",
+			"percent",
+			"bottom",
+			"aboveAverage",
+			"equalAverage",
+			"stdDev",
+			"formulas",
+		]);
+		const dxfId = styles.internDxf(raw.dxf, `${what}.dxf`);
+		let extra = "";
+		const strAttr = (key: string, value: unknown): void => {
+			if (value === undefined) return;
+			if (typeof value !== "string" || !isXmlSafe(value)) {
+				sheetInvalid(sheetName, `${what}.${key} must be an XML-safe string`);
+			}
+			extra += ` ${key}="${escapeAttr(value)}"`;
+		};
+		const intAttr = (key: string, value: unknown): void => {
+			if (value === undefined) return;
+			if (typeof value !== "number" || !Number.isInteger(value)) {
+				sheetInvalid(sheetName, `${what}.${key} must be an integer`);
+			}
+			extra += ` ${key}="${value}"`;
+		};
+		const boolAttr = (key: string, value: unknown): void => {
+			if (value === undefined) return;
+			if (typeof value !== "boolean")
+				sheetInvalid(sheetName, `${what}.${key} must be a boolean`);
+			extra += ` ${key}="${value ? 1 : 0}"`;
+		};
+		strAttr("operator", raw.operator);
+		strAttr("text", raw.text);
+		strAttr("timePeriod", raw.timePeriod);
+		intAttr("rank", raw.rank);
+		boolAttr("percent", raw.percent);
+		boolAttr("bottom", raw.bottom);
+		boolAttr("aboveAverage", raw.aboveAverage);
+		boolAttr("equalAverage", raw.equalAverage);
+		intAttr("stdDev", raw.stdDev);
+		const children = cfFormulasXml(sheetName, what, raw.formulas);
+		const open = dxfId !== undefined ? `type="${type}" dxfId="${dxfId}"` : `type="${type}"`;
+		return finish(open, extra, children);
+	}
+	sheetInvalid(
+		sheetName,
+		`${what}.type "${shortened(type)}" is not a known conditional-format type`,
+	);
+}
+
+// <cfvo> children — thresholds for a colorScale/dataBar/iconSet. type + optional val + optional gte.
+// Returns the emitted XML and the COUNT (length read once — TOCTOU-safe) so the caller can enforce
+// the per-type child-count bound (decision 5).
+function cfvoXml(sheetName: string, what: string, raw: unknown): { xml: string; count: number } {
+	if (!Array.isArray(raw)) sheetInvalid(sheetName, `${what}.cfvo must be an array`);
+	const n = raw.length;
+	let out = "";
+	for (let i = 0; i < n; i++) {
+		const c = raw[i] as unknown;
+		const cw = `${what}.cfvo[${i}]`;
+		if (!isPlainRecord(c)) sheetInvalid(sheetName, `${cw} must be an object`);
+		checkKeys(sheetName, cw, c, ["type", "val", "gte"]);
+		const t = c.type;
+		if (typeof t !== "string" || !isXmlSafe(t)) {
+			sheetInvalid(sheetName, `${cw}.type must be an XML-safe string`);
+		}
+		let attrs = ` type="${escapeAttr(t)}"`;
+		const val = c.val;
+		if (val !== undefined) {
+			if (typeof val !== "string" || !isXmlSafe(val)) {
+				sheetInvalid(sheetName, `${cw}.val must be an XML-safe string`);
+			}
+			attrs += ` val="${escapeAttr(val)}"`;
+		}
+		const gte = c.gte;
+		if (gte !== undefined) {
+			if (typeof gte !== "boolean") sheetInvalid(sheetName, `${cw}.gte must be a boolean`);
+			attrs += ` gte="${gte ? 1 : 0}"`;
+		}
+		out += `<cfvo${attrs}/>`;
+	}
+	return { xml: out, count: n };
+}
+
+// <color> children for a colorScale. Returns the XML and the count (length read once — TOCTOU-safe).
+function cfColorsXml(fail: Fail, what: string, raw: unknown): { xml: string; count: number } {
+	if (!Array.isArray(raw)) fail(`${what} must be an array`);
+	const n = raw.length;
+	let out = "";
+	for (let i = 0; i < n; i++) {
+		out += colorXml("color", validateColor(fail, `${what}[${i}]`, raw[i]));
+	}
+	return { xml: out, count: n };
+}
+
+// <formula> children — 0..3 operand formulas, stored form (leading = stripped), XML-safe.
+function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
+	if (raw === undefined) return "";
+	if (!Array.isArray(raw)) sheetInvalid(sheetName, `${what}.formulas must be an array`);
+	let out = "";
+	for (let i = 0; i < raw.length; i++) {
+		const f = raw[i] as unknown;
+		if (typeof f !== "string")
+			sheetInvalid(sheetName, `${what}.formulas[${i}] must be a string`);
+		const stored = f.startsWith("=") ? f.slice(1) : f;
+		if (stored === "") continue;
+		if (!isXmlSafe(stored)) {
+			sheetInvalid(
+				sheetName,
+				`${what}.formulas[${i}] contains a character not allowed in XML`,
+			);
+		}
+		out += `<formula>${escapeText(stored)}</formula>`;
+	}
+	return out;
+}
+
 // ── Comments (F5.2): xl/commentsN.xml + legacy VML drawing — validation + emission ─────────────
 // Excel renders a comment only when the sheet carries BOTH parts: the comments part (an authors
 // table + a commentList) AND a legacy VML drawing with one hidden note shape per comment. A
@@ -1481,6 +1809,11 @@ export function worksheetXml(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const conditionalFormatting = conditionalFormattingXml(
+		sheet.name,
+		sheet.conditionalFormatting,
+		styles,
+	);
 	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
@@ -1576,15 +1909,15 @@ export function worksheetXml(
 	);
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
-	// dataValidations, hyperlinks, drawing, legacyDrawing, tableParts (CT_Worksheet sequence —
-	// dataValidations sits between mergeCells and hyperlinks; tableParts is last). Every optional
-	// block is an empty string when unused, so a sheet using none of them emits the exact
-	// pre-F4.5/F4.6/F5.2/F9.1/F9.2 bytes.
+	// conditionalFormatting, dataValidations, hyperlinks, drawing, legacyDrawing, tableParts
+	// (CT_Worksheet sequence — conditionalFormatting then dataValidations sit between mergeCells and
+	// hyperlinks; tableParts is last). Every optional block is an empty string when unused, so a sheet
+	// using none of them emits the exact pre-F4.5/F4.6/F5.2/F9.1/F9.2/F9.3 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
 		.join(
 			"",
-		)}</sheetData>${mergeCells}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+		)}</sheetData>${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	// Comment/drawing/table side parts are spread only when present so the optional properties stay
 	// truly absent (exactOptionalPropertyTypes).
 	return {
@@ -1707,6 +2040,11 @@ export function streamWorksheet(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const conditionalFormatting = conditionalFormattingXml(
+		sheet.name,
+		sheet.conditionalFormatting,
+		styles,
+	);
 	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
@@ -1726,7 +2064,7 @@ export function streamWorksheet(
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${mergeCells}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	const footer = `</sheetData>${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,

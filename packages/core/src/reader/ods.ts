@@ -6,6 +6,7 @@ import type {
 	CellStyle,
 	ColumnProps,
 	Comment,
+	ConditionalFormatting,
 	DataValidation,
 	FreezePane,
 	Hyperlink,
@@ -36,6 +37,7 @@ const MIMETYPE_SPREADSHEET = "application/vnd.oasis.opendocument.spreadsheet";
 const NO_COMMENTS: readonly Comment[] = [];
 const NO_TABLES: readonly TableInfo[] = [];
 const NO_DATA_VALIDATIONS: readonly DataValidation[] = [];
+const NO_CONDITIONAL_FORMATTING: readonly ConditionalFormatting[] = [];
 const NO_COLUMNS: readonly ColumnProps[] = [];
 const NO_IMAGES: readonly SheetImage[] = [];
 const NO_ROW_PROPS: ReadonlyMap<number, RowProps> = new Map();
@@ -103,6 +105,10 @@ class OdsWorksheet implements Worksheet {
 
 	get dataValidations(): readonly DataValidation[] {
 		return NO_DATA_VALIDATIONS;
+	}
+
+	get conditionalFormatting(): readonly ConditionalFormatting[] {
+		return NO_CONDITIONAL_FORMATTING;
 	}
 
 	get columns(): readonly ColumnProps[] {

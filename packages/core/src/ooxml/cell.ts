@@ -1,4 +1,4 @@
-import type { Cell } from "../types";
+import type { Cell, DxfStyle } from "../types";
 import { serialToDate } from "./dates";
 import type { StyleTable } from "./styles";
 
@@ -39,6 +39,12 @@ export interface DecodeContext {
 	readonly styles?: StyleTable;
 	/** Workbook 1904 date system flag, selecting the serial epoch. Defaults to false. */
 	readonly date1904?: boolean;
+	/**
+	 * The workbook's `<dxfs>` table (F9.3), positional by `dxfId`. A conditional-formatting rule
+	 * resolves its `@dxfId` against this to an inline {@link DxfStyle}. Absent when the workbook has
+	 * no differential styles.
+	 */
+	readonly dxfs?: readonly DxfStyle[];
 }
 
 export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {

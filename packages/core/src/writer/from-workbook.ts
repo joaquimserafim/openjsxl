@@ -5,6 +5,7 @@ import type {
 	Cell,
 	ColumnProps,
 	Comment,
+	ConditionalFormatting,
 	DataValidation,
 	FreezePane,
 	Hyperlink,
@@ -145,6 +146,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			images?: readonly SheetImage[];
 			tables?: readonly TableInfo[];
 			dataValidations?: readonly DataValidation[];
+			conditionalFormatting?: readonly ConditionalFormatting[];
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -171,6 +173,9 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// Data validations (F9.2) — structural pass-through; the reader's rules ARE writer input.
 		const dataValidations = worksheet.dataValidations;
 		if (dataValidations.length > 0) sheet.dataValidations = dataValidations;
+		// Conditional formatting (F9.3) — structural pass-through; the inline dxf re-interns on write.
+		const conditionalFormatting = worksheet.conditionalFormatting;
+		if (conditionalFormatting.length > 0) sheet.conditionalFormatting = conditionalFormatting;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

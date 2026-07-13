@@ -2107,7 +2107,7 @@ documented + escaped. x14 DV skipped-named (decision 4). `Worksheet.dataValidati
 **Acceptance.** All-8-types fixture round-trips; x14 degrade pinned; hostile sqref
 bounded; DV-free workbooks byte-identical. **Met.**
 
-**Landed (F9.2, uncommitted — awaiting owner approval).** NEW `ooxml/data-validation.ts` (tolerant
+**Landed (F9.2, committed `4f1d99f`).** NEW `ooxml/data-validation.ts` (tolerant
 `parseDataValidations`; shared bounds + `isCanonicalSqrefToken` + type-predicate guards, no `as`) +
 `DataValidation`/3 enums (types.ts) + `Worksheet.dataValidations` accessor (reader; ods/xlsb/csv →
 `[]`). Writer: `dataValidationsXml` (sheet.ts) validates + emits per decisions 5/6, slots between
@@ -2125,7 +2125,7 @@ invariant restored, empirically re-verified via a crafted hostile `.xlsx` throug
 **Gate: biome 0 / tsc 0 / 838 tests** (+35 across data-validation.test.ts + data-validation-write.test.ts
 + corpus). DV-free workbooks byte-identical (golden pins green).
 
-### F9.3 — Conditional formatting + differential styles (dxfs) ☐
+### F9.3 — Conditional formatting + differential styles (dxfs) ☑ (core; table-dxf retrofit deferred, see below)
 **Scope (in).** `<conditionalFormatting @sqref>` blocks + `<cfRule>` for the FULL base
 ST_CfType set (cellIs, expression, colorScale, dataBar, iconSet, top10, aboveAverage,
 uniqueValues/duplicateValues, containsText-family, containsBlanks/Errors-family,
@@ -2138,19 +2138,42 @@ decision 4 (incl. rule-level extLst strip; ExcelJS-authored dataBar fixture pins
 **Scope (out).** Rule EVALUATION (which cells currently match is M8-adjacent, out);
 custom icon sets; x14 emission.
 **Tasks**
-- [ ] dxfs parser + writer interning per decision 3 (bgColor rule pinned by a color-swap
-      regression; interning correctness pinned — two rules sharing one producer dxf must
-      keep identical styles after the round-trip).
-- [ ] cfRule parser/emitter (discriminated union; verbatim formulas; the decision-6
-      priority posture pinned by a precedence-preservation regression); order pin +
-      byte-identity.
-- [ ] Retrofit inline `DxfStyle` onto F9.1's `TableInfo` columns (additive).
-- [ ] Fixtures: `openpyxl-condformat.xlsx` (≥10 rule types + several dxfs incl.
-      font+fill+border+numFmt) + ExcelJS x14 dataBar (degrade pin) + crafted hostile
-      (10k ranges × whole-grid sqref, priority collisions/0/negatives).
-- [ ] Corpus/bridge extension; oracle both ways; adversarial review.
+- [x] dxfs parser (`ooxml/dxf.ts`, RAW fill) + writer interning (`writer/styles.ts` `internDxf`) per
+      decision 3 (bgColor/solid no-swap pinned; interning dedup pinned — two rules sharing one dxf →
+      one `<dxfs>` slot + deep-equal round-trip). Validators refactored ref→`fail` callback to share.
+- [x] cfRule parser/emitter (`ooxml/conditional-formatting.ts` + `writer/sheet.ts`; discriminated union
+      over ST_CfType; verbatim formulas, stored-form; decision-6 priority renumber pinned by a
+      precedence-preservation regression); order pin (mergeCells↔dataValidations) + byte-identity; BOTH writers.
+- [~] Retrofit inline `DxfStyle` onto F9.1's `TableInfo` columns (additive) — **DEFERRED** to a follow-up
+      (the F9.1 table-dxf drop is NAMED + corpus-safe; not a regression). Owner to fold in now or later.
+- [x] Fixtures: `openpyxl-condformat.xlsx` (12 rule types + dxfs font/fill/border; numFmt-in-dxf covered
+      by a crafted unit test). x14 dataBar degrade pinned by a crafted-XML unit test (ExcelJS x14 is an
+      F9.4 owner ask). Hostile counts/priority-0/negative pinned; sqref cap shared with DV.
+- [x] Corpus/bridge extension; oracle both ways (openpyxl reads our output warnings-as-errors clean +
+      12-rule fixture round-trips deep-equal); adversarial review (4 lenses + refuting verifiers).
 **Acceptance.** Every base rule type round-trips with its dxf intact (colors NOT swapped);
-x14 stripped-named; hostile sqref bounded; CF-free workbooks byte-identical.
+x14 stripped-named; hostile sqref bounded; CF-free workbooks byte-identical. **Met (core).**
+
+**Landed (F9.3 core, uncommitted — awaiting owner approval).** NEW `ooxml/dxf.ts` (`parseDxfs`, RAW
+fill — patternType optional, bgColor visible) + `ooxml/conditional-formatting.ts` (`parseConditional
+Formatting` — cfRule discriminated union, resolves `@dxfId`→inline `DxfStyle`, x14 `<extLst>` skip,
+sqref canonical-filter, formula stored-form, cfvo counts + `type` XML-safe-gated) + model (`DxfStyle`/
+`DxfFill`/`Cfvo`/4 CF rule variants/`ConditionalFormatting`) + `Worksheet.conditionalFormatting`
+accessor (dxfs threaded via `DecodeContext`; ods/xlsb/csv → `[]`). Writer: `internDxf`/`validateDxfFill`/
+`dxfXml` + `<dxfs>` after `<cellStyles>` (byte-identity); `conditionalFormattingXml` slots between
+`<mergeCells>` and `<dataValidations>` (decision 1), priorities renumbered dense by ascending caller
+priority + doc-order tiebreak (decision 6), dxfs interned/deduped, BOTH writers; typed `XlsxError` on
+every violation. Style validators refactored `ref`→`fail` callback (shared cell-style + dxf validation).
+Bridge carries. **Adversarial review — 5 findings, 4 CONFIRMED (1 refuted), all fixed + pinned:** the
+reader returned two value classes the writer then rejected/mangled — (1) an XML-unsafe `cfvo type`
+(the one un-gated CF string) → now degraded to `"num"`; (2) out-of-count colorScale/dataBar/iconSet
+(decision-5 cfvo/color bounds unenforced BOTH sides) → reader now DROPS, writer now REJECTS (shared
+`colorScaleCountsOk`/`dataBarCountsOk`/`iconSetCountsOk`). Empirically re-verified via a crafted hostile
+`.xlsx` through the full bridge. **Gate: biome 0 / tsc 0 / 860 tests** (+22). Byte-identity green.
+
+**Deferred (F9.3 follow-up): table-dxf retrofit.** F9.1 dropped table dxf attrs (`headerRowDxfId` etc.)
+NAMED; F9.3's dxf parser now exists, so they can become inline `DxfStyle` fields on `TableInfo`/columns
+additively. Not done in this commit (keeps it scoped + reviewable; the drop is corpus-safe, non-regressing).
 
 ### F9.4 — Fuzzing harness, corpus expansion, milestone hardening review ☐
 **Context.** jazzer.js (libFuzzer) needs native bindings — out. **fast-check** (MIT, pure

@@ -164,6 +164,17 @@ git-ignored [`../local/`](../local) directory and are never committed.
   real Excel 365 file with x14 (cross-sheet DV in `<extLst>`) is an owner-provided ask (F9.4); the x14
   skip is pinned by a crafted-XML unit test in the same suite.
 
+- **`openpyxl-condformat.xlsx`** — authored by **openpyxl 3.1.5** to exercise conditional-formatting read
+  (F9.3): a `CF` sheet with 12 `<cfRule>`s spanning the base `ST_CfType` surface — `cellIs`/greaterThan
+  (fill dxf) + `cellIs`/between (font dxf), `expression` (fill+border dxf), a 2-color and a 3-color
+  `colorScale`, a `dataBar`, an `iconSet` (`3TrafficLights1`), `top10`, `aboveAverage`, `containsText`
+  and `beginsWith` (dxf + generated formula), and `duplicateValues` — plus a `<dxfs>` table in
+  styles.xml. openpyxl DEDUPES the shared red-fill dxf, so two rules point at one `dxfId` (exercises the
+  reader's resolve-to-inline + the writer's re-intern). Validates the `<dxfs>` + `<cfRule>` parsers
+  (`ooxml/__tests__/conditional-formatting.test.ts`); the corpus property round-trips it through the
+  bridge and openpyxl reads our re-written output warnings-as-errors clean. numFmt-in-dxf and the x14
+  dataBar degrade are pinned by crafted-XML unit tests; a real Excel x14 dataBar file is an F9.4 ask.
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

@@ -3,8 +3,10 @@ import {
 	type DecodeContext,
 	type DefinedName,
 	mimeForMediaPath,
+	parseConditionalFormatting,
 	parseDataValidations,
 	parseDrawing,
+	parseDxfs,
 	parseRels,
 	parseSharedStrings,
 	parseStyles,
@@ -23,7 +25,9 @@ import type {
 	Color,
 	ColumnProps,
 	Comment,
+	ConditionalFormatting,
 	DataValidation,
+	DxfStyle,
 	FreezePane,
 	Hyperlink,
 	RowProps,
@@ -177,6 +181,7 @@ export class XlsxWorksheet implements Worksheet {
 	#comments: readonly Comment[] | undefined;
 	#tables: readonly TableInfo[] | undefined;
 	#dataValidations: readonly DataValidation[] | undefined;
+	#conditionalFormatting: readonly ConditionalFormatting[] | undefined;
 	#columns: readonly ColumnProps[] | undefined;
 	#rowProps: ReadonlyMap<number, RowProps> | undefined;
 	#freeze: FreezePane | undefined;
@@ -312,6 +317,19 @@ export class XlsxWorksheet implements Worksheet {
 			this.#dataValidations = parseDataValidations(this.#xml);
 		}
 		return this.#dataValidations;
+	}
+
+	/**
+	 * The conditional-formatting blocks on this sheet, in document order — each with its covered
+	 * `sqref` ranges and its `<cfRule>`s. A highlight rule's look is resolved to an inline
+	 * {@link DxfStyle} against the workbook `<dxfs>` table; the numeric `dxfId` never surfaces. x14
+	 * extensions (under `<extLst>`) are skipped. Empty when the sheet declares none. Parsed lazily.
+	 */
+	get conditionalFormatting(): readonly ConditionalFormatting[] {
+		if (this.#conditionalFormatting === undefined) {
+			this.#conditionalFormatting = parseConditionalFormatting(this.#xml, this.#context.dxfs);
+		}
+		return this.#conditionalFormatting;
 	}
 
 	/**
@@ -526,17 +544,26 @@ async function loadWorkbook(
 		}
 	}
 
-	// Style table (optional) — needed to tell date-styled numbers from plain ones.
+	// Style table (optional) — needed to tell date-styled numbers from plain ones. The same part
+	// also holds `<dxfs>` (F9.3), the differential styles conditional formatting resolves its
+	// `dxfId`s against — parsed from the one decoded string so styles.xml is read once.
 	let styles: StyleTable | undefined;
+	let dxfs: readonly DxfStyle[] = [];
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES));
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const stylesPath = resolveTarget(workbookDir, stylesRel.target);
 		if (zip.has(stylesPath)) {
-			styles = parseStyles(decoder.decode(await zip.read(stylesPath)));
+			const stylesText = decoder.decode(await zip.read(stylesPath));
+			styles = parseStyles(stylesText);
+			dxfs = parseDxfs(stylesText);
 		}
 	}
-	const context: DecodeContext =
-		styles !== undefined ? { sharedStrings, date1904, styles } : { sharedStrings, date1904 };
+	const context: DecodeContext = {
+		sharedStrings,
+		date1904,
+		...(styles !== undefined ? { styles } : {}),
+		...(dxfs.length > 0 ? { dxfs } : {}),
+	};
 
 	// Theme part (optional) — the color scheme resolveColor needs and the bytes the bridge carries.
 	let themeXml: string | undefined;

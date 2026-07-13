@@ -7,6 +7,7 @@ import type {
 	CellStyle,
 	ColumnProps,
 	Comment,
+	ConditionalFormatting,
 	DataValidation,
 	FreezePane,
 	Hyperlink,
@@ -111,6 +112,13 @@ export interface SheetInput {
 	 * characters and bodies at 255; `showDropDown` uses the intuitive sense (`true` = arrow shown).
 	 */
 	readonly dataValidations?: readonly DataValidation[];
+	/**
+	 * Conditional-formatting blocks on this sheet (F9.3) — the same records
+	 * `Worksheet.conditionalFormatting` returns. Each block covers an A1 `sqref` and holds `<cfRule>`s;
+	 * a highlight rule's `dxf` look is interned into the shared `<dxfs>` table, and rule priorities are
+	 * renumbered densely by ascending caller priority (document order breaks ties).
+	 */
+	readonly conditionalFormatting?: readonly ConditionalFormatting[];
 }
 
 export interface WorkbookInput {
@@ -163,6 +171,8 @@ export interface StreamSheetInput {
 	readonly tables?: readonly TableInfo[];
 	/** Data-validation rules on this sheet (F9.2) — see {@link SheetInput.dataValidations}. */
 	readonly dataValidations?: readonly DataValidation[];
+	/** Conditional-formatting blocks on this sheet (F9.3) — see {@link SheetInput.conditionalFormatting}. */
+	readonly conditionalFormatting?: readonly ConditionalFormatting[];
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */

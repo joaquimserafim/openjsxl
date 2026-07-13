@@ -195,6 +195,134 @@ export interface DataValidation {
 	readonly error?: string;
 }
 
+// ── Differential styles + conditional formatting (F9.3) ────────────────────────────────────────
+// One shared model: what `Worksheet.conditionalFormatting` returns IS what `SheetInput
+// .conditionalFormatting` accepts. A rule's highlight look is an INLINE {@link DxfStyle} — the file's
+// numeric `dxfId` (an index into styles.xml's `<dxfs>`) is never public: the reader resolves it to an
+// inline style, the writer interns inline styles back into one `<dxfs>` table and re-assigns ids.
+
+/**
+ * A differential FILL — kept RAW, never normalized (unlike {@link FillStyle}). For a solid
+ * conditional-formatting highlight the visible color is `bgColor` (the exact INVERSE of a cell fill,
+ * where it is `fgColor`), and `patternType` is usually absent — normalizing here would silently swap
+ * every highlight color, so the components are carried exactly as written.
+ */
+export interface DxfFill {
+	readonly patternType?: PatternType;
+	readonly fgColor?: Color;
+	readonly bgColor?: Color;
+}
+
+/**
+ * A differential ("dxf") style — the partial format a conditional-formatting rule (or, later, a table
+ * region) applies over the cells it matches. Only the components it OVERRIDES are present. It shares
+ * the {@link FontStyle}/{@link BorderStyle}/{@link Alignment}/{@link Color} primitives with
+ * {@link CellStyle} but keeps its fill RAW (see {@link DxfFill}).
+ */
+export interface DxfStyle {
+	readonly numberFormat?: string;
+	readonly font?: FontStyle;
+	readonly fill?: DxfFill;
+	readonly border?: BorderStyle;
+	readonly alignment?: Alignment;
+}
+
+/**
+ * A conditional-format value object (`<cfvo>`) — a threshold for a color scale, data bar, or icon
+ * set. `type` is `num`/`percent`/`max`/`min`/`formula`/`percentile` (verbatim); `val` is the raw
+ * threshold text (a number or a formula, carried verbatim); `gte` (data bar / icon set) marks a
+ * `≥` rather than `>` boundary.
+ */
+export interface Cfvo {
+	readonly type: string;
+	readonly val?: string;
+	readonly gte?: boolean;
+}
+
+/** The ST_CfType values whose rule applies a dxf highlight (as opposed to a scale/bar/icon set). */
+export type CfHighlightType =
+	| "cellIs"
+	| "expression"
+	| "top10"
+	| "aboveAverage"
+	| "uniqueValues"
+	| "duplicateValues"
+	| "containsText"
+	| "notContainsText"
+	| "beginsWith"
+	| "endsWith"
+	| "containsBlanks"
+	| "notContainsBlanks"
+	| "containsErrors"
+	| "notContainsErrors"
+	| "timePeriod";
+
+interface CfRuleBase {
+	/** Rule precedence — lower wins when rules overlap. Renumbered densely 1..n on write. */
+	readonly priority: number;
+	/** When true, no lower-priority rule is evaluated for a matched cell. */
+	readonly stopIfTrue?: boolean;
+}
+
+/**
+ * A highlight rule — one that paints matching cells with a {@link DxfStyle}. Discriminated by `type`.
+ * `formulas` are the `<formula>` children verbatim (0–3); the declarative attrs (`operator`/`text`/
+ * `timePeriod`/`rank`/…) and any generated formula BOTH pass through untouched — regenerating either
+ * would desynchronize a dual-encoded rule.
+ */
+export interface CfHighlightRule extends CfRuleBase {
+	readonly type: CfHighlightType;
+	/** The look applied to matched cells; absent when the producer set no `dxfId`. */
+	readonly dxf?: DxfStyle;
+	readonly operator?: string;
+	readonly text?: string;
+	readonly timePeriod?: string;
+	readonly rank?: number;
+	readonly percent?: boolean;
+	readonly bottom?: boolean;
+	readonly aboveAverage?: boolean;
+	readonly equalAverage?: boolean;
+	readonly stdDev?: number;
+	readonly formulas?: readonly string[];
+}
+
+/** A 2- or 3-stop color scale (`type: "colorScale"`). `cfvo` and `colors` are positional and equal-length. */
+export interface CfColorScaleRule extends CfRuleBase {
+	readonly type: "colorScale";
+	readonly cfvo: readonly Cfvo[];
+	readonly colors: readonly Color[];
+}
+
+/** A data bar (`type: "dataBar"`) — two cfvos (min/max) and the bar `color`. */
+export interface CfDataBarRule extends CfRuleBase {
+	readonly type: "dataBar";
+	readonly cfvo: readonly Cfvo[];
+	readonly color: Color;
+}
+
+/** An icon set (`type: "iconSet"`) — a built-in `iconSet` name and one cfvo per icon. */
+export interface CfIconSetRule extends CfRuleBase {
+	readonly type: "iconSet";
+	readonly iconSet?: string;
+	readonly cfvo: readonly Cfvo[];
+}
+
+/** A conditional-formatting rule — discriminated by `type`. */
+export type ConditionalFormattingRule =
+	| CfHighlightRule
+	| CfColorScaleRule
+	| CfDataBarRule
+	| CfIconSetRule;
+
+/**
+ * One `<conditionalFormatting>` block: the ranges it covers (`sqref`, symbolic A1) and the rules that
+ * apply over them, in document order.
+ */
+export interface ConditionalFormatting {
+	readonly sqref: readonly string[];
+	readonly rules: readonly ConditionalFormattingRule[];
+}
+
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
 // One shared model, like styles: what the reader's accessors return IS what the writer accepts.
 
@@ -428,6 +556,8 @@ export interface Worksheet {
 	readonly tables: readonly TableInfo[];
 	/** The data-validation rules on this sheet, in document order. Empty when none (or unsupported). */
 	readonly dataValidations: readonly DataValidation[];
+	/** The conditional-formatting blocks on this sheet, in document order. Empty when none (or unsupported). */
+	readonly conditionalFormatting: readonly ConditionalFormatting[];
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */
