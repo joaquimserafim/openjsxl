@@ -2255,6 +2255,51 @@ corpus property covers tables/DV/CF; M9 done = 0.9 release prep, owner-gated.
 
 ---
 
+### F9.5 — Table round-trip hardening (shared bounds) ☐
+**The problem, plainly.** openjsxl's rule is: *anything the reader hands back, the writer must be
+able to write.* That's what makes "open a file → tweak it → save it" safe. Data validation (F9.2)
+and conditional formatting (F9.3) follow this rule; **tables (F9.1) do not.** So a table made by
+another tool (openpyxl, LibreOffice, hand-written XML) can be **read fine but then refuse to save**.
+It fails *cleanly* (a typed error, not a crash), so it's technically allowed by the contract — but
+it's the odd feature out, and a normal read→save of a foreign table file shouldn't blow up. Found by
+the F9.4 milestone review; confirmed by reading the code + an openpyxl probe (openpyxl itself will
+happily write empty / cell-ref-shaped table names, so such files exist in the wild).
+**The specific mismatches (reader returns → writer rejects).**
+- a table **name** with a space, empty, cell-ref-shaped (`"A1"`), a bad first character, or a
+  non-XML-safe character (the reader only clamps its *length* today);
+- a **column count** that doesn't match the table's width;
+- a **totals row** on a single-row table (nowhere to put it);
+- a **header cell that isn't plain text** (the buffered writer re-derives column names from the grid
+  and throws instead of using the names the reader already carried).
+**The fix (make the tolerant reader degrade to something writable — the DV/CF move).**
+- **Name:** normalize to a legal identifier deterministically (strip/replace spaces + unsafe chars,
+  ensure a letter-first start, avoid cell-ref shape, clamp length); if it ends up empty or collides,
+  fall back to a generated `Table1`/`Table2`/… — **keep the table** (decision: normalize-and-keep, not
+  drop — matches how the reader already clamps colors/indents). *Owner may prefer drop-when-illegal;
+  simpler but loses the table.*
+- **Columns:** reconcile the count to the ref width (trust the range).
+- **Totals row:** clear it when the ref is a single row.
+- **Header non-text:** have the writer prefer the carried `columns[i].name` over re-deriving from
+  grid cells.
+- **Single-source the name rules** so the reader and writer share ONE definition (like
+  `isCanonicalSqrefToken` does for DV ranges) — that's what stops them drifting apart again.
+**Tasks**
+- [ ] Extract the table-name/identifier rules into ONE shared, single-sourced check used by both
+      `ooxml/table.ts` (reader) and `writer/sheet.ts` (writer).
+- [ ] Reader (`ooxml/table.ts`) degrades a table to writer-legal: normalize name, reconcile column
+      count to ref width, clear an impossible totals row.
+- [ ] Writer prefers carried column names over grid re-derivation (fixes the non-text-header abort).
+- [ ] Fixtures + tests: a foreign/hand-crafted table file with a bad name/shape, plus a
+      read→write→read regression proving it now round-trips (and a byte-identity check that clean
+      Excel tables are unaffected).
+- [ ] Adversarial review (round-trip/bridge + hostile-input lenses) + openpyxl cross-validation both
+      ways; fix confirmed findings + pin.
+**Acceptance.** A table from openpyxl/LibreOffice/hand-crafted XML with an odd name/shape opens AND
+re-saves without error; Excel-authored tables are byte-identical (unaffected); reader-output ⊆
+writer-input for tables is enforced by a shared, single-sourced rule.
+
+---
+
 ## M10+ — Later milestones (outline; expanded when reached)
 
 - **Deferred — legacy `.xls` (BIFF8) read:** a CFB/OLE2 container reader + BIFF record
