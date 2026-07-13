@@ -2057,14 +2057,15 @@ documented); structured-ref formula rewriting.
       `<tableParts>` order pin (after `<legacyDrawing>`), byte-identity, BOTH writers (decision 11).
 - [x] Bridge + corpus snapshot extension; fixtures `openpyxl-tables.xlsx` + crafted edge cases
       (header mismatch → typed reject; duplicate displayName; overlap — all in table-write.test.ts).
-- [~] Oracle both ways (openpyxl reads OUR output warnings-as-errors clean + we read openpyxl- and
-      Excel-authored tables). **Owner opens output in real Excel (repair-prompt check) — owner-side,
-      decision 12, named dependency not silently dropped.**
+- [x] Oracle both ways (openpyxl reads OUR output warnings-as-errors clean + we read openpyxl- and
+      Excel-authored tables). **Owner confirmed the repair-prompt check in real Microsoft Excel
+      (decision 12): an openjsxl-written `Inventory` table opens clean — filter dropdowns, banded
+      rows (`TableStyleMedium9`), no repair dialog.**
 - [x] Adversarial review (4 lenses + refuting verifiers, openpyxl-oracle-wired).
 **Acceptance.** inventory-table.xlsx reads verbatim; write→openpyxl clean; no-table
 workbooks byte-identical; every decision-8 rejection typed + named.
 
-**Landed (F9.1, uncommitted — awaiting owner approval).** `ooxml/table.ts` (tolerant `parseTable`)
+**Landed (F9.1, committed `c4d191b`).** `ooxml/table.ts` (tolerant `parseTable`)
 + `TableInfo`/`TableColumn`/`TableStyleInfo` (shared model) + `Worksheet.tables` (reader accessor,
 lazy; ods/xlsb/csv degrade to `[]`). Writer: `buildTables` (sheet.ts) validates + emits per decision
 8 — column names DERIVE from the header row (buffered) or `columns[].name` (streaming, which can't
