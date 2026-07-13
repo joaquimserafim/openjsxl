@@ -26,6 +26,19 @@ const MAX_SHEET_NAME = 31;
 const FORBIDDEN_SHEET_NAME = /[\\/?*[\]:]/;
 
 /**
+ * The writer rejects invalid input with a typed error rather than crashing — so before either entry
+ * point reads `workbook.sheets`, confirm the workbook is a non-null object. A `null`/`undefined`
+ * workbook would otherwise throw a raw `TypeError` on that property access (found by the F9.4 writer
+ * fuzzer); `sheets` itself is then validated by {@link validateSheetMeta}. Single-sourced so both the
+ * buffered and streaming entries reject identically.
+ */
+export function requireWorkbookObject(workbook: unknown): void {
+	if (typeof workbook !== "object" || workbook === null) {
+		throw new XlsxError("invalid-input", "a workbook must be an object with a `sheets` array");
+	}
+}
+
+/**
  * Validate every sheet's NAME and visibility STATE (the checks identical to both writers) and return
  * the resolved names and states. Each `name`/`state` is read exactly once (getters/Proxies can vary
  * between reads), so downstream emission uses these arrays, never `sheet.name`/`sheet.state` — closing

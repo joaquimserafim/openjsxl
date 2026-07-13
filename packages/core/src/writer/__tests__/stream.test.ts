@@ -166,6 +166,10 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		await expect(drain(bad)).rejects.toThrow(/at least one sheet/);
 		const badRows = streamXlsx({ sheets: [{ name: "S", rows: [42 as never] }] });
 		await expect(drain(badRows)).rejects.toThrow(/must be an array/);
+		// F9.4 regression: a null/undefined workbook must surface a typed error through the stream,
+		// not a raw TypeError on the `workbook.sheets` read (requireWorkbookObject, streaming path).
+		const nullWb = streamXlsx(null as never);
+		await expect(drain(nullWb)).rejects.toThrow(/workbook must be an object/);
 	});
 
 	it("closes the async row source on early cancel (review regression: no cursor leak)", async () => {

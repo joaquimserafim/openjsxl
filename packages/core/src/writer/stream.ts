@@ -4,6 +4,7 @@ import {
 	contentTypesXml,
 	encode,
 	packageRelsXml,
+	requireWorkbookObject,
 	sheetSideParts,
 	themeToEmit,
 	validateSheetMeta,
@@ -40,8 +41,10 @@ async function* buildStreamParts(
 	workbook: StreamWorkbookInput,
 	options?: WriteOptions,
 ): AsyncGenerator<StreamPart> {
-	// Read the caller's `sheets` ONCE (single-read TOCTOU, matching writeXlsx), then validate and emit
+	// Reject a non-object workbook typed, before the property read that would otherwise raw-throw. Then
+	// read the caller's `sheets` ONCE (single-read TOCTOU, matching writeXlsx), and validate and emit
 	// from that single array and the resolved names/states.
+	requireWorkbookObject(workbook);
 	const sheets = workbook.sheets;
 	const { states, names } = validateSheetMeta(sheets);
 	for (let i = 0; i < sheets.length; i++) {

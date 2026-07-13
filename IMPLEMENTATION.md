@@ -2212,14 +2212,43 @@ ExcelJS x14 fixture. **Owner-provided asks (named, not silently dropped):** a re
 calculatedColumnFormula table); a Google Sheets export with DV+CF; a LibreOffice file
 (tables-as-database-ranges divergence). Differently-licensed → gitignored `local/`.
 **Tasks**
-- [ ] `packages/fuzz` skeleton + fast-check writer properties (Half A).
-- [ ] Mutation engine + four-opener replay harness + budgets (Half B).
-- [ ] CI smoke wiring (fixed-seed vitest suite; flake-proof: generous budgets, no
-      wall-clock asserts in CI — those live in the local long-run only).
-- [ ] Triage/minimize/promote pipeline + crashers/ gitignore from day one.
-- [ ] Corpus: author + commit the fixtures above; file the owner asks.
-- [ ] Long local run against M9-complete readers; fix + pin every crasher; full-milestone
-      adversarial review (cross-feature + hardening lenses).
+- [x] `packages/fuzz` skeleton + fast-check writer properties (Half A). `arbitraries.ts`
+      (typed valid corpora + an untyped hostile corpus: non-plain protos, unknown keys,
+      transparent Proxies, poisoned values/enums), `writer-properties.ts` (P1
+      resolve-or-`invalid-input`, P2 write-twice determinism, P3 scalar round-trip).
+- [x] Mutation engine + four-opener replay harness + budgets (Half B). `prng.ts` (xorshift),
+      `mutate.ts` (generic bytes + zip-structure pokes + XML-ish blow-ups), `replay.ts`
+      (5 openers, resolve-OR-`XlsxError` verdicts), `campaign.ts` (fixed-count + budgeted
+      modes, wall-clock + RSS ceilings, verdict tally).
+- [x] CI smoke wiring — ordinary vitest suites in `packages/fuzz/src/__tests__/` picked up by
+      the root `packages/*/src/**` include (zero new plumbing); fixed seeds, no wall-clock
+      asserts; the mutation smoke asserts `changed > 0.9·mutants` (bytes actually differ from
+      the seed) so a no-op fuzzer can't pass — `tally.typed` is vacuous (cross-format openers
+      reject other-format fixtures typed even unmutated).
+- [x] Triage/minimize/promote pipeline (`triage.ts`: ddmin chunk-removal + reproducer writer)
+      + `crashers/` gitignored from day one.
+- [~] Corpus: the three openpyxl fixtures (F9.1–F9.3) are already committed; a combined
+      tables+DV+CF+styles sheet was cross-validated against openpyxl 3.1.5 (warnings-as-
+      errors, clean). **Deferred authorable:** the ExcelJS x14 CF-dataBar fixture.
+      **Owner asks (named, not dropped):** real Excel 365 (neg-value dataBar + x14 twin,
+      custom icon set, cross-sheet DV in extLst, calculatedColumnFormula table); a Google
+      Sheets DV+CF export; a LibreOffice tables-as-database-ranges file → gitignored `local/`.
+- [x] Long local run — with cell MATERIALIZATION (drain every sheet's rows so the deferred
+      xlsx sheet SAX parse is actually fuzzed), ~78k mutants/seed × 39 fixtures × 5 openers,
+      **0 crashers** (99.6% of mutants changed; ~54% of outcomes typed-rejected); Half A
+      2500–3000 runs × 4 props clean. Real bug found + fixed: `writeXlsx`/`streamXlsx`
+      raw-threw a `TypeError` on a null/undefined workbook → `requireWorkbookObject` typed
+      guard (`writer/parts.ts`), pinned in `workbook.test.ts` + `stream.test.ts`.
+- [x] Full-milestone adversarial review (two lenses). **Harness soundness:** found the
+      properties were green-but-near-vacuous (all-hostile corpus rejected ~99.8% pre-write,
+      so the resolve/re-read + determinism arms never fired; the bite-guard and the xlsx cell
+      parse were untested) → fixed with a guaranteed-valid corpus (`validWorkbookArb` + new P4
+      valid-round-trips), the `changed` bite-guard, and replay cell-materialization. **M9
+      cross-feature:** dxf index-space, element order, guard TOCTOU, DV/CF shared bounds, and
+      byte-identity all verified clean; **one confirmed pre-existing finding flagged for owner
+      decision** — F9.1 table round-trip is not fully shared-bounds (the tolerant reader can
+      return a table `name`/`columns`/`totalsRow` the strict writer rejects, so a foreign
+      table file can abort on rewrite; DV/CF close this, tables predate the discipline).
 **Acceptance.** The smoke runs in the standard gate deterministically; a long local run
 completes with zero unexplained crashers (every one fixed + promoted or explained); the
 corpus property covers tables/DV/CF; M9 done = 0.9 release prep, owner-gated.

@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,16 @@ import { fileURLToPath } from "node:url";
 
 const dataDir = fileURLToPath(new URL("../data/", import.meta.url));
 const localDir = fileURLToPath(new URL("../local/", import.meta.url));
+
+/**
+ * Every committed fixture file name under ./data (the `.md` docs excluded), sorted for determinism.
+ * Used by the fuzz harness (F9.4) to enumerate seed files for byte-mutation replay.
+ */
+export function listFixtures(): readonly string[] {
+	return readdirSync(dataDir)
+		.filter((f) => !f.endsWith(".md"))
+		.sort();
+}
 
 /** Absolute path to a committed fixture file under packages/fixtures/data. */
 export function fixturePath(name: string): string {

@@ -21,3 +21,7 @@ COMPETITIVE-ANALYSIS.md
 # verification, never committed or published. The README is tracked so the dir documents itself.
 packages/fixtures/local/*
 !packages/fixtures/local/README.md
+
+# Fuzz crashers (F9.4): raw + minimized reproducer bytes and traces from a long local run. Never
+# committed — a confirmed crasher is minimized then promoted BY HAND to packages/fixtures/data/edge-*.
+packages/fuzz/crashers/

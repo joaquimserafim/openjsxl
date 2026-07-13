@@ -242,4 +242,14 @@ describe("writeXlsx — input validation (invalid-input)", () => {
 			"invalid-input",
 		);
 	});
+
+	it("rejects a non-object workbook (null/undefined/primitive) with a typed error, not a raw throw", async () => {
+		// The F9.4 writer fuzzer found that reading `workbook.sheets` off a null/undefined workbook
+		// threw a raw TypeError. `requireWorkbookObject` now rejects a non-object workbook as
+		// invalid-input, in both the buffered and streaming entries.
+		for (const bad of [null, undefined, 42, "x", true]) {
+			// biome-ignore lint/suspicious/noExplicitAny: JS callers can pass a non-object workbook
+			expect(await code(() => writeXlsx(bad as any))).toBe("invalid-input");
+		}
+	});
 });

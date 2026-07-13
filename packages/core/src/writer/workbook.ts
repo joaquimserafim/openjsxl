@@ -5,6 +5,7 @@ import {
 	contentTypesXml,
 	encode,
 	packageRelsXml,
+	requireWorkbookObject,
 	sheetSideParts,
 	themeToEmit,
 	validateSheetMeta,
@@ -60,8 +61,10 @@ export async function writeXlsx(
 	workbook: WorkbookInput,
 	options?: WriteOptions,
 ): Promise<Uint8Array> {
-	// Read the caller's `sheets` ONCE (a getter/Proxy must not vary it between validation and
-	// emission), then validate that single array and emit from it and the resolved names/states.
+	// Reject a non-object workbook typed, before the property read that would otherwise raw-throw. Then
+	// read the caller's `sheets` ONCE (a getter/Proxy must not vary it between validation and emission),
+	// validate that single array, and emit from it and the resolved names/states.
+	requireWorkbookObject(workbook);
 	const sheets = workbook.sheets;
 	const { states, names } = validate(sheets);
 	const date1904 = options?.date1904 === true;

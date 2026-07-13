@@ -1,0 +1,18 @@
+{
+	"name": "@openjsxl/fuzz",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Private fuzzing harness for openjsxl (never published; keeps the shipped packages zero-dependency). Property-based writer fuzzing via fast-check plus a seeded, dependency-free byte/zip/XML mutation engine replayed against every reader.",
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"fuzz": "FUZZ_LONG=1 vitest run --root ../.. long-run"
+	},
+	"dependencies": {
+		"@openjsxl/core": "workspace:*",
+		"@openjsxl/fixtures": "workspace:*"
+	},
+	"devDependencies": {
+		"fast-check": "3.23.2"
+	}
+}
