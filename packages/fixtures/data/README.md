@@ -152,6 +152,18 @@ git-ignored [`../local/`](../local) directory and are never committed.
   test round-trips it through the bridge. The in-tree `inventory-table.xlsx` is the Microsoft-Excel
   producer variant.
 
+- **`openpyxl-datavalidation.xlsx`** — authored by **openpyxl 3.1.5** to exercise data-validation read
+  (F9.2): a `Rules` sheet with nine `<dataValidation>` rules covering all eight types + an
+  input-message-only rule — `whole`/between (with a full prompt + error alert), `decimal`/≥ over a
+  **multi-range** sqref (`B2:B10 D2:D10`), a `list` with an **inline literal** (`"Low,Medium,High"`,
+  dropdown shown) and a `list` with a **cross-sheet range** source (`Lists!$A$1:$A$3`, dropdown hidden
+  via the inverted `showDropDown="1"`), `date`/between, `time`/>, `textLength`/≤, `custom`, and a
+  type-less input-message rule — plus a `Lists` helper sheet holding the source values. Validates the
+  `<dataValidations>` parser (`ooxml/__tests__/data-validation.test.ts`) and the corpus property
+  round-trips it through the bridge; openpyxl reads our re-written output warnings-as-errors clean. A
+  real Excel 365 file with x14 (cross-sheet DV in `<extLst>`) is an owner-provided ask (F9.4); the x14
+  skip is pinned by a crafted-XML unit test in the same suite.
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

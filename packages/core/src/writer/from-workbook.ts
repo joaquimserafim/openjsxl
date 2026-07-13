@@ -5,6 +5,7 @@ import type {
 	Cell,
 	ColumnProps,
 	Comment,
+	DataValidation,
 	FreezePane,
 	Hyperlink,
 	RowProps,
@@ -143,6 +144,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			comments?: readonly Comment[];
 			images?: readonly SheetImage[];
 			tables?: readonly TableInfo[];
+			dataValidations?: readonly DataValidation[];
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -166,6 +168,9 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// row (which the bridge also carries), so a read table rewrites cleanly.
 		const tables = worksheet.tables;
 		if (tables.length > 0) sheet.tables = tables;
+		// Data validations (F9.2) — structural pass-through; the reader's rules ARE writer input.
+		const dataValidations = worksheet.dataValidations;
+		if (dataValidations.length > 0) sheet.dataValidations = dataValidations;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

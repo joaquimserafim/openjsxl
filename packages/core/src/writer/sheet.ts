@@ -8,6 +8,18 @@ import {
 	MAX_ROW_HEIGHT,
 	parseRef,
 } from "../ooxml/a1";
+import {
+	DATA_VALIDATION_ERROR_STYLES,
+	DATA_VALIDATION_OPERATORS,
+	DATA_VALIDATION_TYPES,
+	isCanonicalSqrefToken,
+	isDataValidationErrorStyle,
+	isDataValidationOperator,
+	isDataValidationType,
+	MAX_DV_TEXT_LEN,
+	MAX_DV_TITLE_LEN,
+	MAX_SQREF_RANGES,
+} from "../ooxml/data-validation";
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
@@ -15,6 +27,8 @@ import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
 import type {
 	ColumnProps,
 	Comment,
+	DataValidation,
+	DataValidationType,
 	FreezePane,
 	Hyperlink,
 	RowProps,
@@ -551,6 +565,203 @@ function hyperlinksXml(
 	}
 	if (entries.length === 0) return { xml: "", targets: [] };
 	return { xml: `<hyperlinks>${entries.join("")}</hyperlinks>`, targets };
+}
+
+// ── Data validation (F9.2) ─────────────────────────────────────────────────────────────────────
+// `<dataValidations>` slots between <mergeCells> and <hyperlinks> (CT_Worksheet order, decision 1).
+// Like every structural block it is an empty string when unused, so a validation-free sheet keeps its
+// exact pre-F9.2 bytes. Strict validation mirrors hyperlinks: every caller property is read once
+// (TOCTOU), unknown keys and out-of-bounds values are rejected typed, bounds come from the SAME
+// constants the tolerant reader clamps with, and every emitted string passes escapeAttr/escapeText +
+// isXmlSafe. sqref stays symbolic — validated per range, capped in count, never expanded to cells.
+
+// One `@sqref` token: a canonical A1 cell ("C1") or top-left:bottom-right range ("A1:A10") within
+// Excel's grid. Kept symbolic; never expanded. Uses the SAME predicate the reader drops non-canonical
+// tokens with (isCanonicalSqrefToken) — so a token the reader can return is always one the writer
+// accepts (shared bounds).
+function validateSqrefToken(sheetName: string, what: string, token: string): void {
+	if (!isCanonicalSqrefToken(token)) {
+		sheetInvalid(
+			sheetName,
+			`${what} "${shortened(token)}" is not a canonical A1 cell or top-left→bottom-right range within Excel's grid`,
+		);
+	}
+}
+
+function dataValidationsXml(
+	sheetName: string,
+	dataValidations: readonly DataValidation[] | undefined,
+): string {
+	if (dataValidations === undefined) return "";
+	if (!Array.isArray(dataValidations))
+		sheetInvalid(sheetName, "dataValidations must be an array");
+	if (dataValidations.length === 0) return "";
+
+	const entries: string[] = [];
+	for (let i = 0; i < dataValidations.length; i++) {
+		const raw = dataValidations[i] as unknown;
+		const what = `dataValidations[${i}]`;
+		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
+		checkKeys(sheetName, what, raw, [
+			"sqref",
+			"type",
+			"operator",
+			"formula1",
+			"formula2",
+			"allowBlank",
+			"showDropDown",
+			"showInputMessage",
+			"showErrorMessage",
+			"errorStyle",
+			"promptTitle",
+			"prompt",
+			"errorTitle",
+			"error",
+		]);
+
+		// sqref — required, non-empty, canonical, capped in RANGE COUNT (decision 5).
+		const sqref = raw.sqref;
+		if (!Array.isArray(sqref)) {
+			sheetInvalid(sheetName, `${what}.sqref must be an array of A1 ranges`);
+		}
+		if (sqref.length === 0)
+			sheetInvalid(sheetName, `${what}.sqref must cover at least one range`);
+		if (sqref.length > MAX_SQREF_RANGES) {
+			sheetInvalid(sheetName, `${what}.sqref has more than ${MAX_SQREF_RANGES} ranges`);
+		}
+		const tokens: string[] = [];
+		for (let s = 0; s < sqref.length; s++) {
+			const token = sqref[s] as unknown;
+			if (typeof token !== "string") {
+				sheetInvalid(sheetName, `${what}.sqref[${s}] must be a string`);
+			}
+			validateSqrefToken(sheetName, `${what}.sqref[${s}]`, token);
+			tokens.push(token);
+		}
+
+		// One optional boolean property, read exactly once (TOCTOU).
+		const boolValue = (key: string, value: unknown): boolean | undefined => {
+			if (value === undefined) return undefined;
+			if (typeof value !== "boolean")
+				sheetInvalid(sheetName, `${what}.${key} must be a boolean`);
+			return value;
+		};
+		// One optional prompt/error string: length-bounded (code points, matching the reader's clamp)
+		// and XML-safe.
+		const textValue = (key: string, value: unknown, max: number): string | undefined => {
+			if (value === undefined) return undefined;
+			if (typeof value !== "string")
+				sheetInvalid(sheetName, `${what}.${key} must be a string`);
+			if ([...value].length > max) {
+				sheetInvalid(sheetName, `${what}.${key} exceeds ${max} characters`);
+			}
+			if (!isXmlSafe(value)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.${key} contains a character not allowed in XML (a control character or lone surrogate)`,
+				);
+			}
+			return value;
+		};
+		// A formula operand: stored form (a leading "=" is stripped, decision 6), XML-safe. Empty is
+		// no operand — the reader treats an empty <formula1> the same way.
+		const formulaValue = (key: string, value: unknown): string | undefined => {
+			if (value === undefined) return undefined;
+			if (typeof value !== "string")
+				sheetInvalid(sheetName, `${what}.${key} must be a string`);
+			const stored = value.startsWith("=") ? value.slice(1) : value;
+			if (stored === "") return undefined;
+			if (!isXmlSafe(stored)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.${key} contains a character not allowed in XML (a control character or lone surrogate)`,
+				);
+			}
+			return stored;
+		};
+
+		// type — default "none".
+		const rawType = raw.type;
+		let type: DataValidationType = "none";
+		if (rawType !== undefined) {
+			if (!isDataValidationType(rawType)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.type must be one of ${DATA_VALIDATION_TYPES.join(", ")}`,
+				);
+			}
+			type = rawType;
+		}
+
+		const formula1 = formulaValue("formula1", raw.formula1);
+		const formula2 = formulaValue("formula2", raw.formula2);
+		// An inline list literal (`"a,b,c"`) is capped at Excel's source ceiling (decision 5). A
+		// range/reference source is unbounded here.
+		if (
+			type === "list" &&
+			formula1 !== undefined &&
+			formula1.startsWith('"') &&
+			[...formula1].length > MAX_DV_TEXT_LEN
+		) {
+			sheetInvalid(
+				sheetName,
+				`${what}.formula1 inline list exceeds ${MAX_DV_TEXT_LEN} characters`,
+			);
+		}
+
+		let attrs = ` type="${type}"`;
+		const operator = raw.operator;
+		if (operator !== undefined) {
+			if (!isDataValidationOperator(operator)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.operator must be one of ${DATA_VALIDATION_OPERATORS.join(", ")}`,
+				);
+			}
+			attrs += ` operator="${operator}"`;
+		}
+		const allowBlank = boolValue("allowBlank", raw.allowBlank);
+		if (allowBlank !== undefined) attrs += ` allowBlank="${allowBlank ? 1 : 0}"`;
+		const showInputMessage = boolValue("showInputMessage", raw.showInputMessage);
+		if (showInputMessage !== undefined)
+			attrs += ` showInputMessage="${showInputMessage ? 1 : 0}"`;
+		const showErrorMessage = boolValue("showErrorMessage", raw.showErrorMessage);
+		if (showErrorMessage !== undefined)
+			attrs += ` showErrorMessage="${showErrorMessage ? 1 : 0}"`;
+		// showDropDown is INVERTED in the file — intuitive `true` (arrow shown) writes as "0".
+		const showDropDown = boolValue("showDropDown", raw.showDropDown);
+		if (showDropDown !== undefined) attrs += ` showDropDown="${showDropDown ? 0 : 1}"`;
+		const errorStyle = raw.errorStyle;
+		if (errorStyle !== undefined) {
+			if (!isDataValidationErrorStyle(errorStyle)) {
+				sheetInvalid(
+					sheetName,
+					`${what}.errorStyle must be one of ${DATA_VALIDATION_ERROR_STYLES.join(", ")}`,
+				);
+			}
+			attrs += ` errorStyle="${errorStyle}"`;
+		}
+		const promptTitle = textValue("promptTitle", raw.promptTitle, MAX_DV_TITLE_LEN);
+		if (promptTitle !== undefined) attrs += ` promptTitle="${escapeAttr(promptTitle)}"`;
+		const prompt = textValue("prompt", raw.prompt, MAX_DV_TEXT_LEN);
+		if (prompt !== undefined) attrs += ` prompt="${escapeAttr(prompt)}"`;
+		const errorTitle = textValue("errorTitle", raw.errorTitle, MAX_DV_TITLE_LEN);
+		if (errorTitle !== undefined) attrs += ` errorTitle="${escapeAttr(errorTitle)}"`;
+		const error = textValue("error", raw.error, MAX_DV_TEXT_LEN);
+		if (error !== undefined) attrs += ` error="${escapeAttr(error)}"`;
+		// sqref is the LAST attribute (matching Excel/openpyxl); tokens are canonical A1 — no escaping.
+		attrs += ` sqref="${tokens.join(" ")}"`;
+
+		let children = "";
+		if (formula1 !== undefined) children += `<formula1>${escapeText(formula1)}</formula1>`;
+		if (formula2 !== undefined) children += `<formula2>${escapeText(formula2)}</formula2>`;
+		entries.push(
+			children === ""
+				? `<dataValidation${attrs}/>`
+				: `<dataValidation${attrs}>${children}</dataValidation>`,
+		);
+	}
+	return `<dataValidations count="${entries.length}">${entries.join("")}</dataValidations>`;
 }
 
 // ── Comments (F5.2): xl/commentsN.xml + legacy VML drawing — validation + emission ─────────────
@@ -1270,6 +1481,7 @@ export function worksheetXml(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 	const pictures = imageParts(sheet.name, sheet.images, media);
@@ -1364,14 +1576,15 @@ export function worksheetXml(
 	);
 
 	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
-	// hyperlinks, drawing, legacyDrawing, tableParts (CT_Worksheet sequence — tableParts is last).
-	// Every optional block is an empty string when unused, so a sheet using none of them emits the
-	// exact pre-F4.5/F4.6/F5.2/F9.1 bytes.
+	// dataValidations, hyperlinks, drawing, legacyDrawing, tableParts (CT_Worksheet sequence —
+	// dataValidations sits between mergeCells and hyperlinks; tableParts is last). Every optional
+	// block is an empty string when unused, so a sheet using none of them emits the exact
+	// pre-F4.5/F4.6/F5.2/F9.1/F9.2 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
 		.join(
 			"",
-		)}</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+		)}</sheetData>${mergeCells}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	// Comment/drawing/table side parts are spread only when present so the optional properties stay
 	// truly absent (exactOptionalPropertyTypes).
 	return {
@@ -1494,6 +1707,7 @@ export function streamWorksheet(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 	const pictures = imageParts(sheet.name, sheet.images, media);
@@ -1512,7 +1726,7 @@ export function streamWorksheet(
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${mergeCells}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	const footer = `</sheetData>${mergeCells}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,

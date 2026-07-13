@@ -5,6 +5,7 @@ import type {
 	CellStyle,
 	ColumnProps,
 	Comment,
+	DataValidation,
 	FreezePane,
 	Hyperlink,
 	Row,
@@ -29,6 +30,7 @@ const NO_MERGES: readonly string[] = [];
 const NO_HYPERLINKS: readonly Hyperlink[] = [];
 const NO_COMMENTS: readonly Comment[] = [];
 const NO_TABLES: readonly TableInfo[] = [];
+const NO_DATA_VALIDATIONS: readonly DataValidation[] = [];
 const NO_COLUMNS: readonly ColumnProps[] = [];
 const NO_IMAGES: readonly SheetImage[] = [];
 const NO_ROW_PROPS: ReadonlyMap<number, RowProps> = new Map();
@@ -93,6 +95,10 @@ class CsvWorksheet implements Worksheet {
 
 	get tables(): readonly TableInfo[] {
 		return NO_TABLES;
+	}
+
+	get dataValidations(): readonly DataValidation[] {
+		return NO_DATA_VALIDATIONS;
 	}
 
 	get columns(): readonly ColumnProps[] {

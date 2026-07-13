@@ -7,6 +7,7 @@ import type {
 	CellStyle,
 	ColumnProps,
 	Comment,
+	DataValidation,
 	FreezePane,
 	Hyperlink,
 	RowProps,
@@ -103,6 +104,13 @@ export interface SheetInput {
 	 * `ref` overlaps another, or whose header cells aren't non-empty text, is rejected.
 	 */
 	readonly tables?: readonly TableInfo[];
+	/**
+	 * Data-validation rules on this sheet (F9.2) — the same records `Worksheet.dataValidations`
+	 * returns. Each needs a non-empty `sqref` (A1 ranges) and a `type`; `formula1`/`formula2` are
+	 * operand text carried verbatim (a leading `=` is stripped). Prompt/error titles are capped at 32
+	 * characters and bodies at 255; `showDropDown` uses the intuitive sense (`true` = arrow shown).
+	 */
+	readonly dataValidations?: readonly DataValidation[];
 }
 
 export interface WorkbookInput {
@@ -153,6 +161,8 @@ export interface StreamSheetInput {
 	 * than being derived from the header cells.
 	 */
 	readonly tables?: readonly TableInfo[];
+	/** Data-validation rules on this sheet (F9.2) — see {@link SheetInput.dataValidations}. */
+	readonly dataValidations?: readonly DataValidation[];
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */

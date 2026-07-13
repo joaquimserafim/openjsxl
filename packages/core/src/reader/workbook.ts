@@ -3,6 +3,7 @@ import {
 	type DecodeContext,
 	type DefinedName,
 	mimeForMediaPath,
+	parseDataValidations,
 	parseDrawing,
 	parseRels,
 	parseSharedStrings,
@@ -22,6 +23,7 @@ import type {
 	Color,
 	ColumnProps,
 	Comment,
+	DataValidation,
 	FreezePane,
 	Hyperlink,
 	RowProps,
@@ -174,6 +176,7 @@ export class XlsxWorksheet implements Worksheet {
 	#dimensionRead = false;
 	#comments: readonly Comment[] | undefined;
 	#tables: readonly TableInfo[] | undefined;
+	#dataValidations: readonly DataValidation[] | undefined;
 	#columns: readonly ColumnProps[] | undefined;
 	#rowProps: ReadonlyMap<number, RowProps> | undefined;
 	#freeze: FreezePane | undefined;
@@ -296,6 +299,19 @@ export class XlsxWorksheet implements Worksheet {
 			this.#tables = parsed;
 		}
 		return this.#tables;
+	}
+
+	/**
+	 * The data-validation rules on this sheet, in document order — each with its covered `sqref`
+	 * ranges, `type`, operand `formula1`/`formula2` (verbatim), and prompt/error text. Worksheet-level
+	 * x14 validations (Excel 2010+ cross-sheet list sources, under `<extLst>`) are skipped. Empty when
+	 * the sheet declares none. Parsed lazily on first access.
+	 */
+	get dataValidations(): readonly DataValidation[] {
+		if (this.#dataValidations === undefined) {
+			this.#dataValidations = parseDataValidations(this.#xml);
+		}
+		return this.#dataValidations;
 	}
 
 	/**

@@ -117,6 +117,84 @@ export interface TableInfo {
 	readonly style?: TableStyleInfo;
 }
 
+// ── Data validation (F9.2) ─────────────────────────────────────────────────────────────────────
+// One shared model: what `Worksheet.dataValidations` returns IS what `SheetInput.dataValidations`
+// accepts, so a rule crosses the bridge as a structural pass-through. Formula operands are carried
+// as verbatim TEXT (never evaluated). Worksheet-level x14 validations (Excel 2010+ cross-sheet list
+// sources) live in `<extLst>` and are skipped on read / never emitted — a named degradation.
+
+/** A validation kind (`<dataValidation type>`), ECMA-376 ST_DataValidationType. */
+export type DataValidationType =
+	| "none"
+	| "whole"
+	| "decimal"
+	| "list"
+	| "date"
+	| "time"
+	| "textLength"
+	| "custom";
+
+/** The comparison a validation applies (`<dataValidation operator>`), ST_DataValidationOperator. */
+export type DataValidationOperator =
+	| "between"
+	| "notBetween"
+	| "equal"
+	| "notEqual"
+	| "lessThan"
+	| "lessThanOrEqual"
+	| "greaterThan"
+	| "greaterThanOrEqual";
+
+/** How Excel reacts to invalid input (`<dataValidation errorStyle>`), ST_DataValidationErrorStyle. */
+export type DataValidationErrorStyle = "stop" | "warning" | "information";
+
+/**
+ * A data-validation rule (`<dataValidation>`) constraining one or more cell ranges. `formula1` and
+ * `formula2` are the producer's operand TEXT, carried verbatim: for a `list` type `formula1` is
+ * either a range (`$A$1:$A$3`, possibly cross-sheet) or an inline comma list in quotes (`"a,b,c"` —
+ * the quotes ARE part of the text); for `whole`/`decimal`/`date`/`time`/`textLength` they are the
+ * bound(s); for `custom` `formula1` is the expression.
+ *
+ * `showDropDown` uses the INTUITIVE sense: `true` means Excel shows the in-cell dropdown arrow for a
+ * `list`. The file's `showDropDown` attribute is inverted (a `1` there SUPPRESSES the arrow), so the
+ * reader and writer translate it — a file `1` reads as `false` here, and this `false` writes back as
+ * `showDropDown="1"`.
+ */
+export interface DataValidation {
+	/** The ranges this rule covers, one per `@sqref` token, in A1 notation (e.g. `["A1:A10", "C1"]`). */
+	readonly sqref: readonly string[];
+	/** The validation type; an absent/unrecognized `type` reads as `"none"`. */
+	readonly type: DataValidationType;
+	/** The comparison operator (for whole/decimal/date/time/textLength); absent for list/custom/none. */
+	readonly operator?: DataValidationOperator;
+	/** The first operand text in stored form (a leading `=` stripped) — a bound, list source, or expression. */
+	readonly formula1?: string;
+	/** The second operand text in stored form — only meaningful for `between`/`notBetween`. */
+	readonly formula2?: string;
+	/** Whether an empty cell passes validation (`allowBlank`). */
+	readonly allowBlank?: boolean;
+	/**
+	 * Whether Excel shows the in-cell dropdown for a `list` validation — INTUITIVE sense (`true` =
+	 * arrow shown). The file attribute is inverted; see the interface note. Absent means Excel's
+	 * default (arrow shown).
+	 */
+	readonly showDropDown?: boolean;
+	/** Whether the input-message popup is shown (`showInputMessage`). */
+	readonly showInputMessage?: boolean;
+	/** Whether the error alert is shown on invalid input (`showErrorMessage`). */
+	readonly showErrorMessage?: boolean;
+	/** The error-alert style; absent means Excel's default (`stop`). */
+	readonly errorStyle?: DataValidationErrorStyle;
+	/** The input-message title (≤32 characters). */
+	readonly promptTitle?: string;
+	/** The input-message body (≤255 characters). */
+	readonly prompt?: string;
+	/** The error-alert title (≤32 characters). */
+	readonly errorTitle?: string;
+	/** The error-alert body (≤255 characters). */
+	readonly error?: string;
+}
+
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────
 // One shared model, like styles: what the reader's accessors return IS what the writer accepts.
 
@@ -348,6 +426,8 @@ export interface Worksheet {
 	readonly comments: readonly Comment[];
 	/** The defined tables on this sheet, in document order. Empty when none (or unsupported). */
 	readonly tables: readonly TableInfo[];
+	/** The data-validation rules on this sheet, in document order. Empty when none (or unsupported). */
+	readonly dataValidations: readonly DataValidation[];
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */

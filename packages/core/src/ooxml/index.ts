@@ -2,6 +2,7 @@
 // styles, and cell typing. Aggregates the modules of this layer.
 export * from "./a1";
 export * from "./cell";
+export * from "./data-validation";
 export * from "./dates";
 export * from "./drawing";
 export * from "./formula";

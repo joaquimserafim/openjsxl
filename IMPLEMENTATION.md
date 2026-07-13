@@ -2087,7 +2087,7 @@ warnings-as-errors clean; our reader reads openpyxl/Excel tables.
 corpus). No-table workbooks byte-identical (golden pins green); the `.xlsx` writer's pre-F9.1 output
 is unchanged for input not using tables.
 
-### F9.2 — Data validation: read + write + bridge ☐
+### F9.2 — Data validation: read + write + bridge ☑
 **Scope (in).** `<dataValidations>` between mergeCells and hyperlinks. All 8 types +
 operators; formula1/formula2 verbatim (incl. cross-sheet in main part); multi-range
 `@sqref` (space-separated, symbolic); prompts/errors + `errorStyle`; the dropdown
@@ -2095,13 +2095,35 @@ inversion per decision 2; inline-list quoting quirk (`"a,b,c"` — quotes are fo
 documented + escaped. x14 DV skipped-named (decision 4). `Worksheet.dataValidations`,
 `SheetInput.dataValidations`, bridge carry.
 **Tasks**
-- [ ] Parser + model + degrade pins; bounds (decision 5) single-sourced.
-- [ ] Writer + order pin + byte-identity; escaping/TOCTOU.
-- [ ] Fixtures: `openpyxl-datavalidation.xlsx` (all types, multi-range, both dropdown
-      states, cross-sheet list) + ExcelJS x14 fixture pinning the degrade.
-- [ ] Corpus/bridge extension; oracle both ways; adversarial review (hostile sqref).
+- [x] Parser + model + degrade pins; bounds (decision 5) single-sourced (`ooxml/data-validation.ts`:
+      MAX_DV_TITLE_LEN=32, MAX_DV_TEXT_LEN=255, MAX_SQREF_RANGES=65536, `isCanonicalSqrefToken`).
+- [x] Writer + order pin (between mergeCells↔hyperlinks) + byte-identity; escaping/TOCTOU; BOTH writers.
+- [x] Fixtures: `openpyxl-datavalidation.xlsx` (all 8 types + input-message-only, multi-range,
+      both dropdown states, inline + cross-sheet list). x14 DV degrade pinned by a crafted-XML unit
+      test (ExcelJS emits x14 only for CF dataBars, not DV; a real Excel x14-DV file is an F9.4 owner
+      ask, named not dropped — decision 4/12).
+- [x] Corpus/bridge extension; oracle both ways (openpyxl reads our output warnings-as-errors clean +
+      deep-equal round-trip of the openpyxl fixture); adversarial review (4 lenses + refuting verifiers).
 **Acceptance.** All-8-types fixture round-trips; x14 degrade pinned; hostile sqref
-bounded; DV-free workbooks byte-identical.
+bounded; DV-free workbooks byte-identical. **Met.**
+
+**Landed (F9.2, uncommitted — awaiting owner approval).** NEW `ooxml/data-validation.ts` (tolerant
+`parseDataValidations`; shared bounds + `isCanonicalSqrefToken` + type-predicate guards, no `as`) +
+`DataValidation`/3 enums (types.ts) + `Worksheet.dataValidations` accessor (reader; ods/xlsb/csv →
+`[]`). Writer: `dataValidationsXml` (sheet.ts) validates + emits per decisions 5/6, slots between
+`<mergeCells>` and `<hyperlinks>` (decision 1), on BOTH writers; typed `XlsxError` on every violation;
+`<dataValidations>` emitted only when present (byte-identity). `showDropDown` INVERTED (file `1`=hidden
+↔ model `false`); sqref SYMBOLIC + canonical-token filtered + count-capped (never per-cell); x14
+`<extLst>` DV skipped; prompt/error text clamped-or-dropped, formulas stored-form. Bridge carries.
+Fixtures: `openpyxl-datavalidation.xlsx` (9 rules). **Adversarial review — 6 findings, 5 CONFIRMED (1
+refuted), all fixed + pinned:** the reader returned three value classes the writer then rejected/mangled,
+aborting a read→modify→write of a tolerated file — (1) non-canonical/out-of-grid sqref tokens (`A:A`,
+`$A$1`, lowercase, cross-sheet, past-grid), (2) prompt/error/formula text with decoded control chars,
+(3) a leading-`=` formula silently re-stripped. Fixed by degrading the READER into the writer's accepted
+set (single shared `isCanonicalSqrefToken`, `isXmlSafe` gate, stored-form `=` strip) — the shared-bounds
+invariant restored, empirically re-verified via a crafted hostile `.xlsx` through the full bridge.
+**Gate: biome 0 / tsc 0 / 838 tests** (+35 across data-validation.test.ts + data-validation-write.test.ts
++ corpus). DV-free workbooks byte-identical (golden pins green).
 
 ### F9.3 — Conditional formatting + differential styles (dxfs) ☐
 **Scope (in).** `<conditionalFormatting @sqref>` blocks + `<cfRule>` for the FULL base

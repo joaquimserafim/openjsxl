@@ -59,6 +59,8 @@ async function styleSnapshot(wb: Workbook) {
 			comments: sheet.comments,
 			// Tables (F9.1): name, ref, columns, header/totals flags, and style carry across.
 			tables: sheet.tables,
+			// Data validations (F9.2): sqref, type, operands, prompts/errors carry across.
+			dataValidations: sheet.dataValidations,
 			// Pictures (F6.4): anchor + mime + name + a content digest (not raw bytes).
 			images: (await sheet.images()).map((img) => ({
 				anchor: img.anchor,
