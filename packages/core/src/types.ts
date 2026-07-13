@@ -84,6 +84,15 @@ export interface TableColumn {
 	readonly totalsRowFormula?: string;
 	/** A calculated-column formula, if any — element text, carried verbatim, never evaluated. */
 	readonly calculatedColumnFormula?: string;
+	/**
+	 * The header-cell highlight for this column (`headerRowDxfId`), resolved to an inline
+	 * {@link DxfStyle} (F9.3). The numeric dxf index is never surfaced. Absent when the producer set none.
+	 */
+	readonly headerRowStyle?: DxfStyle;
+	/** The data-cells highlight for this column (`dataDxfId`), resolved to an inline {@link DxfStyle}. */
+	readonly dataStyle?: DxfStyle;
+	/** The totals-cell highlight for this column (`totalsRowDxfId`), resolved to an inline {@link DxfStyle}. */
+	readonly totalsRowStyle?: DxfStyle;
 }
 
 /** The built-in table-style banding for a {@link TableInfo} (`<tableStyleInfo>`). */
@@ -115,6 +124,12 @@ export interface TableInfo {
 	readonly totalsRow: boolean;
 	/** The built-in style banding, or `undefined` when the producer set none. */
 	readonly style?: TableStyleInfo;
+	/** Table-wide header-row highlight (`headerRowDxfId`), resolved to an inline {@link DxfStyle} (F9.3). */
+	readonly headerRowStyle?: DxfStyle;
+	/** Table-wide data highlight (`dataDxfId`), resolved to an inline {@link DxfStyle}. */
+	readonly dataStyle?: DxfStyle;
+	/** Table-wide totals-row highlight (`totalsRowDxfId`), resolved to an inline {@link DxfStyle}. */
+	readonly totalsRowStyle?: DxfStyle;
 }
 
 // ── Data validation (F9.2) ─────────────────────────────────────────────────────────────────────

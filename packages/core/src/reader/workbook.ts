@@ -298,7 +298,7 @@ export class XlsxWorksheet implements Worksheet {
 		if (this.#tables === undefined) {
 			const parsed: TableInfo[] = [];
 			for (const xml of this.#tablesXml) {
-				const table = parseTable(xml);
+				const table = parseTable(xml, this.#context.dxfs);
 				if (table !== undefined) parsed.push(table);
 			}
 			this.#tables = parsed;

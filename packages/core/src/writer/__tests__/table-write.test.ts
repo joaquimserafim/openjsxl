@@ -295,3 +295,98 @@ describe("streamXlsx — tables use caller-provided column names (no header read
 		expect(ws.cell("A2").value).toBe("West"); // the body streamed correctly around the table footer
 	});
 });
+
+// F9.3 retrofit — a table's/column's highlight dxfs (headerRowDxfId/dataDxfId/totalsRowDxfId) become
+// inline DxfStyle fields, interned into the shared <dxfs> table (the same one CF rules use).
+describe("writeXlsx — table dxf highlights (F9.3 retrofit)", () => {
+	it("round-trips table-level and per-column dxf highlights deep-equal", async () => {
+		const table = {
+			name: "Inv",
+			ref: "A1:B3",
+			columns: [
+				{ name: "Item" },
+				{ name: "Qty", dataStyle: { fill: { bgColor: { rgb: "FFFFC7CE" } } } },
+			],
+			headerRow: true,
+			totalsRow: false,
+			headerRowStyle: { font: { bold: true } },
+		};
+		const ws = await roundTrip({
+			name: "S",
+			rows: [
+				["Item", "Qty"],
+				["A", 5],
+				["K", 9],
+			],
+			tables: [table],
+		});
+		const t = ws.tables[0];
+		expect(t?.headerRowStyle).toEqual({ font: { bold: true } });
+		expect(t?.columns[1]?.dataStyle).toEqual({ fill: { bgColor: { rgb: "FFFFC7CE" } } });
+		// The id attrs land on the table part; the numeric index never surfaces in the model.
+		const part = await tablePart({
+			name: "S",
+			rows: [
+				["Item", "Qty"],
+				["A", 5],
+				["K", 9],
+			],
+			tables: [table],
+		});
+		expect(part).toContain("headerRowDxfId=");
+		expect(part).toMatch(/<tableColumn[^>]*dataDxfId=/);
+	});
+
+	it("shares ONE <dxfs> slot between a table dxf and an identical CF dxf (shared index space)", async () => {
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "S",
+					rows: [["H"], [1]],
+					tables: [
+						{
+							name: "T",
+							ref: "A1:A2",
+							columns: [{ name: "H", dataStyle: { font: { bold: true } } }],
+							headerRow: true,
+							totalsRow: false,
+						},
+					],
+					conditionalFormatting: [
+						{
+							sqref: ["A2"],
+							rules: [
+								{
+									type: "expression",
+									priority: 1,
+									formulas: ["TRUE"],
+									dxf: { font: { bold: true } },
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		const styles = decoder.decode(await openZip(bytes).read("xl/styles.xml"));
+		expect(styles).toContain('<dxfs count="1">'); // table + CF share the one bold dxf
+	});
+
+	it("rejects a malformed table dxf (typed)", async () => {
+		await rejects({
+			name: "S",
+			rows: [["H"], [1]],
+			tables: [
+				{
+					name: "T",
+					ref: "A1:A2",
+					columns: [{ name: "H" }],
+					headerRow: true,
+					totalsRow: false,
+					// biome-ignore lint/suspicious/noExplicitAny: hostile input past the types
+					headerRowStyle: { font: { size: -1 } } as any,
+				},
+			],
+		});
+	});
+});

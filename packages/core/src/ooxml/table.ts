@@ -1,4 +1,4 @@
-import type { TableInfo, TableStyleInfo } from "../types";
+import type { DxfStyle, TableColumn, TableInfo, TableStyleInfo } from "../types";
 import { localName } from "../utils";
 import { tokenize } from "../xml";
 
@@ -27,15 +27,43 @@ interface ColumnBuilder {
 	totalsRowFunction?: string;
 	totalsRowFormula?: string;
 	calculatedColumnFormula?: string;
+	headerRowDxfId?: number;
+	dataDxfId?: number;
+	totalsRowDxfId?: number;
 }
 
-/** Parse a table part into a {@link TableInfo}, or `undefined` when it lacks a usable name/ref. */
-export function parseTable(xml: string): TableInfo | undefined {
+// A non-negative integer attribute (a dxf index), or undefined when absent/malformed. Gated to
+// CANONICAL decimal digits first — `Number("")`/`Number(" 0 ")`/`Number("1e2")`/`Number("0x1")` all
+// coerce to valid integers, which would fabricate a phantom highlight from an empty/odd attribute.
+function intId(v: string | undefined): number | undefined {
+	if (v === undefined || !/^[0-9]+$/.test(v)) return undefined;
+	const n = Number(v);
+	return Number.isInteger(n) ? n : undefined;
+}
+
+// Resolve a dxf index to its inline style (F9.3). Out-of-range/absent → undefined (no highlight).
+function resolveDxf(
+	id: number | undefined,
+	dxfs: readonly DxfStyle[] | undefined,
+): DxfStyle | undefined {
+	return id !== undefined ? dxfs?.[id] : undefined;
+}
+
+/**
+ * Parse a table part into a {@link TableInfo}, or `undefined` when it lacks a usable name/ref. `dxfs`
+ * (the workbook `<dxfs>` table, F9.3) resolves the table's/columns' `*DxfId` highlight indexes to
+ * inline {@link DxfStyle}s; absent when the workbook has no differential styles.
+ */
+export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo | undefined {
 	let name: string | undefined;
 	let ref: string | undefined;
 	let headerRowCount: string | undefined;
 	let totalsRowCount: string | undefined;
 	let style: TableStyleInfo | undefined;
+	// Table-level highlight dxf indexes (resolved at the end).
+	let tableHeaderDxfId: number | undefined;
+	let tableDataDxfId: number | undefined;
+	let tableTotalsDxfId: number | undefined;
 	const columns: ColumnBuilder[] = [];
 	let column: ColumnBuilder | undefined; // the tableColumn currently open
 	let textTarget: "totals" | "calc" | undefined; // which formula child is accumulating text
@@ -49,6 +77,9 @@ export function parseTable(xml: string): TableInfo | undefined {
 					ref = tok.attrs.ref;
 					headerRowCount = tok.attrs.headerRowCount;
 					totalsRowCount = tok.attrs.totalsRowCount;
+					tableHeaderDxfId = intId(tok.attrs.headerRowDxfId);
+					tableDataDxfId = intId(tok.attrs.dataDxfId);
+					tableTotalsDxfId = intId(tok.attrs.totalsRowDxfId);
 					break;
 				case "tableColumn": {
 					const cn = tok.attrs.name;
@@ -58,6 +89,12 @@ export function parseTable(xml: string): TableInfo | undefined {
 							builder.totalsRowLabel = tok.attrs.totalsRowLabel;
 						if (tok.attrs.totalsRowFunction !== undefined)
 							builder.totalsRowFunction = tok.attrs.totalsRowFunction;
+						const hId = intId(tok.attrs.headerRowDxfId);
+						if (hId !== undefined) builder.headerRowDxfId = hId;
+						const dId = intId(tok.attrs.dataDxfId);
+						if (dId !== undefined) builder.dataDxfId = dId;
+						const tId = intId(tok.attrs.totalsRowDxfId);
+						if (tId !== undefined) builder.totalsRowDxfId = tId;
 						if (tok.selfClosing) columns.push(builder);
 						else column = builder;
 					}
@@ -101,13 +138,44 @@ export function parseTable(xml: string): TableInfo | undefined {
 
 	if (name === undefined || ref === undefined) return undefined;
 	const clamped = name.length > MAX_TABLE_NAME_LEN ? name.slice(0, MAX_TABLE_NAME_LEN) : name;
+	// Resolve each column's highlight dxf indexes to inline styles (F9.3 retrofit).
+	const outColumns: TableColumn[] = columns.map((c) => {
+		const col: {
+			name: string;
+			totalsRowLabel?: string;
+			totalsRowFunction?: string;
+			totalsRowFormula?: string;
+			calculatedColumnFormula?: string;
+			headerRowStyle?: DxfStyle;
+			dataStyle?: DxfStyle;
+			totalsRowStyle?: DxfStyle;
+		} = { name: c.name };
+		if (c.totalsRowLabel !== undefined) col.totalsRowLabel = c.totalsRowLabel;
+		if (c.totalsRowFunction !== undefined) col.totalsRowFunction = c.totalsRowFunction;
+		if (c.totalsRowFormula !== undefined) col.totalsRowFormula = c.totalsRowFormula;
+		if (c.calculatedColumnFormula !== undefined)
+			col.calculatedColumnFormula = c.calculatedColumnFormula;
+		const h = resolveDxf(c.headerRowDxfId, dxfs);
+		if (h !== undefined) col.headerRowStyle = h;
+		const d = resolveDxf(c.dataDxfId, dxfs);
+		if (d !== undefined) col.dataStyle = d;
+		const t = resolveDxf(c.totalsRowDxfId, dxfs);
+		if (t !== undefined) col.totalsRowStyle = t;
+		return col;
+	});
+	const tHeader = resolveDxf(tableHeaderDxfId, dxfs);
+	const tData = resolveDxf(tableDataDxfId, dxfs);
+	const tTotals = resolveDxf(tableTotalsDxfId, dxfs);
 	const info: TableInfo = {
 		name: clamped,
 		ref,
-		columns,
+		columns: outColumns,
 		headerRow: headerRowCount !== "0",
 		totalsRow: totalsRowCount !== undefined && totalsRowCount !== "0",
 		...(style !== undefined ? { style } : {}),
+		...(tHeader !== undefined ? { headerRowStyle: tHeader } : {}),
+		...(tData !== undefined ? { dataStyle: tData } : {}),
+		...(tTotals !== undefined ? { totalsRowStyle: tTotals } : {}),
 	};
 	return info;
 }

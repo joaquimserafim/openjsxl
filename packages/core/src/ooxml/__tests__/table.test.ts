@@ -71,6 +71,31 @@ describe("parseTable — units", () => {
 		const t = parseTable(`<table ${NS} name="${long}" displayName="${long}" ref="A1:A1"/>`);
 		expect(t?.name.length).toBe(MAX_TABLE_NAME_LEN);
 	});
+
+	// F9.3 retrofit: resolve a table's/column's *DxfId to an inline DxfStyle, and DEGRADE a
+	// malformed/out-of-range index to no highlight (review regression — no phantom dxf[0]).
+	it("resolves a valid *DxfId to an inline DxfStyle, and drops a malformed/out-of-range one", () => {
+		const dxfs = [{ font: { bold: true } }, { fill: { bgColor: { rgb: "FFFFC7CE" } } }];
+		const valid = parseTable(
+			`<table ${NS} name="T" displayName="T" ref="A1:A2" headerRowDxfId="0"><tableColumns count="1"><tableColumn name="H" dataDxfId="1"/></tableColumns></table>`,
+			dxfs,
+		);
+		expect(valid?.headerRowStyle).toEqual({ font: { bold: true } });
+		expect(valid?.columns[0]?.dataStyle).toEqual({ fill: { bgColor: { rgb: "FFFFC7CE" } } });
+
+		for (const bad of ["", " 0 ", "1e2", "0x1", "9"]) {
+			const t = parseTable(
+				`<table ${NS} name="T" displayName="T" ref="A1:A2" headerRowDxfId="${bad}"/>`,
+				dxfs,
+			);
+			expect(t?.headerRowStyle).toBeUndefined(); // no phantom highlight
+		}
+		// With no dxfs table at all, a present id still resolves to nothing.
+		expect(
+			parseTable(`<table ${NS} name="T" displayName="T" ref="A1:A2" headerRowDxfId="0"/>`)
+				?.headerRowStyle,
+		).toBeUndefined();
+	});
 });
 
 describe("tables — verbatim read of a real Excel fixture", () => {

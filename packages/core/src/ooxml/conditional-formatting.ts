@@ -95,7 +95,9 @@ interface RuleBuilder {
 }
 
 function intAttr(v: string | undefined): number | undefined {
-	if (v === undefined) return undefined;
+	// Canonical (optionally-signed) decimal only — `Number("")`/`Number("1e2")`/`Number("0x1")` would
+	// otherwise coerce an empty/odd attribute into a phantom priority/rank/dxfId (F9.3 review).
+	if (v === undefined || !/^-?[0-9]+$/.test(v)) return undefined;
 	const n = Number(v);
 	return Number.isInteger(n) ? n : undefined;
 }

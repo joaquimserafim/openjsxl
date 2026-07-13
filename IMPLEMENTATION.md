@@ -2125,7 +2125,7 @@ invariant restored, empirically re-verified via a crafted hostile `.xlsx` throug
 **Gate: biome 0 / tsc 0 / 838 tests** (+35 across data-validation.test.ts + data-validation-write.test.ts
 + corpus). DV-free workbooks byte-identical (golden pins green).
 
-### F9.3 — Conditional formatting + differential styles (dxfs) ☑ (core; table-dxf retrofit deferred, see below)
+### F9.3 — Conditional formatting + differential styles (dxfs) ☑
 **Scope (in).** `<conditionalFormatting @sqref>` blocks + `<cfRule>` for the FULL base
 ST_CfType set (cellIs, expression, colorScale, dataBar, iconSet, top10, aboveAverage,
 uniqueValues/duplicateValues, containsText-family, containsBlanks/Errors-family,
@@ -2144,8 +2144,9 @@ custom icon sets; x14 emission.
 - [x] cfRule parser/emitter (`ooxml/conditional-formatting.ts` + `writer/sheet.ts`; discriminated union
       over ST_CfType; verbatim formulas, stored-form; decision-6 priority renumber pinned by a
       precedence-preservation regression); order pin (mergeCells↔dataValidations) + byte-identity; BOTH writers.
-- [~] Retrofit inline `DxfStyle` onto F9.1's `TableInfo` columns (additive) — **DEFERRED** to a follow-up
-      (the F9.1 table-dxf drop is NAMED + corpus-safe; not a regression). Owner to fold in now or later.
+- [x] Retrofit inline `DxfStyle` onto F9.1's `TableInfo`/`TableColumn` (additive) — landed as the
+      follow-up commit (see below). Table/column `headerRowDxfId`/`dataDxfId`/`totalsRowDxfId` resolve
+      on read + intern on write, sharing the one `<dxfs>` table with CF; focused review + regressions.
 - [x] Fixtures: `openpyxl-condformat.xlsx` (12 rule types + dxfs font/fill/border; numFmt-in-dxf covered
       by a crafted unit test). x14 dataBar degrade pinned by a crafted-XML unit test (ExcelJS x14 is an
       F9.4 owner ask). Hostile counts/priority-0/negative pinned; sqref cap shared with DV.
@@ -2171,9 +2172,17 @@ reader returned two value classes the writer then rejected/mangled — (1) an XM
 `colorScaleCountsOk`/`dataBarCountsOk`/`iconSetCountsOk`). Empirically re-verified via a crafted hostile
 `.xlsx` through the full bridge. **Gate: biome 0 / tsc 0 / 860 tests** (+22). Byte-identity green.
 
-**Deferred (F9.3 follow-up): table-dxf retrofit.** F9.1 dropped table dxf attrs (`headerRowDxfId` etc.)
-NAMED; F9.3's dxf parser now exists, so they can become inline `DxfStyle` fields on `TableInfo`/columns
-additively. Not done in this commit (keeps it scoped + reviewable; the drop is corpus-safe, non-regressing).
+**Landed (F9.3 table-dxf retrofit, uncommitted — awaiting owner approval).** `TableInfo`/`TableColumn`
+gain `headerRowStyle`/`dataStyle`/`totalsRowStyle` (`DxfStyle`). Reader (`ooxml/table.ts`): `parseTable
+(xml, dxfs?)` resolves the table's + each column's `headerRowDxfId`/`dataDxfId`/`totalsRowDxfId` →
+inline `DxfStyle` (index never surfaced); wired via `context.dxfs`. Writer (`writer/sheet.ts`):
+`buildTables`/`tableColumnXml` take the `StyleRegistry`; `tableDxfAttrs` interns the three styles → the
+`*DxfId` attrs, sharing the ONE `<dxfs>` table with conditional formatting (cross-feature dedup pinned).
+Byte-identity: a no-dxf table emits the exact pre-retrofit bytes. **Focused review — 1 CONFIRMED (low):**
+`intId` used `Number()` which coerced `""`/`" 0 "`/`"1e2"`/`"0x1"` into a phantom `dxf[0]`; fixed with a
+canonical-digits gate (+ the CF `intAttr` sibling, for consistency). Hostile lens re-verified by hand
+(API error killed its verifier) — streaming path, out-of-range/negative/malformed `*DxfId`, and
+non-plain/bad dxf all degrade or reject typed. **Gate: biome 0 / tsc 0 / 864 tests** (+4).
 
 ### F9.4 — Fuzzing harness, corpus expansion, milestone hardening review ☐
 **Context.** jazzer.js (libFuzzer) needs native bindings — out. **fast-check** (MIT, pure

@@ -1323,6 +1323,7 @@ export function buildTables(
 	tables: readonly TableInfo[] | undefined,
 	headerCell: ((row: number, col: number) => unknown) | undefined,
 	ctx: TableContext,
+	styles: StyleRegistry,
 ): TablePart[] | undefined {
 	if (tables === undefined) return undefined;
 	if (!Array.isArray(tables)) sheetInvalid(sheetName, "tables must be an array");
@@ -1341,6 +1342,9 @@ export function buildTables(
 			"headerRow",
 			"totalsRow",
 			"style",
+			"headerRowStyle",
+			"dataStyle",
+			"totalsRowStyle",
 		]);
 
 		const name = raw.name;
@@ -1419,7 +1423,7 @@ export function buildTables(
 				);
 			}
 			seen.add(key);
-			columnXmls.push(tableColumnXml(sheetName, what, c + 1, columnName, provided));
+			columnXmls.push(tableColumnXml(sheetName, what, c + 1, columnName, provided, styles));
 		}
 
 		// Two tables on one sheet may not overlap (Excel repairs overlapping tables). Few tables per
@@ -1449,13 +1453,28 @@ export function buildTables(
 		}
 		const headerAttr = headerRow ? "" : ' headerRowCount="0"';
 		const totalsAttr = totalsRow ? ' totalsRowCount="1"' : ' totalsRowShown="0"';
+		// Table-wide highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs> table.
+		const tableDxf = tableDxfAttrs(styles, what, raw);
 		const styleXml = tableStyleInfoXml(sheetName, what, raw.style);
 		const xml =
-			`${XML_DECL}\n<table xmlns="${NS_MAIN}" id="${number}" name="${escapeAttr(name)}" displayName="${escapeAttr(name)}" ref="${ref}"${headerAttr}${totalsAttr}>` +
+			`${XML_DECL}\n<table xmlns="${NS_MAIN}" id="${number}" name="${escapeAttr(name)}" displayName="${escapeAttr(name)}" ref="${ref}"${headerAttr}${totalsAttr}${tableDxf}>` +
 			`${autoFilter}<tableColumns count="${width}">${columnXmls.join("")}</tableColumns>${styleXml}</table>`;
 		parts.push({ number, xml });
 	}
 	return parts;
+}
+
+// Intern a table's or column's highlight dxfs (headerRow/data/totals) into styles.xml's shared <dxfs>
+// table and return the `*DxfId` attributes (F9.3 retrofit). Absent styles emit nothing (byte-identity).
+function tableDxfAttrs(styles: StyleRegistry, what: string, raw: Record<string, unknown>): string {
+	let attrs = "";
+	const header = styles.internDxf(raw.headerRowStyle, `${what}.headerRowStyle`);
+	if (header !== undefined) attrs += ` headerRowDxfId="${header}"`;
+	const data = styles.internDxf(raw.dataStyle, `${what}.dataStyle`);
+	if (data !== undefined) attrs += ` dataDxfId="${data}"`;
+	const totals = styles.internDxf(raw.totalsRowStyle, `${what}.totalsRowStyle`);
+	if (totals !== undefined) attrs += ` totalsRowDxfId="${totals}"`;
+	return attrs;
 }
 
 // One <tableColumn>. Names are validated by the caller; the optional totals-row label/function and the
@@ -1466,6 +1485,7 @@ function tableColumnXml(
 	id: number,
 	name: string,
 	provided: Record<string, unknown> | undefined,
+	styles: StyleRegistry,
 ): string {
 	let attrs = ` id="${id}" name="${escapeAttr(name)}"`;
 	let children = "";
@@ -1476,7 +1496,12 @@ function tableColumnXml(
 			"totalsRowFunction",
 			"totalsRowFormula",
 			"calculatedColumnFormula",
+			"headerRowStyle",
+			"dataStyle",
+			"totalsRowStyle",
 		]);
+		// Per-column highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs>.
+		attrs += tableDxfAttrs(styles, `${what} column ${id}`, provided);
 		const label = provided.totalsRowLabel;
 		if (label !== undefined)
 			attrs += ` totalsRowLabel="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowLabel`, label))}"`;
@@ -1827,6 +1852,7 @@ export function worksheetXml(
 			return Array.isArray(rowCells) ? rowCells[col - 1] : undefined;
 		},
 		tableCtx,
+		styles,
 	);
 
 	// 0 means "unset" — no populated cell seen yet (columns/rows are 1-based, so 0 is a safe sentinel).
@@ -2051,7 +2077,7 @@ export function streamWorksheet(
 	const pictures = imageParts(sheet.name, sheet.images, media);
 	// The footer (which carries <tableParts>) is built BEFORE the rows stream, so the header row isn't
 	// available — column names come from `tables[i].columns` here (no header resolver).
-	const tables = buildTables(sheet.name, sheet.tables, undefined, tableCtx);
+	const tables = buildTables(sheet.name, sheet.tables, undefined, tableCtx, styles);
 
 	// Relationships + the body plumbing that references them — the SAME builder the buffered writer
 	// uses, so the two can't drift on rel order, rId allocation, or the drawing/legacyDrawing refs.
