@@ -150,8 +150,14 @@ git push -f origin v<version>
   scales, data bars, icon sets). The tolerant reader normalizes a foreign producer's out-of-spec
   table (odd name, mismatched column count, impossible totals row) into writer-legal shape so it
   re-saves instead of aborting. Hardened by a new property + mutation **fuzzing harness**
-  (`@openjsxl/fuzz`, private) run over every reader/writer. Additive API — unused features emit
-  nothing, so `.xlsx` output for existing input stays byte-identical.
+  (`@openjsxl/fuzz`, private) run over every reader/writer. Also in 0.9: **ST_Xstring escaping**, so
+  string content with XML-illegal characters (control chars, lone surrogates, literal `_xHHHH_`)
+  round-trips through Excel/openpyxl instead of corrupting or rejecting; **Unicode table names**
+  (non-English Excel locales' default names read verbatim); and **hostile-input hardening** — the
+  streaming tokenizer is O(n) on any chunking, and every read is guarded against decompression bombs
+  by DEFAULT (a 2 GiB per-part ceiling + a 300× compression-ratio cap, tunable via `ReadOptions`;
+  reads that would exceed the runtime's string limit fail typed, never crash). Additive API — unused
+  features emit nothing, so `.xlsx` output for existing input stays byte-identical.
 - **`1.0.0`** — bump once the API is settled. Follow semver.
 
 ## Notes

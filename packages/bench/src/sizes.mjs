@@ -20,11 +20,14 @@ import { fileURLToPath } from "node:url";
 
 const CACHE = fileURLToPath(new URL("../.cache/", import.meta.url));
 
+// Every library is measured the SAME way — a clean `npm install` of its published package — so the
+// footprints compare like for like. openjsxl tracks `latest` (not a pinned tag), so the row stays
+// current with each release automatically; the competitors are pinned to a specific version.
 const LIBS = [
 	{
 		name: "openjsxl",
-		spec: "openjsxl@0.6.0",
-		note: "its one dependency is its own `@openjsxl/core` — zero third-party packages. Measured at 0.6.0 (the latest published version); the M7 readers add code but no dependencies.",
+		spec: "openjsxl",
+		note: "its one dependency is its own `@openjsxl/core` — zero third-party packages. Measured from the published `latest`, so this row moves with each release.",
 	},
 	{ name: "ExcelJS", spec: "exceljs@4.4.0" },
 	{ name: "SheetJS", spec: "xlsx@0.18.5" },
@@ -49,10 +52,21 @@ function measure(lib) {
 	).length;
 	const installKB = Number(sh("du -sk node_modules", dir).split(/\s+/)[0]);
 	const ownBytes = Number(sh(`npm view ${lib.spec} dist.unpackedSize`));
-	const out = { name: lib.name, spec: lib.spec, directDeps, totalDeps, installKB, ownBytes };
+	// Record the RESOLVED version, so a floating spec like `openjsxl` (= latest) shows its real
+	// number in the table rather than the literal "latest"/bare name.
+	const resolvedVersion = sh(`npm view ${lib.spec} version`);
+	const pkgName = lib.spec.split("@")[0];
+	const out = {
+		name: lib.name,
+		spec: `${pkgName}@${resolvedVersion}`,
+		directDeps,
+		totalDeps,
+		installKB,
+		ownBytes,
+	};
 	if (lib.note) out.note = lib.note;
 	process.stdout.write(
-		`${directDeps} direct / ${totalDeps} total deps · ${(installKB / 1024).toFixed(1)} MB installed\n`,
+		`${directDeps} direct / ${totalDeps} total deps · ${(installKB / 1024).toFixed(2)} MB installed\n`,
 	);
 	return out;
 }

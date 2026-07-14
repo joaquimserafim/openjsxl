@@ -43,7 +43,8 @@ For very large sheets use `streamSheetRows` (constant memory); a worksheet also 
 (anchored pictures — raw bytes, media type, and cell + EMU anchor), and `tables`,
 `dataValidations`, `conditionalFormatting` (0.9); the workbook resolves theme colors to ARGB
 with `resolveColor`; and the reader throws a typed `XlsxError` (with a discriminating `code`)
-on malformed input.
+on malformed input — including hostile input: every read is guarded against decompression bombs
+by default (a 2 GiB per-part ceiling + a 300× compression-ratio cap, tunable via `ReadOptions`).
 
 **Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
 inferred from the JS values. Cells can carry styles (`{ value, style }` — the same shape

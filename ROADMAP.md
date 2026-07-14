@@ -63,9 +63,11 @@ not asked for.
 
 Status: ☐ not started · ◐ in progress · ☑ done
 
-**Shipped:** everything through **0.8 (Formulas)** is complete — the reader, writer, multi-format
-read (0.7: `.ods`/`.xlsb`/`.csv`), and the opt-in `openjsxl/formula` evaluation engine (0.8).
-`0.8.0` is the current release. **Next up: 0.9 — breadth + hardening.**
+**Shipped:** everything through **0.9 (Breadth + hardening)** is complete — the reader, writer,
+multi-format read (0.7: `.ods`/`.xlsb`/`.csv`), the opt-in `openjsxl/formula` evaluation engine
+(0.8), and 0.9's read+write **tables / data validation / conditional formatting** plus the
+hostile-input hardening (property + mutation fuzzing, ST_Xstring escaping, table round-trip
+shared-bounds, decompression-bomb guards, streaming-tokenizer linearity). **Next up: 1.0 — stable.**
 
 | Version | Theme | Outcome | Status |
 | --- | --- | --- | --- |
@@ -78,7 +80,7 @@ read (0.7: `.ods`/`.xlsb`/`.csv`), and the opt-in `openjsxl/formula` evaluation 
 | **0.6** | Images | drawingML picture read + anchored write; native lane deferred (0.5 benchmarks: pure-TS within ~1.5× of native calamine) | ☑ |
 | **0.7** | More formats | `.ods`, `.xlsb`, `.csv`/`.tsv` read (legacy `.xls` deferred to M8+) | ☑ |
 | **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point; text fidelity ships in 0.5) | ☑ |
-| **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus | ☐ |
+| **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus; ST_Xstring, table round-trip + zip-bomb/streaming hardening | ☑ |
 | **1.0** | Stable | Frozen API, full `.xlsx` round-trip fidelity, docs site, published benchmarks | ☐ |
 
 ## 6. How we track

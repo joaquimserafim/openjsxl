@@ -113,12 +113,14 @@ function sizesSection() {
 	}
 	const data = JSON.parse(readFileSync(SIZES_CACHE, "utf8"));
 	const version = (spec) => spec.slice(spec.lastIndexOf("@") + 1);
+	// Sub-1-MB installs show 2 decimals so a ~0.45 MB library doesn't read as a lossy "0.4 MB".
+	const fmtInstalled = (kb) => `${(kb / 1024).toFixed(kb < 1024 ? 2 : 1)} MB`;
 	const rows = data.libs.map((l) => [
 		`**${l.name}**`,
 		`\`${version(l.spec)}\``,
 		String(l.totalDeps),
 		fmtBytes(l.ownBytes),
-		`${(l.installKB / 1024).toFixed(1)} MB`,
+		fmtInstalled(l.installKB),
 	]);
 	const notes = data.libs
 		.filter((l) => l.note)

@@ -47,7 +47,10 @@ for await (const row of streamSheetRows(await readFile('huge.xlsx'))) {
 
 Malformed input throws a typed `XlsxError` with a discriminating `.code`
 (`'not-a-zip' | 'not-xlsx' | 'missing-part' | 'corrupt-zip' | 'part-too-large' | …`), never a
-bare `TypeError` from a corrupt file.
+bare `TypeError` from a corrupt file. Reads are guarded against decompression bombs **by default** —
+a 2 GiB per-part output ceiling plus a 300× compression-ratio cap (over an 8 MiB floor); raise or
+disable either via `ReadOptions.maxPartBytes` / `maxCompressionRatio` (`Number.POSITIVE_INFINITY`
+to turn one off).
 
 ## Writing
 
