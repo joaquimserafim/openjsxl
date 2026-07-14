@@ -212,7 +212,9 @@ describe("openZip — deflate and real-world layouts", () => {
 		expect(decode(await zip.read("p.xml"))).toBe(content);
 	});
 
-	it("caps inflate at the declared uncompressed size (decompression-bomb guard)", async () => {
+	it("caps inflate at the declared uncompressed size, typed part-too-large (F9.7)", async () => {
+		// A stream that produces more than its declared uncompressedSize is a size/bomb rejection
+		// (part-too-large), NOT a corrupt stream — the inflate aborts while streaming.
 		const zip = openZip(
 			await buildZip({
 				name: "bomb.xml",
@@ -220,7 +222,7 @@ describe("openZip — deflate and real-world layouts", () => {
 				centralUncompressedSize: 16,
 			}),
 		);
-		await expect(zip.read("bomb.xml")).rejects.toThrow(/failed to inflate/);
+		await expect(zip.read("bomb.xml")).rejects.toMatchObject({ code: "part-too-large" });
 	});
 
 	it("wraps inflate failures with the part name", async () => {
@@ -264,6 +266,51 @@ describe("openZip — deflate and real-world layouts", () => {
 		});
 		const zip = openZip(bytes, { maxPartBytes: 100 });
 		await expect(zip.read("big.xml")).rejects.toMatchObject({ code: "part-too-large" });
+	});
+});
+
+// F9.7 — the zip-bomb guards are ON BY DEFAULT (no opt-in): an absolute per-part ceiling plus a
+// compression-ratio cap over an 8 MiB floor. Both are caller-tunable / disable-able.
+describe("openZip — decompression-bomb defaults (F9.7)", () => {
+	it("catches a highly-compressible bomb by DEFAULT (no options), typed", async () => {
+		// ~9 MiB of one repeated char deflates to a few hundred bytes — a >8 MiB output at a
+		// ~10000:1 ratio. The default guard (8 MiB floor / 300× ratio) must abort it typed.
+		const zip = openZip(
+			await buildZip({ name: "bomb.xml", content: "A".repeat(9 * 1024 * 1024) }),
+		);
+		await expect(zip.read("bomb.xml")).rejects.toMatchObject({ code: "part-too-large" });
+	});
+
+	it("lets a normal part through under the default guards", async () => {
+		// A realistic ~50:1 part well under the floor reads fine with NO options passed.
+		const content = "<row><c><v>123.45</v></c></row>".repeat(2000);
+		const zip = openZip(await buildZip({ name: "sheet.xml", content }));
+		expect(decode(await zip.read("sheet.xml"))).toBe(content);
+	});
+
+	it("can be disabled with Infinity (caller opts out of both guards)", async () => {
+		const bomb = await buildZip({ name: "bomb.xml", content: "A".repeat(9 * 1024 * 1024) });
+		const zip = openZip(bomb, {
+			maxPartBytes: Number.POSITIVE_INFINITY,
+			maxCompressionRatio: Number.POSITIVE_INFINITY,
+		});
+		expect((await zip.read("bomb.xml")).length).toBe(9 * 1024 * 1024);
+	});
+
+	it("enforces maxPartBytes against a STORED entry's real size, not its lying uncompressedSize", async () => {
+		// The pre-F9.7 gap: a STORED (method 0) part returns compressedSize bytes, but the guard
+		// only checked uncompressedSize — which an attacker sets to 0 to slip a large part through.
+		const bytes = await buildZip({
+			name: "stored.bin",
+			content: "S".repeat(5000),
+			method: 0,
+			centralUncompressedSize: 0, // the lie
+		});
+		const guarded = openZip(bytes, { maxPartBytes: 1000 });
+		await expect(guarded.read("stored.bin")).rejects.toMatchObject({ code: "part-too-large" });
+		// Without the tight cap it still reads its real bytes.
+		const open = openZip(bytes);
+		expect((await open.read("stored.bin")).length).toBe(5000);
 	});
 });
 

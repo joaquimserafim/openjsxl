@@ -2462,7 +2462,7 @@ truncates-and-writes-legal or fails typed; no table-name collision can abort a w
 flattening/drop is either fixed or listed in the not-carried column; the README modify snippet
 type-checks; all standing gates green + byte-identity recipe on the writer-touching parts.
 
-### F9.7 — Hostile-input hardening (streaming O(n²) + zip-bomb default)
+### F9.7 — Hostile-input hardening (streaming O(n²) + zip-bomb default) ☑
 **Where this came from.** The same review's security lens (both findings adversarially verified with
 probes). These are the two resource-exhaustion gaps — neither is code-exec or corruption, both are
 DoS-shaped, and one (the default ceiling) is a deliberate behaviour change, which is why they're split
@@ -2505,16 +2505,28 @@ out of F9.6.
   `uncompressedSize === compressedSize` for stored entries).
 
 **Tasks**
-- [ ] Cursor-carrying `safeBoundary`/`createXmlStream` + `MAX_UNFINISHED_CONSTRUCT` typed cap; growth
+- [x] Cursor-carrying `safeBoundary`/`createXmlStream` + `MAX_UNFINISHED_CONSTRUCT` typed cap; growth
       assertion test (N straddling chunks ⇒ bounded, near-linear op count) + existing boundary tests
       still green.
-- [ ] **Owner decision** on the zip-bomb default (ratio cap vs absolute ceiling vs both, the numbers,
-      and the typed error code) — then implement the shared default in `zip/`, with reader defaults
-      threaded through `openXlsx`/`openXlsb`/`openOds` and a documented opt-out.
-- [ ] STORED-entry cap checked against `compressedSize`; regression fixture/probe-derived test.
-- [ ] Fuzz-corpus additions in `@openjsxl/fuzz`: a straddling-construct mutation and a lying-size /
-      high-ratio archive, asserting typed-fail (not OOM/hang) under the new defaults.
-- [ ] Adversarial review (hostile-input lens) + re-run the F9.4 campaign against the hardened readers.
+- [x] **Owner decision** (2026-07-14: ratio + absolute, error code `part-too-large`) → implemented the
+      shared default in `zip/`: `DEFAULT_MAX_PART_BYTES` 2 GiB absolute ceiling + `DEFAULT_MAX_COMPRESSION_RATIO`
+      300× over an 8 MiB `RATIO_FLOOR_BYTES`, threaded through `openXlsx`/`openXlsb`/`openOds` via
+      `ReadOptions.{maxPartBytes,maxCompressionRatio}`; disable per-guard with `Infinity`.
+- [x] STORED-entry cap checked against the method-aware output size (`compressedSize` for method 0), so
+      a lying `uncompressedSize` can no longer slip a large stored part; regression test.
+- [x] Fuzz-corpus additions in `@openjsxl/fuzz` (`hostile-input.test.ts`): a decompression-bomb
+      worksheet through `openXlsx` AND `streamSheetRows`, plus a lying-size part — all asserting typed
+      `part-too-large` (not OOM/hang) under the DEFAULT guards, with a normal-sheet control.
+- [x] Adversarial review (hostile-input + algorithm-correctness lenses on the rewritten stream state
+      machine) + re-ran the F9.4 campaign against the hardened readers (no crashers).
+
+**Landed** (uncommitted → owner approval): `xml/stream.ts` (chunk-held resumable scan — linear total
+work, one join per construct; `MAX_UNFINISHED_CONSTRUCT` 64 MiB typed cap), `zip/inflate.ts` (typed
+`part-too-large` on the cap, distinguishable from a corrupt stream), `zip/central-directory.ts` (the
+two default guards + method-aware absolute check closing the STORED bypass), `reader/workbook.ts`
+(`ReadOptions` doc + the ratio knob). Tests: stream resume/linearity/cap units, zip guard + STORED
+units, the fuzz end-to-end file. Probe measured the fixed stream linear (50 MB in 2.8 ms vs the old
+quadratic 13 s at 25 MB). README zip-bomb note updated (guards now on by default).
 
 **Acceptance.** A worksheet part that is one giant unterminated construct fails typed (or streams in
 O(n)) instead of hanging/growing unboundedly; a default `openXlsx`/`openXlsb`/`openOds` on a

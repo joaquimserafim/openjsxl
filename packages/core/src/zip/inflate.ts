@@ -1,10 +1,22 @@
+import { XlsxError } from "../errors";
+
 // Raw DEFLATE decompression using the platform Compression Streams API — available on
 // Node >= 18, Deno, Bun, modern browsers, and Cloudflare Workers. This is why openjsxl
 // needs no zip/inflate dependency: the runtime already ships one.
 //
-// `maxBytes` bounds the output: decompression is aborted and an error thrown once the
-// inflated size would exceed it. Callers pass the entry's declared uncompressed size so a
-// malformed or hostile stream can't expand without bound (a decompression bomb).
+// `maxBytes` bounds the output: decompression is aborted and a typed `part-too-large` error
+// thrown once the inflated size would exceed it — the abort happens DURING streaming, so a
+// decompression bomb never fully materializes. The caller (openZip) passes the tightest of the
+// declared size, the absolute per-part ceiling, and the compression-ratio limit (F9.7).
+
+// A distinct XlsxError so openZip can tell a legitimate bomb/size abort (surface as-is) from a
+// genuinely corrupt deflate stream (wrap as corrupt-zip).
+function tooLarge(maxBytes: number): XlsxError {
+	return new XlsxError(
+		"part-too-large",
+		`inflated output exceeds the ${maxBytes}-byte limit (zip-bomb / size guard)`,
+	);
+}
 
 export async function inflateRaw(
 	data: Uint8Array,
@@ -23,7 +35,7 @@ export async function inflateRaw(
 		total += value.byteLength;
 		if (total > maxBytes) {
 			await reader.cancel();
-			throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`);
+			throw tooLarge(maxBytes);
 		}
 		chunks.push(value);
 	}
@@ -54,7 +66,7 @@ export async function* inflateRawStream(
 			if (done) break;
 			total += value.byteLength;
 			if (total > maxBytes) {
-				throw new Error(`inflated output exceeds the expected ${maxBytes} bytes`);
+				throw tooLarge(maxBytes);
 			}
 			yield value;
 		}

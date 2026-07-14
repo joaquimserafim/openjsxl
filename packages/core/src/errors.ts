@@ -10,7 +10,7 @@ export type XlsxErrorCode =
 	| "corrupt-zip" // the ZIP structure is malformed, or an entry failed to inflate
 	| "unsupported" // a valid but unsupported feature (ZIP64, encryption, unknown method)
 	| "no-such-sheet" // the caller asked for a sheet name the workbook does not have
-	| "part-too-large" // a part's decompressed size exceeds the caller's maxPartBytes limit
+	| "part-too-large" // a part exceeds a size guard: the maxPartBytes ceiling, the compression-ratio cap, or a single unterminated XML construct's bound
 	| "invalid-input"; // (writer) a value or option passed to writeXlsx can't be represented in .xlsx
 
 export class XlsxError extends Error {

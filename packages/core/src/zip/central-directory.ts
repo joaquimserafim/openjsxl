@@ -41,6 +41,19 @@ const EOCD_MIN_SIZE = 22;
 const MAX_COMMENT = 0xffff;
 const ZIP64_SENTINEL = 0xffffffff;
 
+// ── Decompression-bomb defaults (F9.7) ─────────────────────────────────────────────────────────
+// A default read is safe against a hostile archive without the caller opting in. Two guards, both
+// caller-tunable (raise, or set to Infinity to disable):
+//   • an ABSOLUTE ceiling on any one part's output — the pathological single-huge-part backstop;
+//   • a compression-RATIO cap over a floor — catches a bomb (deflate reaches ~1000:1) early, while
+//     real spreadsheet XML (~10–50:1) and small high-ratio parts (under the floor) pass untouched.
+/** Absolute per-part output ceiling. Default 2 GiB; a part declaring/producing more fails typed. */
+export const DEFAULT_MAX_PART_BYTES = 2 * 1024 * 1024 * 1024;
+/** A part may not inflate to more than this multiple of its compressed size (above the floor). */
+export const DEFAULT_MAX_COMPRESSION_RATIO = 300;
+/** The ratio cap never applies below this output size, so a small part with a high ratio is fine. */
+export const RATIO_FLOOR_BYTES = 8 * 1024 * 1024;
+
 // The EOCD record sits at the very end, after an optional ≤64 KB comment. Scan backwards
 // for its signature and confirm the comment length lands exactly on the end of file (so a
 // signature appearing inside compressed data can't be mistaken for it).
@@ -54,13 +67,16 @@ function findEocd(view: DataView, len: number): number {
 	return -1;
 }
 
-export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }): ZipArchive {
+export function openZip(
+	bytes: Uint8Array,
+	options?: { maxPartBytes?: number; maxCompressionRatio?: number },
+): ZipArchive {
 	const len = bytes.byteLength;
 	const view = new DataView(bytes.buffer, bytes.byteOffset, len);
-	// An absolute ceiling on a single part's declared decompressed size, independent of the
-	// (attacker-controllable) uncompressedSize the inflate already caps at — a zip-bomb guard
-	// callers opt into. undefined ⇒ no ceiling beyond the declared size.
-	const maxPartBytes = options?.maxPartBytes;
+	// Zip-bomb guards (F9.7), applied by DEFAULT so a hostile archive is safe without opt-in.
+	// Pass a larger number to raise, or Number.POSITIVE_INFINITY to disable either guard.
+	const maxPartBytes = options?.maxPartBytes ?? DEFAULT_MAX_PART_BYTES;
+	const maxRatio = options?.maxCompressionRatio ?? DEFAULT_MAX_COMPRESSION_RATIO;
 
 	const eocd = findEocd(view, len);
 	if (eocd === -1) {
@@ -124,10 +140,15 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 		const entry = entries.get(name);
 		if (entry === undefined)
 			throw new XlsxError("missing-part", `zip entry not found: ${name}`);
-		if (maxPartBytes !== undefined && entry.uncompressedSize > maxPartBytes) {
+		// The part's OUTPUT size against the absolute ceiling. For a STORED entry the output is
+		// the compressedSize bytes we return (uncompressedSize is untrusted and can lie small —
+		// the pre-F9.7 gap that let a large stored part slip a maxPartBytes guard); for deflate it
+		// is the declared uncompressedSize (the inflate re-checks the ACTUAL size while streaming).
+		const declaredOutput = entry.method === 0 ? entry.compressedSize : entry.uncompressedSize;
+		if (declaredOutput > maxPartBytes) {
 			throw new XlsxError(
 				"part-too-large",
-				`zip part ${name} declares ${entry.uncompressedSize} bytes, over the ${maxPartBytes}-byte limit`,
+				`zip part ${name} declares ${declaredOutput} bytes, over the ${maxPartBytes}-byte limit`,
 			);
 		}
 		const header = entry.localHeaderOffset;
@@ -146,17 +167,30 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 		return { entry, payload: bytes.subarray(dataStart, dataStart + entry.compressedSize) };
 	}
 
+	// The tightest output cap for inflating `entry`: the declared size, the absolute ceiling, and
+	// the ratio limit (max of the floor and compressedSize × ratio). The inflate aborts typed as
+	// soon as the ACTUAL output would exceed it, so a bomb that lies about its size can't expand.
+	function inflateCap(entry: ZipEntry): number {
+		const ratioLimit = Math.max(RATIO_FLOOR_BYTES, entry.compressedSize * maxRatio);
+		return Math.min(entry.uncompressedSize, maxPartBytes, ratioLimit);
+	}
+
+	// A `part-too-large` abort from the inflate is a real size/bomb rejection — surface it as-is;
+	// any other inflate failure is a corrupt deflate stream.
+	function inflateError(name: string, cause: unknown): XlsxError {
+		if (cause instanceof XlsxError) return cause;
+		return new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, { cause });
+	}
+
 	async function read(name: string): Promise<Uint8Array> {
 		const { entry, payload } = locate(name);
 		if (entry.method === 0) return payload;
 		if (entry.method === 8) {
 			if (entry.compressedSize === 0) return new Uint8Array(0);
 			try {
-				return await inflateRaw(payload, entry.uncompressedSize);
+				return await inflateRaw(payload, inflateCap(entry));
 			} catch (cause) {
-				throw new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, {
-					cause,
-				});
+				throw inflateError(name, cause);
 			}
 		}
 		throw new XlsxError(
@@ -176,11 +210,9 @@ export function openZip(bytes: Uint8Array, options?: { maxPartBytes?: number }):
 		if (entry.method === 8) {
 			if (entry.compressedSize === 0) return;
 			try {
-				yield* inflateRawStream(payload, entry.uncompressedSize);
+				yield* inflateRawStream(payload, inflateCap(entry));
 			} catch (cause) {
-				throw new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, {
-					cause,
-				});
+				throw inflateError(name, cause);
 			}
 			return;
 		}

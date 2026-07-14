@@ -597,11 +597,24 @@ async function loadWorkbook(
 }
 
 /**
- * Reader options. `maxPartBytes` caps the declared decompressed size of any single part — a
- * zip-bomb guard independent of the archive's own (untrusted) size fields. Omit for no ceiling.
+ * Reader options — two zip-bomb guards, applied by DEFAULT so a hostile archive is safe without
+ * opt-in (F9.7). Pass a larger number to raise a guard, or `Number.POSITIVE_INFINITY` to disable it.
+ *
+ * - `maxPartBytes`: absolute ceiling on any one part's decompressed output (default 2 GiB). A part
+ *   that declares — or, while inflating, actually produces — more fails typed (`part-too-large`).
+ * - `maxCompressionRatio`: a part may not inflate to more than this multiple of its compressed size
+ *   (default 300), above an 8 MiB floor. Catches a decompression bomb (deflate reaches ~1000:1)
+ *   early, while real spreadsheet XML (measured ~10–33:1, even for the most repetitive sheets) and
+ *   small high-ratio parts pass untouched.
+ *
+ * Both guards apply to the constant-memory streaming path (`streamSheetRows`) too, so a *single*
+ * legitimately huge worksheet whose decompressed XML exceeds `maxPartBytes` (2 GiB) is rejected by
+ * default even when streamed — pass `maxPartBytes: Number.POSITIVE_INFINITY` to stream it (the ratio
+ * guard still protects against a bomb).
  */
 export interface ReadOptions {
 	readonly maxPartBytes?: number;
+	readonly maxCompressionRatio?: number;
 }
 
 export async function openXlsx(

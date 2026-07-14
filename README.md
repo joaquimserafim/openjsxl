@@ -84,7 +84,8 @@ import { readFile } from 'node:fs/promises';
 
 let wb;
 try {
-	// `maxPartBytes` caps any single decompressed part — an opt-in zip-bomb guard.
+	// Zip-bomb guards are ON by default (a 2 GiB per-part ceiling + a 300× compression-ratio
+	// cap); tighten or disable them per read — here, a stricter 50 MB ceiling.
 	wb = await openXlsx(await readFile('report.xlsx'), { maxPartBytes: 50_000_000 });
 } catch (err) {
 	if (err instanceof XlsxError) {
