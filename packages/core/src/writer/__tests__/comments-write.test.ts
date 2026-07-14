@@ -285,11 +285,17 @@ describe("writeXlsx — comment validation", () => {
 		await reject([{ ref: "A1", text: "x", author: 5 }], /author must be a string/);
 	});
 
-	it("rejects XML-unsafe text and author (control chars / lone surrogates)", async () => {
-		await reject(
-			[{ ref: "A1", text: "bad\u0001text" }],
-			/text contains a character not allowed in XML/,
-		);
+	it("stores XML-unsafe text via the ST_Xstring escape; the author still rejects (F9.6)", async () => {
+		// Comment TEXT is string content — a control char now stores as _xHHHH_ (the convention
+		// Excel decodes) and round-trips. The AUTHOR stays identifier-strict: typed rejection.
+		const bytes = await writeXlsx({
+			sheets: [
+				{ name: "S", rows: [["v"]], comments: [{ ref: "A1", text: "bad\u0001text" }] },
+			],
+		});
+		expect(await part(bytes, "xl/comments1.xml")).toContain("bad_x0001_text");
+		const wb = await openXlsx(bytes);
+		expect(wb.sheet("S").comments).toEqual([{ ref: "A1", text: "bad\u0001text" }]);
 		await reject(
 			[{ ref: "A1", text: "ok", author: "bad\u0001author" }],
 			/author contains a character not allowed in XML/,

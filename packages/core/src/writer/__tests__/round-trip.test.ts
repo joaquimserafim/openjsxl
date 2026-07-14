@@ -99,3 +99,21 @@ describe("round-trip — golden wire format", () => {
 		);
 	});
 });
+
+describe("round-trip — the README read→modify→write snippet (F9.6)", () => {
+	it("appends a row via non-mutating spread (WorkbookInput is deeply readonly)", async () => {
+		// This mirrors the READMEs' modify-flow snippet EXACTLY — it living here means the repo's
+		// tsc gate type-checks the documented pattern (the old `.push` version failed TS2339).
+		const wb = await openXlsx(
+			await writeXlsx({ sheets: [{ name: "Sheet1", rows: [["a", 1]] }] }),
+		);
+		const input = await workbookToInput(wb);
+		const sheets = input.sheets.map((sheet, i) =>
+			i === 0 ? { ...sheet, rows: [...sheet.rows, ["appended", "row"]] } : sheet,
+		);
+		const out = await openXlsx(await writeXlsx({ ...input, sheets }));
+		expect(out.sheet("Sheet1").cell("A2").value).toBe("appended");
+		expect(out.sheet("Sheet1").cell("B2").value).toBe("row");
+		expect(out.sheet("Sheet1").cell("A1").value).toBe("a"); // original data intact
+	});
+});

@@ -145,8 +145,12 @@ await writeFile('report.xlsx', bytes); // opens cleanly in Excel and LibreOffice
 
 The output is deterministic (identical input → identical bytes), strings are written inline (no
 shared-strings table), and input the format can't represent — no sheets, a bad or duplicate sheet
-name, a non-finite number, an invalid `Date`, or a string with XML-illegal characters — throws a
-typed `XlsxError` with `code: 'invalid-input'` rather than producing a file Excel must repair.
+name, a non-finite number, an invalid `Date` — throws a typed `XlsxError` with
+`code: 'invalid-input'` rather than producing a file Excel must repair. String *content* never
+throws: characters XML can't carry (control chars, lone surrogates) are stored with the same
+`_xHHHH_` escape Excel uses, so they round-trip instead of corrupting or rejecting.
+An optional second argument `writeXlsx(input, { date1904: true })` selects the 1904 date epoch
+(legacy Mac workbooks); dates are 1900-epoch by default.
 
 ### Styles & layout (0.4)
 
@@ -247,8 +251,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 const wb = await openXlsx(await readFile('in.xlsx'));
 const input = await workbookToInput(wb);
-input.sheets[0].rows.push(['appended', 'row']); // tweak the plain data
-await writeFile('out.xlsx', await writeXlsx(input));
+const sheets = input.sheets.map((sheet, i) =>
+	i === 0 ? { ...sheet, rows: [...sheet.rows, ['appended', 'row']] } : sheet,
+); // tweak the plain data (the input is deeply readonly — spread, don't mutate)
+await writeFile('out.xlsx', await writeXlsx({ ...input, sheets }));
 ```
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
@@ -259,7 +265,8 @@ pictures, geometry, structural metadata, tables, data validation, and conditiona
 | string, number, boolean, `Date` values | error cells without a formula (written as their text) |
 | number formats — built-in & custom codes | absolute-anchored pictures & non-picture drawings (shapes, charts) — skipped on read |
 | fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
-| colors: rgb, indexed, theme + tint (raw) | |
+| colors: rgb, indexed, theme + tint (raw) | defined names / named ranges — read (`Workbook.definedNames`) but dropped on write, so a formula like `=Total*2` recalculates as `#NAME?` |
+| control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
 | custom theme part (carried byte-identical) | |
 | formula text + cached value | |
 | comments (author + text, Excel-visible) | |

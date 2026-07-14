@@ -56,6 +56,16 @@ describe("parseComments — units", () => {
 	it("is empty when there are no comments", () => {
 		expect(parseComments("<comments><authors/><commentList/></comments>")).toEqual([]);
 	});
+
+	it("decodes ST_Xstring escapes in comment text, per <t> run (F9.6)", () => {
+		const xml =
+			"<comments><authors><author>A</author></authors><commentList>" +
+			'<comment ref="A1" authorId="0"><text><t>a_x000B_b</t></text></comment>' +
+			'<comment ref="B1" authorId="0"><text><t>_x005F_x0041_</t></text></comment>' + // protected literal
+			'<comment ref="C1" authorId="0"><text><r><t>_x00</t></r><r><t>41_</t></r></text></comment>' + // no straddle
+			"</commentList></comments>";
+		expect(parseComments(xml).map((c) => c.text)).toEqual(["a\x0Bb", "_x0041_", "_x0041_"]);
+	});
 });
 
 describe("Worksheet.comments — no comments part", () => {

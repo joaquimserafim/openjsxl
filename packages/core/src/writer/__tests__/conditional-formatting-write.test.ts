@@ -249,6 +249,16 @@ describe("writeXlsx — conditional formatting rejects malformed input (typed)",
 		]);
 		await rejects([{ sqref: ["A1"], rules: [] }]);
 	});
+	it("rejects a rule with more than MAX_CF_FORMULAS formulas (CT_CfRule maxOccurs=3, F9.6)", async () => {
+		// The tolerant reader IGNORES the excess (shared bound) — the strict writer refuses it, so
+		// neither side emits a schema-invalid rule Excel would repair-prompt on.
+		await rejects([
+			{
+				sqref: ["A1"],
+				rules: [{ type: "expression", priority: 1, formulas: ["1", "2", "3", "4"] }],
+			},
+		]);
+	});
 	it("rejects out-of-count graphical rules (decision-5 cfvo/color bounds — Excel repair guard)", async () => {
 		// colorScale: needs 2-3 cfvo + equal colors.
 		await rejects([

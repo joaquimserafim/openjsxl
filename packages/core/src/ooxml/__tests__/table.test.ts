@@ -17,13 +17,20 @@ describe("tableNameProblem — the shared table-name legality rule", () => {
 		}
 	});
 
+	it("accepts Unicode-letter starts — non-English Excel locales auto-name tables this way (F9.6)", () => {
+		for (const ok of ["Таблица1", "テーブル1", "データ", "Ünïcode", "表1"]) {
+			expect(tableNameProblem(ok)).toBeUndefined();
+		}
+	});
+
 	it("classifies each illegal name by its FIRST broken rule (writer's check order)", () => {
 		expect(tableNameProblem("")).toBe("empty");
 		expect(tableNameProblem("a".repeat(MAX_TABLE_NAME_LEN + 1))).toBe("too-long");
 		expect(tableNameProblem("a\x01b")).toBe("not-xml-safe");
 		expect(tableNameProblem("My Table")).toBe("whitespace");
 		expect(tableNameProblem("1abc")).toBe("bad-start");
-		expect(tableNameProblem("データ")).toBe("bad-start"); // rule is ASCII-start only (pre-existing)
+		expect(tableNameProblem("①abc")).toBe("bad-start"); // a Unicode DIGIT is not a letter
+		expect(tableNameProblem("😀data")).toBe("bad-start"); // an emoji is not a letter
 		expect(tableNameProblem("A1")).toBe("cell-ref");
 		expect(tableNameProblem("ABC12")).toBe("cell-ref");
 		expect(tableNameProblem("C")).toBe("cell-ref");
@@ -33,7 +40,16 @@ describe("tableNameProblem — the shared table-name legality rule", () => {
 
 describe("normalizeTableName — repair an illegal name into a legal identifier (F9.5)", () => {
 	it("returns an already-legal name UNCHANGED (clean files stay byte-identical)", () => {
-		for (const ok of ["Table1", "Sales", "_hidden", "\\weird", "T"]) {
+		for (const ok of [
+			"Table1",
+			"Sales",
+			"_hidden",
+			"\\weird",
+			"T",
+			"Таблица1",
+			"テーブル1",
+			"データ",
+		]) {
 			expect(normalizeTableName(ok)).toBe(ok);
 		}
 	});
@@ -42,7 +58,7 @@ describe("normalizeTableName — repair an illegal name into a legal identifier 
 		expect(normalizeTableName("My Table")).toBe("My_Table"); // whitespace → _
 		expect(normalizeTableName("A1")).toBe("A1_"); // cell-ref broken with trailing _
 		expect(normalizeTableName("1abc")).toBe("_1abc"); // bad start prefixed
-		expect(normalizeTableName("データ")).toBe("_データ"); // non-ASCII start prefixed, body kept
+		expect(normalizeTableName("😀data")).toBe("_😀data"); // non-letter start prefixed, body kept
 		expect(normalizeTableName("C")).toBe("C_"); // reserved bare C
 		expect(normalizeTableName("")).toBe("_"); // empty → a legal placeholder
 	});
@@ -158,6 +174,20 @@ describe("parseTable — units", () => {
 		]);
 	});
 
+	it("decodes ST_Xstring escapes in displayName, column names, and totalsRowLabel (F9.6)", () => {
+		// These attributes are ST_Xstring like the header cells they mirror — Excel and openpyxl
+		// both decode them, so the stored `_x005F_x0041_` IS the name `_x0041_`.
+		const t = parseTable(
+			`<table ${NS} name="_x005F_x0041_" displayName="_x005F_x0041_" ref="A1:B3"><tableColumns count="2">` +
+				'<tableColumn name="_x005F_x0041_"/>' +
+				'<tableColumn name="B" totalsRowLabel="Sum_x000B_"/>' +
+				"</tableColumns></table>",
+		);
+		expect(t?.name).toBe("_x0041_"); // decoded, and still a legal identifier — kept verbatim
+		expect(t?.columns[0]?.name).toBe("_x0041_");
+		expect(t?.columns[1]?.totalsRowLabel).toBe("Sum\x0B");
+	});
+
 	it("returns undefined when name or ref is missing (the reader drops it)", () => {
 		expect(parseTable(`<table ${NS} ref="A1:B2"/>`)).toBeUndefined(); // no name
 		expect(parseTable(`<table ${NS} name="T" displayName="T"/>`)).toBeUndefined(); // no ref
@@ -234,5 +264,15 @@ describe("tables — verbatim read of a real Excel fixture", () => {
 				},
 			},
 		]);
+	});
+
+	it("reads a Unicode table name VERBATIM from openpyxl-table-unicode.xlsx (F9.6)", async () => {
+		// A non-English Excel locale's default table name ("Таблица1") is a LEGAL identifier — the
+		// pre-F9.6 ASCII-only rule mangled it to "_Таблица1", silently breaking structured refs.
+		const book = await openXlsx(await loadFixture("openpyxl-table-unicode.xlsx"));
+		const table = book.sheet("Sheet1").tables[0];
+		expect(table?.name).toBe("Таблица1");
+		expect(table?.ref).toBe("A1:C3");
+		expect(table?.columns.map((c) => c.name)).toEqual(["Товар", "Кол-во", "Город"]);
 	});
 });

@@ -13,6 +13,7 @@ import {
 	dataBarCountsOk,
 	iconSetCount,
 	iconSetCountsOk,
+	MAX_CF_FORMULAS,
 } from "../ooxml/conditional-formatting";
 import {
 	DATA_VALIDATION_ERROR_STYLES,
@@ -30,6 +31,7 @@ import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
 import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
+import { encodeXstring } from "../ooxml/xstring";
 import type {
 	ColumnProps,
 	Comment,
@@ -163,15 +165,13 @@ function renderCell(
 		return xf === 0 ? undefined : `<c r="${ref}"${sAttr}/>`;
 	}
 	if (typeof value === "string") {
-		// A forbidden control character or lone surrogate would make the part not well-formed (or be
-		// silently mangled to U+FFFD by TextEncoder) — reject rather than emit a broken/lossy file.
-		if (!isXmlSafe(value)) {
-			throw new XlsxError(
-				"invalid-input",
-				`cell ${ref}: string contains a character not allowed in XML (a control character or lone surrogate)`,
-			);
-		}
-		return `<c r="${ref}"${sAttr} t="inlineStr"><is><t${preserveAttr(value)}>${escapeText(value)}</t></is></c>`;
+		// String content is ST_Xstring (F9.6): characters XML cannot carry (controls, lone
+		// surrogates) store as `_xHHHH_`, and a literal look-alike is protected as `_x005F_…` —
+		// the convention Excel/openpyxl decode on load. A clean string passes through unchanged
+		// (byte-identity); nothing is rejected here anymore, so whatever string a reader returns
+		// (xlsx escape, raw xlsb/csv control char) writes losslessly.
+		const stored = encodeXstring(value);
+		return `<c r="${ref}"${sAttr} t="inlineStr"><is><t${preserveAttr(stored)}>${escapeText(stored)}</t></is></c>`;
 	}
 	if (typeof value === "boolean") {
 		return `<c r="${ref}"${sAttr} t="b"><v>${value ? 1 : 0}</v></c>`;
@@ -202,13 +202,10 @@ function cachedValueXml(
 ): { readonly tAttr: string; readonly vXml: string } {
 	if (value === null || value === undefined) return { tAttr: "", vXml: "" };
 	if (typeof value === "string") {
-		if (!isXmlSafe(value)) {
-			throw new XlsxError(
-				"invalid-input",
-				`cell ${ref}: cached string contains a character not allowed in XML (a control character or lone surrogate)`,
-			);
-		}
-		return { tAttr: ' t="str"', vXml: `<v>${escapeText(value)}</v>` };
+		// A cached formula string's <v> is ST_Xstring too — encode, don't reject (F9.6), so a
+		// cached result the reader decoded (or any API string) round-trips instead of aborting.
+		const stored = encodeXstring(value);
+		return { tAttr: ' t="str"', vXml: `<v>${escapeText(stored)}</v>` };
 	}
 	if (typeof value === "boolean") return { tAttr: ' t="b"', vXml: `<v>${value ? 1 : 0}</v>` };
 	if (typeof value === "number") {
@@ -1075,6 +1072,7 @@ function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
 	if (raw === undefined) return "";
 	if (!Array.isArray(raw)) sheetInvalid(sheetName, `${what}.formulas must be an array`);
 	let out = "";
+	let emitted = 0;
 	for (let i = 0; i < raw.length; i++) {
 		const f = raw[i] as unknown;
 		if (typeof f !== "string")
@@ -1086,6 +1084,11 @@ function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
 				sheetName,
 				`${what}.formulas[${i}] contains a character not allowed in XML`,
 			);
+		}
+		// CT_CfRule allows at most MAX_CF_FORMULAS <formula> children — the shared bound the
+		// tolerant reader also enforces (it ignores the excess; the writer refuses, F9.6).
+		if (++emitted > MAX_CF_FORMULAS) {
+			sheetInvalid(sheetName, `${what} has more than ${MAX_CF_FORMULAS} formulas`);
 		}
 		out += `<formula>${escapeText(stored)}</formula>`;
 	}
@@ -1165,15 +1168,12 @@ function commentsParts(
 				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell within Excel's grid`,
 			);
 		}
-		// text is required (the reader always yields one, possibly empty) and must be XML-safe.
-		const text = raw.text;
-		if (typeof text !== "string") sheetInvalid(sheetName, `${what}.text must be a string`);
-		if (!isXmlSafe(text)) {
-			sheetInvalid(
-				sheetName,
-				`${what}.text contains a character not allowed in XML (a control character or lone surrogate)`,
-			);
-		}
+		// text is required (the reader always yields one, possibly empty). Comment text is
+		// ST_Xstring content like cell strings: XML-unsafe characters and literal `_xHHHH_`
+		// look-alikes store via the escape (F9.6) instead of rejecting — clean text unchanged.
+		const rawText = raw.text;
+		if (typeof rawText !== "string") sheetInvalid(sheetName, `${what}.text must be a string`);
+		const text = encodeXstring(rawText);
 		// author is optional; an absent author shares the single empty-string author entry.
 		const rawAuthor = raw.author;
 		let key: string;
@@ -1408,12 +1408,9 @@ export function buildTables(
 					);
 				} else columnName = `Column${c + 1}`;
 			}
-			if (!isXmlSafe(columnName)) {
-				sheetInvalid(
-					sheetName,
-					`${what} column ${c + 1} name has a character not allowed in XML`,
-				);
-			}
+			// No XML-safety rejection here: a column name is ST_Xstring like its header cell (the
+			// reader decodes both), so it EMITS through the same encodeXstring — the two decoded
+			// views must match or Excel repair-prompts (F9.6 review fix). Dedup on the model value.
 			const key = columnName.toLowerCase();
 			if (seen.has(key)) {
 				sheetInvalid(
@@ -1455,8 +1452,12 @@ export function buildTables(
 		// Table-wide highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs> table.
 		const tableDxf = tableDxfAttrs(styles, what, raw);
 		const styleXml = tableStyleInfoXml(sheetName, what, raw.style);
+		// name/displayName are ST_Xstring — encode so a legal name that LOOKS like an escape
+		// (`_x0041_`) reads back as itself in Excel/openpyxl (both decode table names). A name
+		// with nothing to protect is unchanged (byte-identity).
+		const storedName = encodeXstring(name);
 		const xml =
-			`${XML_DECL}\n<table xmlns="${NS_MAIN}" id="${number}" name="${escapeAttr(name)}" displayName="${escapeAttr(name)}" ref="${ref}"${headerAttr}${totalsAttr}${tableDxf}>` +
+			`${XML_DECL}\n<table xmlns="${NS_MAIN}" id="${number}" name="${escapeAttr(storedName)}" displayName="${escapeAttr(storedName)}" ref="${ref}"${headerAttr}${totalsAttr}${tableDxf}>` +
 			`${autoFilter}<tableColumns count="${width}">${columnXmls.join("")}</tableColumns>${styleXml}</table>`;
 		parts.push({ number, xml });
 	}
@@ -1478,6 +1479,8 @@ function tableDxfAttrs(styles: StyleRegistry, what: string, raw: Record<string, 
 
 // One <tableColumn>. Names are validated by the caller; the optional totals-row label/function and the
 // totals/calculated formulas are carried from the caller's TableColumn verbatim (never evaluated).
+// @name and @totalsRowLabel are ST_Xstring (like the header cell they mirror) — encoded, so the
+// decoded views agree in Excel; the function/formulas are NOT xstrings and stay strict.
 function tableColumnXml(
 	sheetName: string,
 	what: string,
@@ -1486,7 +1489,7 @@ function tableColumnXml(
 	provided: Record<string, unknown> | undefined,
 	styles: StyleRegistry,
 ): string {
-	let attrs = ` id="${id}" name="${escapeAttr(name)}"`;
+	let attrs = ` id="${id}" name="${escapeAttr(encodeXstring(name))}"`;
 	let children = "";
 	if (provided !== undefined) {
 		checkKeys(sheetName, `${what} column`, provided, [
@@ -1502,8 +1505,11 @@ function tableColumnXml(
 		// Per-column highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs>.
 		attrs += tableDxfAttrs(styles, `${what} column ${id}`, provided);
 		const label = provided.totalsRowLabel;
-		if (label !== undefined)
-			attrs += ` totalsRowLabel="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowLabel`, label))}"`;
+		if (label !== undefined) {
+			if (typeof label !== "string")
+				sheetInvalid(sheetName, `${what} totalsRowLabel must be a string`);
+			attrs += ` totalsRowLabel="${escapeAttr(encodeXstring(label))}"`;
+		}
 		const fn = provided.totalsRowFunction;
 		if (fn !== undefined)
 			attrs += ` totalsRowFunction="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowFunction`, fn))}"`;

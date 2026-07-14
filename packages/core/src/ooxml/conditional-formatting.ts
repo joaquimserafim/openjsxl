@@ -144,6 +144,13 @@ function cfvoFrom(attrs: Readonly<Record<string, string>>): Cfvo {
 	return cfvo;
 }
 
+/**
+ * The most `<formula>` operands one cfRule can carry (CT_CfRule: `maxOccurs="3"` — e.g. `between`
+ * needs 2). Single-sourced (F9.6): the tolerant reader IGNORES the 4th+ formula of a malformed rule,
+ * the strict writer REJECTS one, so neither side emits a schema-invalid rule Excel would repair.
+ */
+export const MAX_CF_FORMULAS = 3;
+
 // Shared cfvo/color count bounds (decision 5) — the reader DROPS a graphical rule that violates them,
 // the writer REJECTS one, so neither side can produce a schema-invalid <colorScale>/<dataBar>/<iconSet>
 // that Excel would repair-prompt on.
@@ -298,7 +305,10 @@ export function parseConditionalFormatting(
 			if (name === "formula") {
 				if (inFormula) {
 					const f = storedFormula(formulaText);
-					if (f !== undefined) rule.formulas.push(f);
+					// The 4th+ formula of a malformed rule is ignored (shared MAX_CF_FORMULAS bound,
+					// F9.6) — the writer rejects a rule carrying more, so a tolerated file still writes.
+					if (f !== undefined && rule.formulas.length < MAX_CF_FORMULAS)
+						rule.formulas.push(f);
 				}
 				inFormula = false;
 			} else if (name === "colorScale" || name === "dataBar" || name === "iconSet") {

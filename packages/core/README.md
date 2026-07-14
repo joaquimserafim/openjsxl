@@ -67,10 +67,12 @@ const bytes = await writeXlsx({
 	],
 });
 
-// Or read → modify → write.
+// Or read → modify → write (the input is deeply readonly — spread, don't mutate).
 const input = await workbookToInput(await openXlsx(bytes));
-input.sheets[0].rows.push(['Pears', new Date('2024-02-01')]);
-const updated = await writeXlsx(input);
+const sheets = input.sheets.map((sheet, i) =>
+	i === 0 ? { ...sheet, rows: [...sheet.rows, ['Pears', new Date('2024-02-01')]] } : sheet,
+);
+const updated = await writeXlsx({ ...input, sheets });
 ```
 
 Cells can carry styles (`{ value, style }` — the same shape `style(ref)` returns) or formulas
@@ -83,11 +85,15 @@ png, jpeg, gif, bmp, tiff, webp, emf, wmf; identical bytes dedupe into one media
 huge exports, `streamXlsx` accepts the same input shape with each sheet's `rows` as any
 sync/async iterable and returns a `ReadableStream` — roughly constant memory at any row count
 (constant in *rows*; embedded image bytes are held, by reference, until the media parts flush
-at stream end). Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet
-name, non-finite number, invalid `Date`, XML-illegal characters, malformed or overlapping
-merges) throws `XlsxError` with `code: 'invalid-input'`. The round trip is lossless for values,
-types, sheet names/order, styles, formulas, comments, pictures, custom themes, geometry,
-merges, hyperlinks, visibility, tables, data validations, and conditional formatting.
+at stream end). `writeXlsx(input, { date1904: true })` selects the legacy 1904 date epoch.
+Output is deterministic; unrepresentable input (no sheets, bad/duplicate sheet name,
+non-finite number, invalid `Date`, malformed or overlapping merges) throws `XlsxError` with
+`code: 'invalid-input'` — string *content* never throws: XML-illegal characters (controls,
+lone surrogates) store via the `_xHHHH_` escape Excel itself uses, and round-trip. The round
+trip is lossless for values, types, sheet names/order, styles, formulas, comments, pictures,
+custom themes, geometry, merges, hyperlinks, visibility, tables, data validations, and
+conditional formatting; defined names are read (`Workbook.definedNames`) but not carried on
+write, and in-cell rich text flattens to plain text.
 
 ## Other formats (read-only)
 

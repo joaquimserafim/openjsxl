@@ -428,3 +428,47 @@ describe("writeXlsx — tables: carried column name fallback (F9.5)", () => {
 		});
 	});
 });
+
+describe("writeXlsx — table names/columns are ST_Xstring, consistent with the header cells (F9.6)", () => {
+	it("encodes a literal _xHHHH_ identically in the header cell and the tableColumn name", async () => {
+		// Excel decodes BOTH views; if only the cell were encoded, the decoded column name would
+		// diverge from its decoded header cell and Excel repair-prompts (adversarial-review fix).
+		const sheet: SheetInput = {
+			name: "S",
+			rows: [["_x0041_"], ["v"]],
+			tables: [
+				{ name: "_x0041_", ref: "A1:A2", columns: [], headerRow: true, totalsRow: false },
+			],
+		};
+		const bytes = await writeXlsx({ sheets: [sheet] });
+		const sheetXml = decoder.decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
+		const tableXml = decoder.decode(await openZip(bytes).read("xl/tables/table1.xml"));
+		expect(sheetXml).toContain("<t>_x005F_x0041_</t>"); // the cell, encoded
+		expect(tableXml).toContain('name="_x005F_x0041_"'); // the column name, encoded the SAME way
+		expect(tableXml).toContain('displayName="_x005F_x0041_"'); // and the table name
+		// Our reader decodes all three back — the model round-trips verbatim.
+		const ws = (await openXlsx(bytes)).sheet("S");
+		expect(ws.cell("A1").value).toBe("_x0041_");
+		expect(ws.tables[0]?.name).toBe("_x0041_");
+		expect(ws.tables[0]?.columns[0]?.name).toBe("_x0041_");
+	});
+
+	it("accepts a control char in a header cell / column name and totalsRowLabel (encodes, no reject)", async () => {
+		const sheet: SheetInput = {
+			name: "S",
+			rows: [["col\x0Bone"], ["v"], [null]],
+			tables: [
+				{
+					name: "Tbl",
+					ref: "A1:A3",
+					columns: [{ name: "col\x0Bone", totalsRowLabel: "sum\x0B" }],
+					headerRow: true,
+					totalsRow: true,
+				},
+			],
+		};
+		const ws = await roundTrip(sheet); // pre-fix: typed reject on the column name
+		expect(ws.tables[0]?.columns[0]?.name).toBe("col\x0Bone");
+		expect(ws.tables[0]?.columns[0]?.totalsRowLabel).toBe("sum\x0B");
+	});
+});

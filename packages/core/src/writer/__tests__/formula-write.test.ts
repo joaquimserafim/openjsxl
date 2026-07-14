@@ -73,8 +73,12 @@ describe("writeXlsx — formula validation", () => {
 		await reject({ formula: `A1${String.fromCharCode(1)}` }, /not allowed in XML/);
 	});
 
-	it("rejects a cached string result that isn't XML-safe", async () => {
-		await reject({ formula: "A1", value: `x${String.fromCharCode(1)}` }, /cached string/);
+	it("stores an XML-unsafe cached string result via the ST_Xstring escape (F9.6)", async () => {
+		// Used to reject typed; a cached formula string's <v> is ST_Xstring content, so the
+		// control char now escapes as _xHHHH_ and round-trips (the formula itself stays strict).
+		const s = await roundtrip({ formula: "A1", value: `x${String.fromCharCode(1)}` });
+		expect(s.formula("A1")).toBe("A1");
+		expect(s.cell("A1").value).toBe(`x${String.fromCharCode(1)}`);
 	});
 
 	it("reads a value-flipping formula getter exactly once (TOCTOU)", async () => {

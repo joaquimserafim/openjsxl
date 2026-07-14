@@ -2,7 +2,7 @@ import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { openXlsx } from "../../reader/workbook";
 import type { DxfStyle } from "../../types";
-import { parseConditionalFormatting } from "../conditional-formatting";
+import { MAX_CF_FORMULAS, parseConditionalFormatting } from "../conditional-formatting";
 import { parseDxfs } from "../dxf";
 
 // F9.3 — differential styles + conditional-formatting parser units.
@@ -184,6 +184,22 @@ describe("parseConditionalFormatting — rules + dxf resolution", () => {
 		);
 		const rule = block?.rules[0];
 		expect(rule?.type === "expression" ? rule.formulas : undefined).toEqual(["A1>0"]);
+	});
+
+	it("ignores the 4th+ formula of a malformed rule (shared MAX_CF_FORMULAS bound, F9.6)", () => {
+		// CT_CfRule allows ≤ 3 <formula> children; a hostile/malformed rule carrying more must still
+		// come back writer-legal (the writer rejects > MAX_CF_FORMULAS — shared bound).
+		const [block] = parseConditionalFormatting(
+			sheet(
+				'<conditionalFormatting sqref="A1"><cfRule type="expression" priority="1">' +
+					"<formula>1</formula><formula>2</formula><formula>3</formula><formula>4</formula><formula>5</formula>" +
+					"</cfRule></conditionalFormatting>",
+			),
+			DXFS,
+		);
+		const rule = block?.rules[0];
+		expect(rule?.type === "expression" ? rule.formulas : undefined).toEqual(["1", "2", "3"]);
+		expect(MAX_CF_FORMULAS).toBe(3); // the schema's maxOccurs — pinned so both sides move together
 	});
 });
 

@@ -2319,6 +2319,218 @@ follow-ups if a real file ever surfaces one.
 
 ---
 
+### F9.6 — Round-trip corruption fixes + docs honesty ☑
+**Where this came from.** A 4-agent overall review (2026-07-14; security + correctness + feature
+lenses, each finding adversarially verified against the code). It confirmed the shared-bounds
+architecture, TOCTOU discipline, element order, determinism and injection-safety are all real — but
+surfaced a handful of *silent-corruption* and *docs-honesty* gaps in the M9 features and the shipped
+READMEs. F9.6 closes the ones that are pure fixes (no behaviour-change decision needed); the
+resource-exhaustion gaps go to F9.7. Nothing here relaxes an invariant — each item makes a currently
+silent wrong-output either correct, typed-fail, or a *documented* degradation.
+
+**The problems, plainly.**
+1. **Non-ASCII table names get mangled (silent corruption, verified HIGH).** `tableNameProblem`'s
+   first-char rule is `/^[A-Za-z_\\]/` — ASCII-only — but Excel/ECMA-376 defined-name grammar allows
+   Unicode letters, and non-English Excel locales auto-name tables `Таблица1` / `テーブル1`. The reader
+   sees `bad-start`, normalizes to `_Таблица1`, and a read→save **succeeds silently** while formula
+   text still carries `Таблица1[Col]` structured refs → `#NAME?` in Excel. Also a latent byte-identity
+   break: a clean Unicode-named table is NOT emitted byte-for-byte. Contradicts F9.5's "Excel-authored
+   tables unaffected" acceptance (it held only for ASCII names).
+2. **`_xHHHH_` (ST_Xstring) escape convention unimplemented, both directions (verified MEDIUM).** OOXML
+   string content (`<t>` in shared/inline strings, comment text) uses `_xHHHH_` to encode characters:
+   Excel/openpyxl decode `_x0041_` → `"A"` on load. openjsxl emits string content verbatim, so writing
+   a cell whose value literally contains `_x0041_` produces a file Excel reads as `A` — silent
+   alteration for any data pre-escaped by another system, masked by our own reader round-tripping it.
+   Reader direction: an Excel file storing a control char as `_x000B_` reads back as the 7-char literal.
+3. **cfRule `<formula>` count unbounded on both sides (verified MEDIUM).** `CT_CfRule` allows ≤ 3
+   `<formula>` children; the reader pushes every one it sees and the writer emits every one it's given,
+   with no cap — so a 4-formula rule (hostile file OR API caller) reads fine and re-emits
+   schema-invalid worksheet XML (Excel repair-prompt). The exact shared-bounds gap F9.5 closed for
+   tables; DV's `MAX_SQREF_RANGES` and CF's cfvo/color counts already enforce their limits.
+4. **`uniquifyTableName` can slice mid-surrogate-pair (verified LOW — a live F9.5 bug).** On a
+   collision it does `name.slice(0, MAX - suffix.length) + suffix`; `String.slice` cuts at UTF-16
+   code units, so a near-255-unit name cut inside an astral char leaves a lone surrogate →
+   `tableNameProblem` reports `not-xml-safe` → the whole `writeXlsx` aborts typed. That is exactly the
+   bridge-abort the dedup exists to *prevent*. `normalizeTableName` has the same slice but is saved by
+   its `… === undefined ? s : "Table"` fallback; `uniquifyTableName` has no such re-check.
+5. **Docs-honesty gaps (verified; several downgraded to LOW but all real).**
+   - **Defined names silently dropped + not documented (verified HIGH-as-corruption, LOW-as-fix).**
+     The reader exposes `Workbook.definedNames` (public `DefinedName`) and the evaluator resolves them,
+     but the writer has no way to emit them and the bridge drops them. A named-range workbook
+     round-trips with formula text intact but no `<definedNames>` → `#NAME?` on recalc. The root README
+     round-trip table presents its "Not carried (yet)" column as complete and never mentions them.
+     *F9.6 scope = DOCUMENT it as a named degradation* (removes the "silent" half); actually carrying
+     defined names across the bridge is a real new writer capability → its own future feature (below).
+   - **In-cell rich text flattened, not listed.** Shared-string per-run formatting is concatenated to
+     plain text on read (values survive, formatting lost) — documented in a code comment but absent
+     from every README's not-carried column.
+   - **Flagship README snippet doesn't compile.** The root + core README `read→modify→write` example
+     does `input.sheets[0].rows.push(...)`, but `WorkbookInput` is deeply `readonly` → TS2339. Loud,
+     not silent, but embarrassing for a "TypeScript-first" lib. Fix: non-mutating spread in the docs
+     (do NOT widen the writer's input type — `readonly` is deliberate).
+   - **Stale image-mime jsdoc.** `SheetInput.images` jsdoc + the bridge fidelity comment say the
+     allowlist is png/jpeg/gif; the real `MEDIA_MIME_TO_EXT` (and all three READMEs) list 8 types.
+   - **`WriteOptions.date1904` undocumented** in every README/example.
+
+**The fixes.**
+- **Name grammar → Unicode letters, single-sourced.** In `ooxml/table.ts`, change the first-char test
+  (in BOTH `tableNameProblem` and `normalizeTableName`) from `[A-Za-z_\\]` to `[\p{L}_\\]/u`.
+  `CELL_REF_NAME` stays ASCII (cell refs *are* ASCII, so `Таблица1` correctly isn't flagged). Reader
+  and writer move together (one edit, both sides). *Decision — keep it minimal:* match Excel's
+  practical rule (Unicode letters + `_` `\` start; letters/digits/`.`/`_` body already permitted via
+  isXmlSafe + no-whitespace). Not attempting Excel's full Unicode-category exactness.
+- **ST_Xstring escaping, shared helper.** Add `encodeXstring`/`decodeXstring` in `utils/` (or
+  `ooxml/`). `decodeXstring`: replace `/_x([0-9A-Fa-f]{4})_/` with the code point (incl. `_x005F_`→`_`).
+  `encodeXstring`: escape a literal `_x` that begins an `_xHHHH_`-shaped run as `_x005F_…`. Apply
+  decode on read at the three string-content sites (shared strings, inline `<t>`, comment text); apply
+  encode on write at the matching emit sites. **Decision to confirm:** *(A) collision-escape only* —
+  handle the `_xHHHH_` literal collision so data survives, leave `isXmlSafe`'s control-char rejection
+  as-is (minimal, no shared-bounds change, fixes the common write-corruption case); vs *(B) full
+  ST_Xstring* — also decode control chars on read AND emit them via escape on write, which means
+  relaxing `isXmlSafe` rejection *for string cell/comment content only* (identifiers keep rejecting) so
+  the writer accepts what the reader now returns (shared-bounds requirement). **Recommend (B)** — a
+  partial ST_Xstring (decode `_x005F_` but not `_x000B_`) is precisely the reader-returns /
+  writer-rejects asymmetry this repo bans — but structure the tasks so (A) lands first as an
+  independently-correct increment. Byte-identity: strings not matching the pattern are emitted
+  unchanged (only affected fixtures move; corpus property + goldens re-pinned).
+- **cf-formula cap, single-sourced.** Add `MAX_CF_FORMULAS = 3` (in `ooxml/conditional-formatting.ts`,
+  imported by the writer): reader truncates/drops the 4th+, writer rejects typed — mirroring
+  `MAX_SQREF_RANGES`.
+- **`uniquifyTableName` surrogate fix.** Re-check the candidate with `tableNameProblem` and fall back
+  to a code-point-safe slice (or the `"Table"` fallback) so a collision can never abort the write.
+- **Docs.** Add *defined names (dropped)* and *in-cell rich text (flattened)* to the "Not carried
+  (yet)" column in all three READMEs + the bridge fidelity comment; rewrite the modify-flow snippet to
+  a non-mutating spread; fix the image-mime jsdoc + bridge comment to the real 8-type allowlist (or
+  point at `MEDIA_MIME_TO_EXT`); add one line on `WriteOptions.date1904`.
+
+**Tasks**
+- [x] Table-name grammar → `[\p{L}_\\]/u` first-char in `tableNameProblem` + `normalizeTableName`;
+      unit tests: `Таблица1`/`テーブル1` are legal + byte-identical round-trip; add an openpyxl
+      (or hand-built) Unicode-named-table fixture read verbatim. **Fixture:
+      `openpyxl-table-unicode.xlsx` (openpyxl 3.1.5, displayName `Таблица1`), read verbatim + corpus.**
+- [x] ST_Xstring: shared `encode/decodeXstring` helper + unit tests (incl. `_x005F_`, idempotency,
+      non-matching strings unchanged); wire decode into the read sites; wire encode into the write
+      sites. **Landed (A)+(B) together in `ooxml/xstring.ts`; sites kept symmetric: shared-string
+      `<t>` runs, inline `<is><t>` runs, `t="str"` cached `<v>`, comment text — plus (review fix)
+      the table part's ST_Xstring attrs (name/displayName, tableColumn@name, @totalsRowLabel).
+      Goldens/corpus unchanged (encode is identity on clean strings).**
+- [x] `MAX_CF_FORMULAS = 3` single-sourced; reader ignores the 4th+, writer rejects typed; unit + a
+      4-formula degradation test (no fixture carries >3, corpus unaffected).
+- [x] `uniquifyTableName` re-checks its candidate (no mid-surrogate abort); regression unit test with
+      an astral-char near-max name.
+- [x] Docs: not-carried column (defined names + rich text) in 3 READMEs + bridge comment;
+      compile-clean modify snippet (non-mutating spread); image-mime jsdoc/comment; `date1904`
+      mention; the snippet lives verbatim in `round-trip.test.ts` so the repo `tsc` gate checks it.
+- [x] Adversarial review (round-trip/bridge + hostile-input lenses) + openpyxl cross-validation both
+      ways for the Unicode-name and ST_Xstring changes; fix confirmed findings + pin. **4 findings,
+      all CONFIRMED and all FIXED + pinned (see below).**
+
+**Review findings (2 finders + refuting verifier; all fixed pre-commit).**
+1. **HIGH — encoder collision check ran on the INPUT.** A literal `_x`+4hex immediately followed by
+   a unit that gets escaped had its shape COMPLETED by the emitted escape's leading `_`
+   (`"_x0041"+"\x01"` → `"_x0041_x0001_"` → Excel/our decode `"Ax0001_"`). Fixed: the underscore is
+   protected when the next unit is `_` OR will itself be escaped (`unitNeedsEscape` lookahead);
+   pinned with the review's counterexamples + a denser 500-case deterministic corpus.
+2. **MEDIUM — CR must be escaped.** XML 1.0 §2.11 line-ending normalization turns a raw CR into LF
+   in every conforming parser, so Excel stores CR as `_x000D_` — we now do too (decode already
+   handled it). *Deliberate byte-identity deviation:* a string CONTAINING `\r` now emits the escape
+   instead of a raw CR byte — the old bytes were already silently mangled to LF by Excel/openpyxl,
+   so verbatim was corruption, not fidelity. All other input byte-identical (old-writer byte-compare
+   on 9 canonical inputs: IDENTICAL).
+3. **MEDIUM — table part attrs are ST_Xstring too.** Header CELLS encoded but `tableColumn@name`
+   emitted raw → the two Excel-decoded views diverged (Excel requires column name == header cell).
+   Fixed both sides: reader decodes name/displayName/column names/totalsRowLabel; writer encodes
+   them (and no longer isXmlSafe-rejects column names / labels — same shared-bounds move as cells).
+   openpyxl confirms: its decoded column names now equal the codec-decoded header cells.
+**Cross-validation (openpyxl 3.1.5, warnings-as-errors, both directions, all green).** Notable:
+openpyxl does NOT implement the ST_Xstring codec for cell content (neither sst nor inline, read or
+write — it refuses control chars entirely and shows Excel-authored escapes as literals); it DOES
+decode table names/column names. Equivalence criterion used: our wire form is exactly what
+openpyxl's own `escape`/`unescape` codec produces/decodes (true for every case), i.e. we match
+Excel, which is the authority.
+**Known residuals (typed-fail or verbatim, documented; candidates for a later feature).** Other
+ST_Xstring-typed ATTRIBUTES (sheet names, comment authors, DV prompt/error text, hyperlink
+display/tooltip, CF `text`) are still carried/emitted verbatim with isXmlSafe rejection — a
+pre-existing, symmetric behavior on both sides (no F9.6 regression; Excel would decode an
+`_xHHHH_`-shaped sheet name we emit verbatim, the same latent collision class F9.6 fixed for
+string CONTENT). The fuzz corpus gains xstring-targeted mutations with F9.7's fuzz task.
+
+**Acceptance.** A non-English-locale Excel table round-trips byte-identically with intact structured
+refs; a cell/comment value containing `_xHHHH_` survives a round-trip through Excel/openpyxl unchanged
+(and, under (B), control chars round-trip via the escape); a 4-formula cfRule reads and either
+truncates-and-writes-legal or fails typed; no table-name collision can abort a write; every silent
+flattening/drop is either fixed or listed in the not-carried column; the README modify snippet
+type-checks; all standing gates green + byte-identity recipe on the writer-touching parts.
+
+### F9.7 — Hostile-input hardening (streaming O(n²) + zip-bomb default)
+**Where this came from.** The same review's security lens (both findings adversarially verified with
+probes). These are the two resource-exhaustion gaps — neither is code-exec or corruption, both are
+DoS-shaped, and one (the default ceiling) is a deliberate behaviour change, which is why they're split
+out of F9.6.
+
+**The problems, plainly.**
+1. **Streaming XML tokenizer is O(n²) on a single oversized construct (verified MEDIUM).**
+   `createXmlStream.push` calls `safeBoundary(buffer)` on the FULL accumulated buffer every chunk, and
+   `safeBoundary` always scans from `i = 0`. When a markup construct never closes within the buffer (an
+   unterminated/huge tag, a giant comment, a `<![CDATA[…]]>` spanning chunks), the buffer isn't drained
+   and each subsequent chunk re-scans the whole growing buffer for the closer → O(N²) CPU **and**
+   unbounded growth, defeating the documented constant-memory guarantee of `streamSheetRows`. Verifier
+   probe: 50/100/200/400 chunks = 217ms/809ms/3.25s/13.1s — clean quadratic. Worksheet XML is fully
+   attacker-controlled.
+2. **Decompression-bomb guard is opt-in (verified MEDIUM).** `maxPartBytes` is `undefined` by default;
+   `inflateRaw*` default `maxBytes` to `+Infinity`; the readers pass the entry's own attacker-controlled
+   32-bit `uncompressedSize` (~4 GB) as the only cap, and `openXlsx` eagerly decodes every sheet. A
+   small crafted archive declaring ~4 GB parts (deflate reaches ~1000:1) forces multi-GB allocation /
+   OOM on a *default* `openXlsx(bytes)` — at odds with the "performance is adversarial-input-safe"
+   invariant, even though a guard exists.
+3. **(LOW, folded in) STORED-entry `maxPartBytes` bypass.** The cap is checked against
+   `uncompressedSize`, but a STORED (method 0) entry returns `compressedSize` bytes; an attacker can set
+   `uncompressedSize = 0` to slip a large stored part past a `maxPartBytes` guard. Impact bounded (a
+   view into already-in-memory input, no amplification) but it weakens the guard's stated promise.
+
+**The fixes.**
+- **Carry the scan cursor across pushes.** Remember where the last incomplete tag/comment/CDATA search
+  left off instead of restarting at `0`, so a straddling construct is scanned once, not once-per-chunk.
+  Belt-and-braces: a `MAX_UNFINISHED_CONSTRUCT` byte cap → typed error past a bound (a single 100 MB
+  unterminated tag is not a real worksheet). Keep the existing chunk-boundary correctness tests; add an
+  O(n)-not-O(n²) growth assertion (bounded op-count on N straddling chunks).
+- **Safe default ceiling — behaviour decision.** Options: *(i)* a conservative default `maxPartBytes`
+  (e.g. a few hundred MB) callers can raise/disable; *(ii)* a compression-ratio cap (reject when
+  inflated/compressed exceeds ~1000:1) which needs no absolute number; *(iii)* both. **Recommend (ii)+
+  a generous absolute backstop** — a ratio cap targets bombs without penalising legitimately large
+  files, and pairs with a high absolute ceiling for the pathological single-part case. This CHANGES
+  default behaviour (a currently-accepted hostile file starts failing typed), so it needs the owner's
+  explicit sign-off on the numbers and the error code before implementation.
+- **STORED cap fix.** For method 0, validate/clamp against `compressedSize` too (or require
+  `uncompressedSize === compressedSize` for stored entries).
+
+**Tasks**
+- [ ] Cursor-carrying `safeBoundary`/`createXmlStream` + `MAX_UNFINISHED_CONSTRUCT` typed cap; growth
+      assertion test (N straddling chunks ⇒ bounded, near-linear op count) + existing boundary tests
+      still green.
+- [ ] **Owner decision** on the zip-bomb default (ratio cap vs absolute ceiling vs both, the numbers,
+      and the typed error code) — then implement the shared default in `zip/`, with reader defaults
+      threaded through `openXlsx`/`openXlsb`/`openOds` and a documented opt-out.
+- [ ] STORED-entry cap checked against `compressedSize`; regression fixture/probe-derived test.
+- [ ] Fuzz-corpus additions in `@openjsxl/fuzz`: a straddling-construct mutation and a lying-size /
+      high-ratio archive, asserting typed-fail (not OOM/hang) under the new defaults.
+- [ ] Adversarial review (hostile-input lens) + re-run the F9.4 campaign against the hardened readers.
+
+**Acceptance.** A worksheet part that is one giant unterminated construct fails typed (or streams in
+O(n)) instead of hanging/growing unboundedly; a default `openXlsx`/`openXlsb`/`openOds` on a
+declared-huge or high-ratio archive fails typed instead of OOM-ing, with a documented opt-out for
+legitimately large files; the STORED bypass is closed; the fuzz campaign covers all three; standing
+gates green (the default change is behaviour-visible, so it ships only at the owner's release call).
+
+**Deferred sibling — defined-names WRITE + bridge carry (v1 fidelity, its own feature).** The reader
+already models `DefinedName`; giving the writer a `WorkbookInput.definedNames` field, emitting
+`<definedNames>` in the load-bearing workbook slot (after `sheets`), and carrying them through
+`workbookToInput` would turn the F9.6-documented drop into true round-trip fidelity — a natural v1
+item, scoped when reached (shares the table-name identifier bounds; the print-range `_xlnm.*` names
+ride along).
+
+---
+
 ## M10+ — Later milestones (outline; expanded when reached)
 
 - **Deferred — legacy `.xls` (BIFF8) read:** a CFB/OLE2 container reader + BIFF record

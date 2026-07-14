@@ -2,6 +2,7 @@ import type { DxfStyle, TableColumn, TableInfo, TableStyleInfo } from "../types"
 import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
 import { parseRef } from "./a1";
+import { decodeXstring } from "./xstring";
 
 // Table part parser (F9.1). Reads `xl/tables/tableN.xml` into the shared {@link TableInfo} model. The
 // reader is TOLERANT: absent attributes degrade to Excel's defaults (header on, totals off), and a
@@ -20,8 +21,10 @@ const CELL_REF_NAME = /^[A-Za-z]{1,3}[0-9]+$/;
 /**
  * The ways a table display name can be illegal, in the order the writer checks them. A table name is a
  * defined-name-style identifier (decision 8): non-empty, ≤ {@link MAX_TABLE_NAME_LEN}, XML-safe, no
- * whitespace, starts with a letter/underscore/backslash, and doesn't look like a cell reference (or the
- * reserved bare `C`/`R`). Excel repair-prompts on a name that breaks these.
+ * whitespace, starts with a letter (any Unicode letter — non-English Excel locales auto-name tables
+ * `Таблица1`/`テーブル1`, F9.6) / underscore / backslash, and doesn't look like a cell reference (or the
+ * reserved bare `C`/`R` — cell refs are ASCII, so the shape check stays ASCII). Excel repair-prompts on
+ * a name that breaks these.
  */
 export type TableNameProblem =
 	| "empty"
@@ -41,7 +44,7 @@ export function tableNameProblem(name: string): TableNameProblem | undefined {
 	if (name.length > MAX_TABLE_NAME_LEN) return "too-long";
 	if (!isXmlSafe(name)) return "not-xml-safe";
 	if (/\s/.test(name)) return "whitespace";
-	if (!/^[A-Za-z_\\]/.test(name)) return "bad-start";
+	if (!/^[\p{L}_\\]/u.test(name)) return "bad-start";
 	if (CELL_REF_NAME.test(name) || /^[CcRr]$/.test(name)) return "cell-ref";
 	return undefined;
 }
@@ -65,7 +68,7 @@ export function normalizeTableName(name: string): string {
 		}
 	}
 	if (s.length > MAX_TABLE_NAME_LEN) s = s.slice(0, MAX_TABLE_NAME_LEN);
-	if (!/^[A-Za-z_\\]/.test(s)) s = `_${s}`.slice(0, MAX_TABLE_NAME_LEN);
+	if (!/^[\p{L}_\\]/u.test(s)) s = `_${s}`.slice(0, MAX_TABLE_NAME_LEN);
 	if (CELL_REF_NAME.test(s) || /^[CcRr]$/.test(s)) {
 		s = s.length < MAX_TABLE_NAME_LEN ? `${s}_` : `_${s.slice(1)}`;
 	}
@@ -155,8 +158,11 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 	for (const tok of tokenize(xml)) {
 		if (tok.kind === "open") {
 			switch (localName(tok.name)) {
-				case "table":
-					name = tok.attrs.displayName ?? tok.attrs.name;
+				case "table": {
+					// displayName/name are ST_Xstring (F9.6) — Excel and openpyxl decode them, so
+					// a stored `_x005F_x0041_` IS the name `_x0041_`; the writer encodes them back.
+					const rawName = tok.attrs.displayName ?? tok.attrs.name;
+					name = rawName !== undefined ? decodeXstring(rawName) : undefined;
 					ref = tok.attrs.ref;
 					headerRowCount = tok.attrs.headerRowCount;
 					totalsRowCount = tok.attrs.totalsRowCount;
@@ -164,12 +170,15 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 					tableDataDxfId = intId(tok.attrs.dataDxfId);
 					tableTotalsDxfId = intId(tok.attrs.totalsRowDxfId);
 					break;
+				}
 				case "tableColumn": {
 					const cn = tok.attrs.name;
 					if (cn !== undefined) {
-						const builder: ColumnBuilder = { name: cn };
+						// @name and @totalsRowLabel are ST_Xstring, like the header cells they
+						// mirror — decode so the column name equals its decoded header cell (F9.6).
+						const builder: ColumnBuilder = { name: decodeXstring(cn) };
 						if (tok.attrs.totalsRowLabel !== undefined)
-							builder.totalsRowLabel = tok.attrs.totalsRowLabel;
+							builder.totalsRowLabel = decodeXstring(tok.attrs.totalsRowLabel);
 						if (tok.attrs.totalsRowFunction !== undefined)
 							builder.totalsRowFunction = tok.attrs.totalsRowFunction;
 						const hId = intId(tok.attrs.headerRowDxfId);

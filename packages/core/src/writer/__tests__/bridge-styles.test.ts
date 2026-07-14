@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { XlsxError } from "../../errors";
-import { tableNameProblem } from "../../ooxml/table";
+import { MAX_TABLE_NAME_LEN, tableNameProblem } from "../../ooxml/table";
 import { openCsv } from "../../reader/csv";
 import { openOds } from "../../reader/ods";
 import { openXlsx, type Workbook } from "../../reader/workbook";
@@ -408,5 +408,20 @@ describe("bridge — F9.5 table round-trip hardening", () => {
 		expect(uniquifyTableName("sales", seen)).toBe("sales_2"); // case-insensitive collision with "Sales"
 		expect(tableNameProblem("__2")).toBeUndefined(); // suffixed names stay legal
 		expect(tableNameProblem("sales_2")).toBeUndefined();
+	});
+
+	// Truncating a near-max name to make room for the suffix slices at UTF-16 code units — a cut
+	// landing inside an astral character used to leave a lone high surrogate, an ILLEGAL candidate the
+	// writer then rejects (F9.6 regression). The half pair is dropped; the candidate is always legal.
+	it("keeps a suffixed candidate legal when the length cut lands inside an astral pair", () => {
+		// 2 + 126×2 + 1 = 255 units (the max); the "_2" suffix cut at 253 units lands mid-pair.
+		const name = `AB${"😀".repeat(126)}C`;
+		expect(name.length).toBe(MAX_TABLE_NAME_LEN);
+		expect(tableNameProblem(name)).toBeUndefined(); // the input itself is legal
+		const seen = new Set<string>([name.toLowerCase()]);
+		const candidate = uniquifyTableName(name, seen);
+		expect(candidate.endsWith("_2")).toBe(true);
+		expect(candidate.length).toBeLessThanOrEqual(MAX_TABLE_NAME_LEN);
+		expect(tableNameProblem(candidate)).toBeUndefined(); // no lone surrogate — writer-legal
 	});
 });

@@ -22,6 +22,17 @@ describe("parseSharedStrings", () => {
 		expect(parseSharedStrings(xml)).toEqual(["Hello World"]);
 	});
 
+	it("decodes ST_Xstring escapes per <t> run (F9.6)", () => {
+		const xml =
+			"<sst>" +
+			"<si><t>a_x000B_b</t></si>" + // a control char Excel stores escaped
+			"<si><t>_x005F_x0041_</t></si>" + // the protected literal survives as _x0041_
+			"<si><r><t>_x00</t></r><r><t>41_</t></r></si>" + // an escape can NOT straddle two runs
+			"<si><t>&#95;x0041_</t></si>" + // entity-split tokens are one <t> context — decodes
+			"</sst>";
+		expect(parseSharedStrings(xml)).toEqual(["a\x0Bb", "_x0041_", "_x0041_", "A"]);
+	});
+
 	it("preserves significant whitespace inside <t>", () => {
 		const xml =
 			'<sst><si><t xml:space="preserve">  leading</t></si><si><r><t>a </t></r><r><t> b</t></r></si></sst>';

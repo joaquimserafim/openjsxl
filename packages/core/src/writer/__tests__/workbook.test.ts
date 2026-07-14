@@ -201,15 +201,18 @@ describe("writeXlsx — input validation (invalid-input)", () => {
 		).toBe("invalid-input");
 	});
 
-	it("rejects a forbidden control character in a cell string", async () => {
+	it("stores a control character in a cell string via the ST_Xstring escape (F9.6)", async () => {
+		// These used to REJECT typed; string content now escapes as _xHHHH_ (the convention Excel
+		// decodes), so the value survives write→read — and the raw bytes stay XML-well-formed.
 		const nul = String.fromCharCode(0);
 		const bel = String.fromCharCode(7);
-		expect(await code(() => writeXlsx({ sheets: [{ name: "S", rows: [[`a${nul}b`]] }] }))).toBe(
-			"invalid-input",
-		);
-		expect(await code(() => writeXlsx({ sheets: [{ name: "S", rows: [[`x${bel}`]] }] }))).toBe(
-			"invalid-input",
-		);
+		const bytes = await writeXlsx({ sheets: [{ name: "S", rows: [[`a${nul}b`, `x${bel}`]] }] });
+		const xml = new TextDecoder().decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
+		expect(xml).toContain("a_x0000_b");
+		expect(xml).toContain("x_x0007_");
+		const wb = await openXlsx(bytes);
+		expect(wb.sheet("S").cell("A1").value).toBe(`a${nul}b`);
+		expect(wb.sheet("S").cell("B1").value).toBe(`x${bel}`);
 	});
 
 	it("rejects a control character in a sheet name", async () => {
@@ -219,15 +222,24 @@ describe("writeXlsx — input validation (invalid-input)", () => {
 		).toBe("invalid-input");
 	});
 
-	it("rejects a lone surrogate in a cell string", async () => {
+	it("stores a lone surrogate in a cell string via the ST_Xstring escape (F9.6)", async () => {
+		// TextEncoder would silently mangle a lone surrogate to U+FFFD — the escape carries the
+		// exact code unit instead, so even this survives the trip.
 		const loneHigh = String.fromCharCode(0xd800);
 		const loneLow = String.fromCharCode(0xdc00);
-		expect(
-			await code(() => writeXlsx({ sheets: [{ name: "S", rows: [[`a${loneHigh}`]] }] })),
-		).toBe("invalid-input");
-		expect(
-			await code(() => writeXlsx({ sheets: [{ name: "S", rows: [[`${loneLow}b`]] }] })),
-		).toBe("invalid-input");
+		const wb = await roundTrip({
+			sheets: [{ name: "S", rows: [[`a${loneHigh}`, `${loneLow}b`]] }],
+		});
+		expect(wb.sheet("S").cell("A1").value).toBe(`a${loneHigh}`);
+		expect(wb.sheet("S").cell("B1").value).toBe(`${loneLow}b`);
+	});
+
+	it("protects a literal _xHHHH_ so Excel reads back the same text (F9.6)", async () => {
+		const bytes = await writeXlsx({ sheets: [{ name: "S", rows: [["_x0041_"]] }] });
+		const xml = new TextDecoder().decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
+		expect(xml).toContain("_x005F_x0041_"); // the wire form Excel/openpyxl decode to "_x0041_"
+		const wb = await openXlsx(bytes);
+		expect(wb.sheet("S").cell("A1").value).toBe("_x0041_");
 	});
 
 	it("rejects a non-array row (string, null) instead of exploding or crashing", async () => {

@@ -14,3 +14,4 @@ export * from "./styles";
 export * from "./table";
 export * from "./theme";
 export * from "./workbook";
+export * from "./xstring";

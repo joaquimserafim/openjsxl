@@ -161,6 +161,15 @@ git-ignored [`../local/`](../local) directory and are never committed.
   the file re-saves and re-reads; `writer/__tests__/bridge-styles.test.ts` pins that round-trip and the
   corpus property covers it.
 
+- **`openpyxl-table-unicode.xlsx`** — authored by **openpyxl 3.1.5** to exercise the Unicode
+  table-name grammar (F9.6): a `Sheet1` with a defined table whose `displayName` is the
+  **Russian-locale default `"Таблица1"`** over `A1:C3` (Cyrillic header `Товар`/`Кол-во`/`Город`,
+  two data rows, `TableStyleMedium9`). Excel's defined-name grammar allows Unicode letters — before
+  F9.6 the ASCII-only rule "normalized" this legal name to `_Таблица1`, silently breaking any
+  structured references on a rewrite. The reader must return the name **verbatim** and the whole
+  file must round-trip; `ooxml/__tests__/table.test.ts` pins the verbatim read and the corpus
+  property covers the round-trip.
+
 - **`openpyxl-datavalidation.xlsx`** — authored by **openpyxl 3.1.5** to exercise data-validation read
   (F9.2): a `Rules` sheet with nine `<dataValidation>` rules covering all eight types + an
   input-message-only rule — `whole`/between (with a full prompt + error alert), `decimal`/≥ over a

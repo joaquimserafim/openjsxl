@@ -58,6 +58,25 @@ describe("readRows — cell typing", () => {
 		expect(cells.get("B1")?.value).toBe("漢字");
 	});
 
+	it("decodes ST_Xstring escapes in inline strings and cached formula strings (F9.6)", () => {
+		const cells = byRef(
+			rows(
+				'<row r="1">' +
+					'<c r="A1" t="inlineStr"><is><t>a_x000B_b</t></is></c>' +
+					'<c r="B1" t="inlineStr"><is><t>_x005F_x0041_</t></is></c>' + // protected literal
+					'<c r="C1" t="inlineStr"><is><r><t>_x00</t></r><r><t>41_</t></r></is></c>' + // per-run: no straddle
+					'<c r="D1" t="str"><f>X</f><v>a_x000A_b</v></c>' + // cached string <v> is ST_Xstring too
+					'<c r="E1" t="e"><v>#REF!</v></c>' + // error text is NOT an xstring channel
+					"</row>",
+			),
+		);
+		expect(cells.get("A1")?.value).toBe("a\x0Bb");
+		expect(cells.get("B1")?.value).toBe("_x0041_");
+		expect(cells.get("C1")?.value).toBe("_x0041_");
+		expect(cells.get("D1")?.value).toBe("a\nb");
+		expect(cells.get("E1")?.value).toBe("#REF!");
+	});
+
 	it("preserves significant whitespace inside inline text", () => {
 		const cells = byRef(
 			rows('<row r="1"><c r="A1" t="inlineStr"><is><t>  a b </t></is></c></row>'),

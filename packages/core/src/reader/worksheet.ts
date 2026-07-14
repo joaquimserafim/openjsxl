@@ -2,6 +2,7 @@ import {
 	type CellRef,
 	type DecodeContext,
 	decodeCell,
+	decodeXstring,
 	formatRef,
 	MAX_COL,
 	MAX_COL_WIDTH,
@@ -133,21 +134,37 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 	let cellStyle: number | undefined; // the `s` attribute (index into cellXfs)
 	let cellIsInline = false; // type === 'inlineStr': value lives in <is>, not <v>
 	let cellValue = "";
+	let tBuf = ""; // raw text of the currently-open inline <t>, decoded as one unit on close
 	let hasValue = false; // the value channel's element was present (even if empty)
 	let inValue = false; // inside <v>
 	let inInline = false; // inside <is>
 	let textDepth = 0; // open <t> within <is>
 	let phoneticDepth = 0; // open <rPh>/<phoneticPr> within <is> (excluded from the value)
 
+	// An inline <t>'s raw text buffers until the element closes and decodes as ONE ST_Xstring
+	// escape context (F9.6) — per run, like shared strings, so an escape never straddles runs.
+	// Also flushed at cell finalize, so misnested markup (a missing </t>) drops no text.
+	const flushT = () => {
+		if (tBuf !== "") {
+			cellValue += decodeXstring(tBuf);
+			tBuf = "";
+		}
+	};
+
 	// Finalize the open cell into the current row. A no-op when no cell is open.
 	const flushCell = () => {
 		if (!inCell) return;
+		flushT();
+		// A cached formula string (`t="str"`, its <v> is ST_Xstring) decodes as one context —
+		// the single <v> element. Other <v> channels (numbers, booleans, errors, shared-string
+		// INDEXES) are not xstrings and stay verbatim.
+		const value = cellType === "str" ? decodeXstring(cellValue) : cellValue;
 		cells.push(
 			decodeCell(
 				{
 					ref: cellRef,
 					type: cellType,
-					value: hasValue ? cellValue : undefined,
+					value: hasValue ? value : undefined,
 					style: cellStyle,
 				},
 				ctx,
@@ -216,6 +233,7 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns);
 				cellIsInline = cellType === "inlineStr";
 				cellValue = "";
+				tBuf = "";
 				hasValue = false;
 				inValue = false;
 				inInline = false;
@@ -261,7 +279,8 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 				? inInline && textDepth > 0 && phoneticDepth === 0
 				: inValue;
 			if (inCell && collect) {
-				cellValue += token.value;
+				if (cellIsInline) tBuf += token.value;
+				else cellValue += token.value;
 				hasValue = true;
 			}
 			return out;
@@ -291,7 +310,10 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
 		else if (name === "v") inValue = false;
 		else if (name === "is") inInline = false;
 		else if (name === "t") {
-			if (textDepth > 0) textDepth--;
+			if (textDepth > 0) {
+				textDepth--;
+				if (textDepth === 0) flushT();
+			}
 		} else if (name === "rPh" || name === "phoneticPr") {
 			if (phoneticDepth > 0) phoneticDepth--;
 		}
@@ -314,8 +336,9 @@ function createRowAssembler(ctx: DecodeContext): RowAssembler {
  * The comments a worksheet carries. Comments live in a separate part (xl/commentsN.xml) that
  * pairs an `<authors>` list with a `<commentList>`; each `<comment ref authorId>` holds rich
  * text in `<text>`. We concatenate the `<t>` runs (dropping formatting, matching how shared
- * strings read) and resolve the authorId against the authors list. A comment with no `ref`, or
- * an authorId that resolves to nothing, still yields text — the author is just omitted.
+ * strings read; each run decodes its `_xHHHH_` escapes as one ST_Xstring context — F9.6) and
+ * resolve the authorId against the authors list. A comment with no `ref`, or an authorId that
+ * resolves to nothing, still yields text — the author is just omitted.
  */
 export function parseComments(xml: string): Comment[] {
 	const authors: string[] = [];
@@ -326,6 +349,14 @@ export function parseComments(xml: string): Comment[] {
 	let inText = false; // inside the current comment's <text>
 	let tDepth = 0; // open <t> within <text>
 	let text = "";
+	let tBuf = ""; // raw text of the currently-open <t>, decoded as one unit on close
+
+	const flushT = () => {
+		if (tBuf !== "") {
+			text += decodeXstring(tBuf);
+			tBuf = "";
+		}
+	};
 
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open") {
@@ -347,6 +378,7 @@ export function parseComments(xml: string): Comment[] {
 						: -1;
 				current = ref !== undefined && ref !== "" ? { ref, authorId } : undefined;
 				text = "";
+				tBuf = "";
 				inText = false;
 				tDepth = 0;
 			} else if (name === "text" && current !== undefined) {
@@ -356,7 +388,7 @@ export function parseComments(xml: string): Comment[] {
 			}
 		} else if (token.kind === "text") {
 			if (authorText !== undefined) authorText += token.value;
-			else if (inText && tDepth > 0) text += token.value;
+			else if (inText && tDepth > 0) tBuf += token.value;
 		} else {
 			const name = localName(token.name);
 			if (name === "authors") inAuthors = false;
@@ -364,9 +396,13 @@ export function parseComments(xml: string): Comment[] {
 				authors.push(authorText);
 				authorText = undefined;
 			} else if (name === "t") {
-				if (tDepth > 0) tDepth--;
+				if (tDepth > 0) {
+					tDepth--;
+					if (tDepth === 0) flushT();
+				}
 			} else if (name === "text") inText = false;
 			else if (name === "comment" && current !== undefined) {
+				flushT(); // a missing </t> (misnested markup) must not drop collected text
 				const author = authors[current.authorId];
 				comments.push({
 					ref: current.ref,

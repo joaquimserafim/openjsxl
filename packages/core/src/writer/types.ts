@@ -94,8 +94,10 @@ export interface SheetInput {
 	/**
 	 * Pictures anchored on this sheet (F6.3) — the same records `Worksheet.images()` returns. Each
 	 * needs an `anchor` (a one-cell `{from, ext}` or two-cell `{from, to}` cell anchor), the raw
-	 * image `bytes`, and a `mime` (`image/png` | `image/jpeg` | `image/gif`); `name` is optional.
-	 * Identical bytes are written once as a shared media part; EMU offsets/extents are used verbatim.
+	 * image `bytes`, and a `mime` from the writer's allowlist (png, jpeg, gif, bmp, tiff, webp,
+	 * x-emf, x-wmf — the single source is `MEDIA_MIME_TO_EXT` in ooxml/drawing.ts); `name` is
+	 * optional. Identical bytes are written once as a shared media part; EMU offsets/extents are
+	 * used verbatim.
 	 */
 	readonly images?: readonly SheetImage[];
 	/**

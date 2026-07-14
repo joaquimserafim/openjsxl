@@ -32,7 +32,13 @@ export function uniquifyTableName(name: string, seen: Set<string>): string {
 	}
 	for (let n = 2; ; n++) {
 		const suffix = `_${n}`;
-		const candidate = `${name.slice(0, MAX_TABLE_NAME_LEN - suffix.length)}${suffix}`;
+		let head = name.slice(0, MAX_TABLE_NAME_LEN - suffix.length);
+		// `slice` cuts at UTF-16 code units, so a truncation landing inside an astral character
+		// leaves a lone high surrogate — an ILLEGAL name that would abort the very write this dedup
+		// exists to protect (F9.6). Drop the half pair so the candidate is always legal.
+		const last = head.charCodeAt(head.length - 1);
+		if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+		const candidate = `${head}${suffix}`;
 		if (!seen.has(candidate.toLowerCase())) {
 			seen.add(candidate.toLowerCase());
 			return candidate;
@@ -55,8 +61,14 @@ export function uniquifyTableName(name: string, seen: Set<string>): string {
 //   Picture degradations (documented; the reader already skips these on read, so they never reach
 //   the bridge): absolute-anchored pictures and non-picture drawing objects (shapes, charts) are
 //   dropped at read. A picture whose media type is outside the writer's allowlist (anything but
-//   image/png, image/jpeg, image/gif) makes the subsequent writeXlsx throw a TYPED invalid-input —
-//   the whole rewrite refuses rather than silently dropping the picture.
+//   the MEDIA_MIME_TO_EXT set — png, jpeg, gif, bmp, tiff, webp, x-emf, x-wmf) makes the
+//   subsequent writeXlsx throw a TYPED invalid-input — the whole rewrite refuses rather than
+//   silently dropping the picture.
+//   NOT carried (documented drops, F9.6): DEFINED NAMES — the reader exposes
+//   Workbook.definedNames but WorkbookInput has no field for them, so a named-range workbook
+//   rewrites with its formula TEXT intact and the <definedNames> part gone (Excel recalculates
+//   such formulas to #NAME?). IN-CELL RICH TEXT — per-run formatting flattens to plain text at
+//   read (the concatenated value is what crosses the bridge).
 //   Formula degradations (documented, values stay exact): a SHARED-formula dependent carries its
 //   TRANSLATED text (not the shared grouping); an ARRAY formula carries the master's text as a plain
 //   formula (the spilled cells keep their cached values); a `dataTable` formula carries no text (its

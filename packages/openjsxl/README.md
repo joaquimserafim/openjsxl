@@ -76,6 +76,8 @@ const bytes = await writeXlsx({
 `workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —
 values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
 hyperlinks, sheet visibility, tables, data validations, and conditional formatting all round-trip.
+Not carried (yet): defined names / named ranges are read (`Workbook.definedNames`) but dropped on
+write, and in-cell rich text flattens to plain text — see the project README's fidelity table.
 
 **Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
 Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
