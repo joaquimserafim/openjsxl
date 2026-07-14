@@ -81,7 +81,7 @@ shared-bounds, decompression-bomb guards, streaming-tokenizer linearity). **Next
 | **0.7** | More formats | `.ods`, `.xlsb`, `.csv`/`.tsv` read (legacy `.xls` deferred to M8+) | ☑ |
 | **0.8** | Formulas | Opt-in formula parse + evaluate (separate entry point; text fidelity ships in 0.5) | ☑ |
 | **0.9** | Breadth + hardening | Tables, data validation, conditional formatting; fuzzing + corpus; ST_Xstring, table round-trip + zip-bomb/streaming hardening | ☑ |
-| **1.0** | Stable | Frozen API, full `.xlsx` round-trip fidelity, docs site, published benchmarks | ☐ |
+| **1.0** | Stable | Frozen API (typed errors, collision-free entry points); workbook-level carry (defined names, autoFilter, protection, print setup); a documented round-trip **contract** (everything carried is corpus-tested, everything dropped is an explicit README line); README as the canonical docs; benchmarks current. Docs site: post-1.0 | ☐ |
 
 ## 6. How we track
 

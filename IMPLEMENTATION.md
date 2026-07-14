@@ -2557,7 +2557,385 @@ ride along).
 
 ---
 
-## M10+ — Later milestones (outline; expanded when reached)
+## M10 — Stable (v1.0)
+
+**Theme.** Close the gap between the (real, corpus-tested) cell-grid fidelity and the 1.0
+claim: carry the workbook-level content that today drops silently (defined names, sheet
+autoFilter, protection, print setup), turn every REMAINING drop into a documented, pinned
+contract line, freeze the public API (typed errors everywhere, no cross-entry-point name
+collisions), and promote the README to the canonical documentation — the docs SITE is
+deferred post-1.0 (owner, 2026-07-14: "another day"). Scoped 2026-07-14 from the pre-1.0
+review (code-quality + feature-gap agent sweep; every finding re-verified in-tree).
+
+**Cold-session orientation (read before implementing anything).** The operating contract is
+CLAUDE.md: prime rule (owner's explicit "proceed" per feature before any implementation),
+quality gates run FROM THE REPO ROOT and judged by exit code, the writer byte-identity
+recipe, the corpus lossless-or-typed property, openpyxl cross-validation both directions,
+adversarial review before committing parser/emitter code, tests in `__tests__/` beside the
+code, probes in the session scratchpad never the repo, commit only on the owner's "commit".
+Key files: shared model `packages/core/src/types.ts` + `writer/types.ts` (ONE shared model —
+what a reader accessor returns IS what the writer accepts); worksheet emitter
+`writer/sheet.ts` (its element-order comment is load-bearing); workbook emitter
+`writer/parts.ts` (`workbookXml`); bridge `writer/from-workbook.ts` (its doc header is the
+authoritative in-code drop-list); bounds single-sourced in `ooxml/a1.ts`, `ooxml/styles.ts`,
+`ooxml/table.ts`, `utils/chars.ts` — reader clamps/drops to writer-legal, writer rejects
+typed `XlsxError("invalid-input")`. `Worksheet` is a STRUCTURAL interface (F7.1): adding an
+accessor means every backend gains the member — xlsx implements, xlsb/ods/csv degrade, with
+pins.
+
+**Milestone-wide decisions:**
+1. **Element order (load-bearing, exact slots — Excel repair-prompts on violations).** In the
+   CT_Worksheet child sequence: `sheetProtection` slots AFTER `sheetData`; `autoFilter` after
+   sheetProtection, BEFORE `mergeCells`; `printOptions` → `pageMargins` → `pageSetup` →
+   `headerFooter` (that internal order) slot AFTER `hyperlinks`, BEFORE `drawing`. In
+   CT_Workbook: `workbookProtection` slots BETWEEN `workbookPr` and `bookViews`;
+   `definedNames` AFTER `sheets` (before `calcPr`, which we never emit). Extend the order
+   comments in writer/sheet.ts + parts.ts and pin every insertion with a golden-bytes test
+   (M9 decision-1 precedent).
+2. **One shared model, additive.** New/extended types live in `types.ts` and are used
+   verbatim by the reader accessor, `SheetInput`/`WorkbookInput`, and the bridge:
+   `DefinedName` (exists — index.ts re-exports it), `SheetAutoFilter` (`{ ref }`),
+   `SheetProtection` / `WorkbookProtection` (verbatim attr carry), `PageMargins`,
+   `PageSetup`, `PrintOptions`, `HeaderFooter`, and `CellStyle.protection`
+   (`{ locked?, hidden? }`). Absent field = feature absent = NOTHING emitted (byte-identity).
+3. **Reader degrades to writer-legal; shared single-sourced bounds (the F9.5 posture).**
+   Each new carry defines its bounds ONCE and both sides read them: the reader clamps
+   numeric attrs and DROPS entries that could never re-emit (every drop is a NAMED, pinned
+   degradation); the writer rejects typed. The corpus property extends per feature: every
+   readable fixture round-trips losslessly OR fails typed — never a bare throw.
+4. **Deterministic bytes / unused-emits-nothing / BOTH writers.** A workbook using no M10
+   feature emits EXACT pre-M10 bytes (golden pins). Every carry lands on `writeXlsx` AND
+   `streamXlsx` in the same commit, extending the streamed==buffered equivalence test (M9
+   decision 11).
+5. **No crypto in core.** Protection carries password hashes VERBATIM (legacy `password`
+   attr, or `algorithmName`/`hashValue`/`saltValue`/`spinCount`) — we never compute or
+   verify a hash. Flags-only protection (no password) is authorable; password authoring
+   means the caller supplies precomputed hash attrs. Documented at the type.
+6. **Formula-adjacent text is carried verbatim, never rewritten** (M9 decision-7 posture):
+   definedName `refersTo`, headerFooter `&`-code strings. Emission follows the same
+   escape/reject rule as the existing cell-formula-text path; per decision 3 the reader
+   drops an entry that could never re-emit.
+7. **Oracles per feature:** openpyxl 3.1.5 both directions (it reads/writes names,
+   autoFilter, protection, and page setup — exercises every M10 carry); ExcelJS smoke where
+   it supports the feature; real Excel = the owner (repair-prompt property; print-preview
+   spot check on F10.4). Throwaway venv in the scratchpad, never in-repo.
+8. **1.0 fidelity wording is a CONTRACT, not a boast:** everything carried is corpus-tested;
+   everything not carried is an explicit README drop-list line. ROADMAP's 1.0 row is
+   reworded accordingly (done at scoping, 2026-07-14).
+
+**Standing gates** as always (`pnpm biome check .`, `pnpm -r exec tsc --noEmit`,
+`pnpm vitest run` — root, exit codes); every writer-touching feature runs the byte-identity
+recipe.
+
+**Dependency order:** F10.1 (names — F10.2's `_xlnm._FilterDatabase` and F10.4's print
+area/titles ride on it) → F10.2 → F10.3 → F10.4 → F10.5 (the drop-list documents the FINAL
+carry set) → F10.6 (freeze) → F10.7 (README documents the frozen surface) → F10.8 (release).
+
+### F10.1 — Defined names: write + bridge carry ☐
+
+**Context.** The reader has modelled defined names since F8.2 (`DefinedName` —
+`ooxml/workbook.ts`; `Workbook.definedNames` — `reader/workbook.ts`), but `WorkbookInput`
+has no field, so the bridge DROPS them (`writer/from-workbook.ts` documents the drop) and a
+rewritten workbook's `=Total*2` recalculates `#NAME?` — computational corruption, the
+sharpest remaining fidelity edge (named "a natural v1 item" in the F9.7 deferred-sibling
+note above). openpyxl, ExcelJS, and SheetJS all carry names.
+
+**Scope (in).** `WorkbookInput.definedNames?: readonly DefinedName[]`; emit `<definedNames>`
+in the decision-1 workbook slot (`name`, `localSheetId`, `hidden="1"` only when true,
+refersTo as element TEXT — mirror the parser, which accumulates text tokens); bridge carries
+`Workbook.definedNames` through `workbookToInput`. Writer validation (typed, single-read
+TOCTOU, `isPlainRecord` + unknown-key reject): name lexical rules SHARED with table names —
+extract the identifier core (char classes, cell-ref-shape detection incl. bare `C`/`R`,
+≤255) from `ooxml/table.ts` (`MAX_TABLE_NAME_LEN`, `tableNameProblem`) into one module both
+consume (M9 decision 8 anticipated exactly this — table behavior must not change:
+byte-identity + existing tests stay green); `_xlnm.` prefix allowed ONLY for the spec's
+built-ins (`Print_Area`, `Print_Titles`, `_FilterDatabase`, `Criteria`, `Database`,
+`Extract`); case-insensitive uniqueness PER SCOPE (the same name may exist workbook-global
+and sheet-local, and in two different sheets); `localSheetId` must index an existing sheet;
+`refersTo` non-empty + decision-6 emission. Reader true-up (decision 3): an entry whose name
+or refersTo could never re-emit is DROPPED at parse — named, documented, pinned.
+
+**Scope (out).** Parsing/rewriting refersTo (verbatim text; the F8.2 evaluator keeps its
+existing name-resolution behavior — constants and simple ranges resolve, the rest is
+`#NAME?` on use); `functionGroups` / `externalReferences`; the `comment` attribute.
+
+**Tasks**
+- [ ] Shared identifier module extracted from `ooxml/table.ts` + defined-name rules on top
+      (built-in `_xlnm.*` allow-list, per-scope uniqueness); table code keeps byte-identical
+      behavior.
+- [ ] Writer: `WorkbookInput.definedNames` validation + `workbookXml` emission + order pin +
+      byte-identity pin (absent field → pre-M10 bytes) + BOTH writers (decision 4).
+- [ ] Reader drop-to-writer-legal true-up + pins (hostile fixtures: name with a space /
+      cell-ref shape / oversized refersTo → dropped named, never a bare throw).
+- [ ] Bridge carry + corpus snapshot extension + fixtures (openpyxl-authored names incl. a
+      sheet-local one and a built-in `Print_Area`; our output read back by openpyxl with
+      `warnings.simplefilter("error")`).
+- [ ] Adversarial review (round-trip + hostile-input lenses) + gates + byte-identity recipe.
+
+**Acceptance.** A named-range workbook round-trips with `<definedNames>` intact and its
+formulas recalculating (owner-verifiable in real Excel); invalid caller input fails typed;
+no-names input is byte-identical; corpus + both-direction oracle green.
+
+### F10.2 — Sheet-level autoFilter: read + write + bridge ☐
+
+**Context.** M9 decision 10 deferred sheet-level autoFilter BECAUSE it pairs with the hidden
+`_xlnm._FilterDatabase` defined name — F10.1 unblocks it. Today the writer emits autoFilter
+only INSIDE table parts (`writer/sheet.ts`); a sheet-level `<autoFilter>` from a foreign
+file is silently dropped (undocumented), and "add filter dropdowns to my export" is the
+single most common writer ask this feature closes.
+
+**Scope (in).** `SheetAutoFilter` = `{ ref: string }` in `types.ts`;
+`Worksheet.autoFilter?: SheetAutoFilter` (xlsx implements; xlsb/ods/csv degrade `undefined`,
+pinned); `SheetInput.autoFilter`; emit `<autoFilter ref="…"/>` in the decision-1 slot. When
+writing a sheet autoFilter, ALSO emit the paired hidden sheet-local `_xlnm._FilterDatabase`
+defined name (Excel parity — verify against openpyxl's output with the oracle; F10.1
+machinery). Reader: parse `@ref` through the shared a1 machinery (in-bounds range, symbolic
+— never expanded per-cell; F4.4/F4.6 posture), clamp/drop hostile refs; DROP
+`filterColumn`/`sortState` children as a NAMED degradation — documented consequence: the
+rewritten file shows filter arrows with criteria cleared, and filtered-out rows STAY hidden
+because row `hidden` flags already carry.
+
+**Scope (out).** Filter-criteria model (customFilters, top10, color/icon filters, dynamic),
+`sortState` carry, any change to table-internal autoFilter.
+
+**Tasks**
+- [ ] Model + reader parse + degrade pins (ods/xlsb/csv `undefined`; hostile-ref
+      clamp/drop pins).
+- [ ] Writer emission + order pin + `_FilterDatabase` pairing + byte-identity pin + BOTH
+      writers.
+- [ ] Bridge carry + corpus snapshot + fixtures (a real Excel- or openpyxl-authored FILTERED
+      sheet — criteria present → named drop pinned; openpyxl reads our output clean).
+- [ ] Adversarial review + gates + byte-identity recipe.
+
+**Acceptance.** A filtered workbook round-trips with working filter arrows (owner Excel
+check); the criteria drop is documented in the README table and pinned; a hostile ref cannot
+inflate memory; unfiltered input is byte-identical.
+
+### F10.3 — Protection carry: workbook, sheet, and cell locked/hidden ☐
+
+**Context.** "Protection is not modelled" (`writer/styles.ts`) — `<sheetProtection>`,
+`<workbookProtection>`, and the xf-level `<protection locked hidden>` are all silently
+stripped on round-trip today. Security-adjacent: a protected template re-saves UNPROTECTED
+with no warning — the exact silent mangling the repo bans.
+
+**Scope (in).** `SheetProtection` (attrs verbatim-typed: `sheet`, `objects`, `scenarios`,
+`formatCells`/`formatColumns`/`formatRows`, `insertColumns`/`insertRows`/`insertHyperlinks`,
+`deleteColumns`/`deleteRows`, `selectLockedCells`/`selectUnlockedCells`, `sort`,
+`autoFilter`, `pivotTables` + the decision-5 hash attrs) on `Worksheet`/`SheetInput`;
+`WorkbookProtection` (`lockStructure`, `lockWindows` + hash attrs) on
+`Workbook`/`WorkbookInput`, emitted in the decision-1 workbook slot; `CellStyle.protection`
+(`{ locked?, hidden? }`) read from xf `applyProtection`/`<protection>` and written through
+the style registry (interning extends; note the dxf emission order already reserves a
+protection slot — M9 decision 3). Store ONLY explicitly-present attrs (spec defaults stay
+absent) so carry is byte-faithful; booleans emit `1`/`0` per house style. Reader
+clamps/drops garbage attr values (decision 3).
+
+**Scope (out).** `protectedRanges`, scenario CONTENT, file encryption (FILEPASS-style
+`.xlsx` encryption is a different container — typed reject already), computing or verifying
+password hashes (decision 5).
+
+**Tasks**
+- [ ] Model + reader (both parts + xf protection) + degrade pins (ods/xlsb/csv).
+- [ ] Styles-registry read/write of locked/hidden + interning tests (styled-blank
+      interaction: a protection-only style must still intern).
+- [ ] Writer emission (sheet + workbook slots) + order pins + byte-identity pin + BOTH
+      writers.
+- [ ] Bridge carry + corpus snapshot + fixture (an openpyxl password-protected sheet — hash
+      attrs carry VERBATIM; owner verifies the rewrite still challenges for the password in
+      real Excel).
+- [ ] Adversarial review + gates + byte-identity recipe.
+
+**Acceptance.** A protected template round-trips still protected (owner Excel check);
+flags-only protection is authorable; unprotected input is byte-identical; garbage attrs
+degrade named, never bare-throw.
+
+### F10.4 — Print setup: margins, page setup, print options, header/footer ☐
+
+**Context.** `pageMargins`/`pageSetup`/`printOptions`/`headerFooter` have zero handling in
+core — report-generation output prints with defaults and a foreign file's print config
+silently vanishes on rewrite (undocumented). Print AREA and print TITLES are `_xlnm.*`
+defined names and ride on F10.1 — this feature carries the four worksheet elements.
+
+**Scope (in).** Typed carry on `Worksheet`/`SheetInput`: `PageMargins` (the six required
+doubles `left/right/top/bottom/header/footer` — reader clamps non-finite/negative or drops
+the element; writer rejects; shared numeric bound, single-sourced); `PageSetup` (curated
+attrs: `paperSize` uint, `orientation`, `scale` 10–400 clamp/reject, `fitToWidth`/
+`fitToHeight` uint, `firstPageNumber` + `useFirstPageNumber`, `blackAndWhite`, `draft`,
+`cellComments`, `pageOrder` — match the set openpyxl carries; the `r:id` →
+`printerSettings.bin` relationship is DROPPED NAMED: opaque device-specific binary);
+`PrintOptions` (`gridLines`, `headings`, `horizontalCentered`, `verticalCentered`);
+`HeaderFooter` (`oddHeader/oddFooter/evenHeader/evenFooter/firstHeader/firstFooter` +
+`differentOddEven/differentFirst/scaleWithDoc/alignWithMargins`; strings are `&`-code text —
+decision-6 emission, ST_Xstring-aware like comment text).
+
+**Scope (out).** `rowBreaks`/`colBreaks` (named defer — post-1.0), the `printerSettings.bin`
+part itself, chartsheet printing.
+
+**Tasks**
+- [ ] Model + reader (all four elements) + clamp/drop pins + degrade pins (ods/xlsb/csv).
+- [ ] Writer emission + the four-element internal order pin + byte-identity pin + BOTH
+      writers.
+- [ ] Bridge carry + corpus snapshot + fixtures (openpyxl-authored landscape + fit-to-page +
+      header/footer file; our output read back warnings-as-errors clean).
+- [ ] Owner real-Excel spot check: print preview of a round-tripped landscape/fit-to-1-page/
+      footer workbook matches the original (decision 7).
+- [ ] Adversarial review + gates + byte-identity recipe.
+
+**Acceptance.** A workbook with margins + landscape + fit-to-page + a footer round-trips
+print-identical (owner check); print-config-free input is byte-identical; hostile numeric
+attrs clamp/drop named.
+
+### F10.5 — Fidelity truth-up + `.xlsm` policy ☐
+
+**Context.** The README fidelity table's "Not carried (yet)" column omits several REAL drops
+(verified 2026-07-14): row/col outline grouping (`outlineLevel`/`collapsed`), tab colors /
+`sheetPr`, docProps (author/title/created — writer emits no docProps at all, consistent with
+deterministic bytes), pivot tables, external links (`[1]Sheet!` formula text left dangling),
+calcChain/calcPr, threaded-comment thread structure (text survives via the legacy part),
+gradient fills (read as no-fill), and — post-F10.2 — autoFilter criteria. Worse: an `.xlsm`
+opens via `openXlsx` and bridge-rewrites to a plain `.xlsx` with the VBA project SILENTLY
+STRIPPED (no `vbaProject` handling exists in core). The library's brand is "documented,
+never silently mangled" — every drop must be a contract line.
+
+**Scope (in).** README drop-list rows (root + both package READMEs + the
+`writer/from-workbook.ts` doc header — keep all four in agreement) for EVERY remaining drop,
+each with its consequence named. A pin test per newly-documented drop where one doesn't
+exist (fixture with the feature → reads clean, output lacks it, never a bare throw).
+**`.xlsm` policy — OWNER DECISION (present options, wait for the pick):**
+  (a) document-only (README warning);
+  (b) RECOMMENDED — additive `Workbook.macroEnabled: boolean` sniffed from the workbook
+      part's content type (`…sheet.macroEnabled.main+xml`) + README warning, so callers can
+      warn end users before a rewrite discards macros;
+  (c) bridge typed-reject on macro-enabled sources without an explicit opt-in flag.
+
+**Scope (out).** Implementing ANY new carry (that is F10.1–F10.4, or post-1.0); VBA
+round-trip (`vbaProject.bin` carry would change the workbook content type and re-emit live
+macros — deliberately out for 1.0, revisit only on user demand).
+
+**Tasks**
+- [ ] Audit sweep: diff `reader/worksheet.ts`'s parsed-element set and `writer/parts.ts`'s
+      emitted-part set against CT_Worksheet/CT_Workbook + the OPC part inventory → the
+      authoritative drop list (goes in the session scratchpad; conclusions into the docs).
+- [ ] README table rows + package-README mirrors + from-workbook.ts header true-up (all
+      agree, exactly).
+- [ ] `.xlsm` decision presented → implement the pick (+ a macro-enabled fixture either way;
+      `detectSpreadsheetFormat` already routes `.xlsm` → `'xlsx'` — unchanged).
+- [ ] Drop pins for every newly-documented drop that lacks one.
+- [ ] Docs-accuracy review lens (does the README match the code, line by line) + gates.
+
+**Acceptance.** The README drop-list and the code agree exactly; `.xlsm` behavior is
+explicit, tested, and documented; every documented drop has a pin proving "reads clean,
+drops named, never bare-throws".
+
+### F10.6 — API freeze pass ☐
+
+**Context.** Pre-1.0 sweep findings (2026-07-14, all verified in-tree). (1) HIGH: the a1
+helpers exported from the package index (`columnToIndex`/`indexToColumn`/`parseRef`/
+`formatRef`, `ooxml/a1.ts`) throw BARE `Error` — the only public entry points with an
+untyped error contract; post-1.0 the thrown type is frozen. (2) MED: `CellRef` name
+collision — core `index.ts` exports `{col,row}` (from `ooxml/a1.ts`) while
+`openjsxl/formula` exports a DIFFERENT `CellRef` AST node (`formula/ast.ts`); importing both
+entry points collides, and renaming after 1.0 is breaking. The ONLY collision (verified:
+`RangeRef`/`ErrorCode` etc. are formula-side only). (3) MED: writer zip throws bare `Error`
+on duplicate/directory entry names (`writer/zip.ts`, `writer/stream-zip.ts` — whose
+docstring even PROMISES "a plain `Error`"). (4) LOW: `as` escapes vs the no-type-escape
+rule — the realest are `writer/sheet.ts` (`input as unknown as Record<…>` + two value
+casts); the rest are two guarded idioms (bounds-checked index assert under
+noUncheckedIndexedAccess; Set-membership narrow) in biff/record.ts, formula/parser.ts,
+formula/lexer.ts, ooxml/styles.ts, ooxml/dxf.ts. (5) LOW: stale headers — core `index.ts`
+"For now…" on what is now the full API file; `utils/chars.ts` same flavor;
+`writer/index.ts` header overstates what the package index re-exports. (6) `openCsv` is
+SYNC while the other three `open*` are async — deliberate (no container to decompress),
+KEEP, but freeze it as documented intent.
+
+**Scope (in).** a1 helpers → `XlsxError("invalid-input")` (XlsxError extends Error, so
+existing `catch (e instanceof Error)` consumers keep working — changelog note); rename the
+formula-side `CellRef` → `CellRefNode` (present the symmetric-suffix alternative to the
+owner at implementation if it looks cleaner in situ); writer-zip bare Errors → typed +
+docstring fix; `as` policy: REMOVE the writer/sheet.ts escapes if a clean typing exists,
+BLESS the two guarded idioms with a short CLAUDE.md note naming them; header comment
+true-ups; full export audit — every export of `index.ts` AND `formula/index.ts` intentional
+and JSDoc'd, d.ts output reviewed; a stated error contract in README + JSDoc ("every public
+function throws `XlsxError` only"); `openCsv` stays sync, JSDoc'd as deliberate.
+
+**Scope (out).** Any signature or behavior change beyond the listed items; core-side
+renames; new features.
+
+**Tasks**
+- [ ] a1 typed errors + tests asserting the code path (`invalid-input`) + changelog note.
+- [ ] `CellRefNode` rename (formula entry only) + collision test (import both entry points'
+      surfaces in one file — compile-time proof).
+- [ ] Writer-zip typed errors + docstring + tests.
+- [ ] `as` sweep: fix writer/sheet.ts if clean; CLAUDE.md blessed-idiom note for the rest.
+- [ ] Export audit (both entry points, d.ts reviewed) + header true-ups + error-contract
+      docs + gates.
+
+**Acceptance.** Zero bare-`Error` paths reachable from the public API (grep + tests prove
+it); the two entry points' export names are collision-free; every export is documented;
+gates green.
+
+### F10.7 — README as the canonical documentation ☐
+
+**Context.** Owner decision (2026-07-14): the README is THE doc for 1.0 — "all the info
+regarding the interface and methods and examples" — and a docs site is for another day. npm
+renders the PACKAGE readme, so `packages/openjsxl/README.md` is what installers see; the
+root `README.md` is what GitHub shows. Today the READMEs are guide-shaped (excellent but
+selective); nothing documents the full surface function-by-function.
+
+**Scope (in).** Root README gains a complete **API reference**: every public export of BOTH
+entry points — functions (`openXlsx`/`openXlsb`/`openOds`/`openCsv`/
+`detectSpreadsheetFormat`/`streamSheetRows`/`writeXlsx`/`streamXlsx`/`workbookToInput`, the
+a1 helpers, and whatever else `index.ts` exports — the F10.6 audit is the checklist) with
+signature, parameters, throws, and a short example; member tables for
+`Workbook`/`Worksheet`/`Row`/`Cell` and the style/geometry/M10 types; an `openjsxl/formula`
+reference (`parseFormula`, `evaluateWorkbook`/`evaluateCell`, `EvaluateOptions` incl. UDFs
+and the injected clock/RNG, `FormulaError`, value types); every section cross-linked to its
+runnable example in `examples/`. `packages/openjsxl/README.md` mirrors the full reference
+(it is the npm landing page); `packages/core/README.md` stays engine-focused and points at
+the facade. New examples for the M10 carries (names, autoFilter, protection, print — extend
+07/13 or add `14-print-and-protection.mjs`; keep `examples/README.md`'s index current).
+ROADMAP 1.0 row + PUBLISHING versioning entry true-up. **Consistency rule:** every
+documented signature is verified against the built `.d.ts` — no drift; every example runs.
+
+**Scope (out).** Docs-site tooling of any kind (typedoc, site generators) — post-1.0;
+auto-generation (1.0 reference is hand-curated against the d.ts).
+
+**Tasks**
+- [ ] API inventory from the built d.ts (both entry points) — the reference's checklist.
+- [ ] Root README reference sections (functions, interfaces, types, formula entry).
+- [ ] Facade README full mirror + core README pointer + examples for M10 features +
+      examples/README index.
+- [ ] ROADMAP / PUBLISHING true-up.
+- [ ] Docs-accuracy review lens (signature drift against d.ts; every example executed) +
+      gates.
+
+**Acceptance.** A user can operate every public API from the README alone; signatures match
+the d.ts exactly; all examples run; npm and GitHub landing pages both carry the full
+reference.
+
+### F10.8 — 1.0 release ☐
+
+**Context.** Owner-gated by CLAUDE.md rule 4: version bumps only at the owner's explicit
+request; READMEs + examples must already be true (F10.7); the OWNER runs `pnpm -r publish
+--access public`, tags, and pushes — never the agent, never the npm CLI.
+
+**Tasks**
+- [ ] Full gate + corpus + fuzz-smoke re-run at the release candidate; benchmarks re-measured
+      on the release build (`pnpm bench`) and `docs/benchmarks.md` regenerated.
+- [ ] Version 1.0.0 lock-step bump (root + core + facade) AT THE OWNER'S WORD, with the
+      PUBLISHING.md changelog entry.
+- [ ] OWNER: publish, `git tag v1.0.0`, push; then `pnpm sizes` re-run to flip the size row
+      to the published 1.0.0.
+- [ ] OWNER decision recorded: repo visibility for 1.0 (npm metadata links 404 while
+      private — PUBLISHING.md note).
+- [ ] ROADMAP 1.0 row ☑ + progress.md checkpoint.
+
+**Acceptance.** 1.0.0 live on npm (facade + core, lock-step), tag pushed, benchmarks/sizes
+current, ROADMAP updated.
+
+---
+
+## M11+ — Later milestones (outline; expanded when reached)
 
 - **Deferred — legacy `.xls` (BIFF8) read:** a CFB/OLE2 container reader + BIFF record
   layer (globals + per-sheet substreams; the SST `Continue`-split Unicode-flag trap;
@@ -2567,8 +2945,19 @@ ride along).
 - **Deferred — native lane:** the optional `@openjsxl/native` napi-rs binding to Rust
   `calamine` (and a WASM build) behind the zip/xml interface. Deferred by the F5.5
   benchmark evidence (see the M6 re-scope note); revisit if a workload shifts the math.
-- **1.0:** frozen API, full round-trip fidelity, documentation site, benchmarks kept
-  current (harness from F5.5).
+- **Deferred — docs site** (owner, 2026-07-14: "another day"): a generated reference site;
+  the README stays canonical until then (F10.7).
+- **Deferred — F9.4 x14 corpus fixture:** a real Excel 365 file exercising the x14 skip
+  paths (neg-value dataBar + x14 twin, custom icon set, cross-sheet DV) — unit-tested
+  today; corpus-strengthening only, needs the owner to author the file in real Excel.
+- **Deferred — F9.7 review LOW:** exempt `streamSheetRows` from the 2 GiB absolute
+  per-part cap (its whole point is constant-memory hugeness) while keeping the ratio
+  guard; revisit with a real >2 GiB streaming use case.
+- **Deferred — dependency majors:** TypeScript stays on 5.x until tsup's DTS pipeline
+  supports TS 7 (verified breaking, 2026-07-13); re-check each tsup release.
+- **Post-1.0 fidelity candidates** (additive, demand-driven): rich-text run carry,
+  outline/grouping, tab colors, threaded comments, docProps write, gradient fills,
+  autoFilter criteria, rowBreaks/colBreaks, x14 (incl. cross-sheet DV) emission, charts.
 
 ---
 
