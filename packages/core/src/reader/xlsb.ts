@@ -25,6 +25,7 @@ import {
 	type XlsbStyleTable,
 } from "../xlsb";
 import { openZip, type ZipArchive } from "../zip";
+import { decodeText } from "./decode";
 import { type ReadOptions, Workbook } from "./workbook";
 
 // The `.xlsb` reader. An Excel Binary Workbook is the SAME OPC container as `.xlsx` — the package
@@ -33,8 +34,6 @@ import { type ReadOptions, Workbook } from "./workbook";
 // resolves each part through the rels graph, parses the binary records (see ../biff, ../xlsb), and
 // returns the SAME public Workbook `openXlsx` returns. Styles beyond number formats, formula text,
 // comments, geometry, images, and merges are not carried and degrade on their accessors (F7.2).
-
-const decoder = new TextDecoder();
 
 const REL_OFFICE_DOCUMENT = "/officeDocument";
 const REL_SHARED_STRINGS = "/sharedStrings";
@@ -65,7 +64,7 @@ function relsPathFor(path: string): string {
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))
 		throw new XlsxError("missing-part", `xlsb is missing a required part: ${path}`);
-	return decoder.decode(await zip.read(path));
+	return decodeText(await zip.read(path));
 }
 
 // The xlsb-backed Worksheet: a plain data holder built from the parsed sheet part. numberFormat is

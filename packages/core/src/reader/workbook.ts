@@ -38,6 +38,7 @@ import type {
 	Worksheet,
 } from "../types";
 import { openZip, type ZipArchive } from "../zip";
+import { decodeText } from "./decode";
 import {
 	parseCellStyles,
 	parseColumnProps,
@@ -59,8 +60,6 @@ import {
 //
 // Worksheet XML is decompressed up front (so cell access is synchronous) but only parsed
 // into cells on first use; a sheet you never touch costs a decompression, not a parse.
-
-const decoder = new TextDecoder();
 
 // Relationship type URIs end in these segments; matching the suffix avoids hard-coding the
 // 2006 namespace and tolerates the strict/transitional variants.
@@ -90,7 +89,7 @@ function relsPathFor(path: string): string {
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))
 		throw new XlsxError("missing-part", `xlsx is missing a required part: ${path}`);
-	return decoder.decode(await zip.read(path));
+	return decodeText(await zip.read(path));
 }
 
 /**
@@ -116,13 +115,13 @@ async function loadSheetImages(
 	for (const drawingRel of drawingRels) {
 		const drawingPath = resolveTarget(sheetDir, drawingRel.target);
 		if (!zip.has(drawingPath)) continue;
-		const anchors = parseDrawing(decoder.decode(await zip.read(drawingPath)));
+		const anchors = parseDrawing(decodeText(await zip.read(drawingPath)));
 		if (anchors.length === 0) continue;
 
 		// The drawing's rels map each picture's r:embed to its media part.
 		const embedRelsPath = relsPathFor(drawingPath);
 		if (!zip.has(embedRelsPath)) continue;
-		const embedRels = parseRels(decoder.decode(await zip.read(embedRelsPath)));
+		const embedRels = parseRels(decodeText(await zip.read(embedRelsPath)));
 		const drawingDir = directoryOf(drawingPath);
 		const mediaCache = new Map<string, Uint8Array>();
 
@@ -540,7 +539,7 @@ async function loadWorkbook(
 	if (sst !== undefined && sst.targetMode !== "External") {
 		const sstPath = resolveTarget(workbookDir, sst.target);
 		if (zip.has(sstPath)) {
-			sharedStrings = parseSharedStrings(decoder.decode(await zip.read(sstPath)));
+			sharedStrings = parseSharedStrings(decodeText(await zip.read(sstPath)));
 		}
 	}
 
@@ -553,7 +552,7 @@ async function loadWorkbook(
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const stylesPath = resolveTarget(workbookDir, stylesRel.target);
 		if (zip.has(stylesPath)) {
-			const stylesText = decoder.decode(await zip.read(stylesPath));
+			const stylesText = decodeText(await zip.read(stylesPath));
 			styles = parseStyles(stylesText);
 			dxfs = parseDxfs(stylesText);
 		}
@@ -571,7 +570,7 @@ async function loadWorkbook(
 	if (themeRel !== undefined && themeRel.targetMode !== "External") {
 		const themePath = resolveTarget(workbookDir, themeRel.target);
 		if (zip.has(themePath)) {
-			const decoded = decoder.decode(await zip.read(themePath));
+			const decoded = decodeText(await zip.read(themePath));
 			// A present-but-EMPTY theme part (a truncated/corrupt producer) is no usable theme —
 			// treat it as absent so resolveColor degrades to `undefined` and, crucially, the bridge
 			// doesn't carry "" into the writer's non-empty check (which would reject the workbook's
@@ -627,12 +626,12 @@ export async function openXlsx(
 	const infos: SheetInfo[] = [];
 	const byName = new Map<string, Worksheet>();
 	for (const { info, path } of sheets) {
-		const xml = decoder.decode(await zip.read(path));
+		const xml = decodeText(await zip.read(path));
 		// The sheet's own relationships (xl/worksheets/_rels/sheetN.xml.rels) resolve hyperlink
 		// r:ids and locate the comments part. Optional — a plain sheet has no rels part.
 		const relsPath = relsPathFor(path);
 		const rels = zip.has(relsPath)
-			? parseRels(decoder.decode(await zip.read(relsPath)))
+			? parseRels(decodeText(await zip.read(relsPath)))
 			: undefined;
 
 		// Comments live in a separate part linked from the worksheet rels.
@@ -640,7 +639,7 @@ export async function openXlsx(
 		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS));
 		if (commentsRel !== undefined && commentsRel.targetMode !== "External") {
 			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target);
-			if (zip.has(commentsPath)) commentsXml = decoder.decode(await zip.read(commentsPath));
+			if (zip.has(commentsPath)) commentsXml = decodeText(await zip.read(commentsPath));
 		}
 
 		// Tables are one part each (a sheet may own several), linked from the worksheet rels.
@@ -649,7 +648,7 @@ export async function openXlsx(
 			for (const rel of rels.values()) {
 				if (!rel.type.endsWith(REL_TABLE) || rel.targetMode === "External") continue;
 				const tablePath = resolveTarget(directoryOf(path), rel.target);
-				if (zip.has(tablePath)) tablesXml.push(decoder.decode(await zip.read(tablePath)));
+				if (zip.has(tablePath)) tablesXml.push(decodeText(await zip.read(tablePath)));
 			}
 		}
 

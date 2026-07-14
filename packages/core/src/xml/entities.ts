@@ -4,8 +4,15 @@
 //
 // Per the XML spec, hex references use a lowercase `x` (`&#x41;`); anything that does
 // not match a known form is left untouched so malformed input round-trips unchanged.
-
-const ENTITY_PATTERN = /&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);/g;
+//
+// The numeric-reference digit counts are BOUNDED (≤ 6 hex / ≤ 7 decimal — enough for the
+// largest scalar U+10FFFF): a longer run, even one that is only leading-zero padding, is left
+// literal. This keeps the longest decodable reference (`&#x10FFFF;` / `&#1114111;` = 10 chars)
+// within the streaming tokenizer's split-entity window (xml/stream.ts MAX_ENTITY_TAIL), so a
+// reference straddling a chunk boundary decodes identically to a one-shot parse — without the
+// bound, a padded reference longer than the window would be held-then-dropped by the stream but
+// decoded whole by one-shot (the F9.7 review's split-charref divergence).
+const ENTITY_PATTERN = /&(#x[0-9a-fA-F]{1,6}|#[0-9]{1,7}|amp|lt|gt|quot|apos);/g;
 
 export function decodeXmlEntities(input: string): string {
 	if (!input.includes("&")) return input;

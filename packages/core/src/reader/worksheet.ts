@@ -1,3 +1,4 @@
+import { XlsxError } from "../errors";
 import {
 	type CellRef,
 	type DecodeContext,
@@ -670,15 +671,30 @@ export async function* streamRows(
 	const xml = createXmlStream();
 	const decoder = new TextDecoder();
 
-	for await (const bytes of chunks) {
-		const text = decoder.decode(bytes, { stream: true });
-		if (text === "") continue;
-		for (const token of xml.push(text)) yield* assembler.push(token);
+	// A single cell VALUE that grows past the JS engine's maximum string length (V8 ~512 MiB) makes
+	// the accumulation throw a bare `RangeError` — surface it as the typed `part-too-large` the
+	// tolerant-reader contract requires, never a bare throw (F9.7 review follow-up). The typed
+	// MAX_UNFINISHED_CONSTRUCT cap in the stream already passes through untouched.
+	try {
+		for await (const bytes of chunks) {
+			const text = decoder.decode(bytes, { stream: true });
+			if (text === "") continue;
+			for (const token of xml.push(text)) yield* assembler.push(token);
+		}
+		const tail = decoder.decode(); // finalize any pending multi-byte sequence
+		if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token);
+		for (const token of xml.flush()) yield* assembler.push(token);
+		yield* assembler.flush();
+	} catch (cause) {
+		if (cause instanceof RangeError) {
+			throw new XlsxError(
+				"part-too-large",
+				"a cell value exceeds the maximum string length this runtime supports",
+				{ cause },
+			);
+		}
+		throw cause;
 	}
-	const tail = decoder.decode(); // finalize any pending multi-byte sequence
-	if (tail !== "") for (const token of xml.push(tail)) yield* assembler.push(token);
-	for (const token of xml.flush()) yield* assembler.push(token);
-	yield* assembler.flush();
 }
 
 // ── Sheet geometry (F4.5) ──────────────────────────────────────────────────────────────────────

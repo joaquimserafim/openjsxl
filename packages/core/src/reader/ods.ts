@@ -19,6 +19,7 @@ import type {
 	Worksheet,
 } from "../types";
 import { openZip } from "../zip";
+import { decodeText } from "./decode";
 import { type ReadOptions, Workbook } from "./workbook";
 
 // The `.ods` reader. An OpenDocument spreadsheet is a ZIP whose sheets all live in one
@@ -27,8 +28,6 @@ import { type ReadOptions, Workbook } from "./workbook";
 // can't exist inside a single part). The result is the SAME public Workbook/Worksheet surface
 // `openXlsx` returns — accessors ODS can't express (styles, formula text, comments, geometry,
 // images) DEGRADE to `[]`/`undefined`, never throw (F7.1).
-
-const decoder = new TextDecoder();
 
 // The ODF spreadsheet media type. A spreadsheet TEMPLATE (`…spreadsheet-template`) shares this
 // prefix, so `startsWith` accepts both while still rejecting a text/presentation document.
@@ -189,7 +188,7 @@ export async function openOds(
 	// Encrypted ODF (an encryption-data entry in the manifest) can't be parsed — refuse it typed
 	// rather than garbage-parse the ciphertext.
 	if (zip.has("META-INF/manifest.xml")) {
-		const manifest = decoder.decode(await zip.read("META-INF/manifest.xml"));
+		const manifest = decodeText(await zip.read("META-INF/manifest.xml"));
 		if (manifest.includes("manifest:encryption-data")) {
 			throw new XlsxError("unsupported", "encrypted OpenDocument files are not supported");
 		}
@@ -199,7 +198,7 @@ export async function openOds(
 	// or .odp fed to openOds is rejected. Tolerant when absent (a few producers omit it) — the
 	// presence of a parseable content.xml then decides.
 	if (zip.has("mimetype")) {
-		const mimetype = decoder.decode(await zip.read("mimetype")).trim();
+		const mimetype = decodeText(await zip.read("mimetype")).trim();
 		if (mimetype !== "" && !mimetype.startsWith(MIMETYPE_SPREADSHEET)) {
 			throw new XlsxError(
 				"unsupported",
@@ -211,7 +210,7 @@ export async function openOds(
 	if (!zip.has("content.xml")) {
 		throw new XlsxError("missing-part", "ods is missing a required part: content.xml");
 	}
-	const parsed = parseOdsContent(decoder.decode(await zip.read("content.xml")));
+	const parsed = parseOdsContent(decodeText(await zip.read("content.xml")));
 
 	const infos: SheetInfo[] = [];
 	const byName = new Map<string, Worksheet>();

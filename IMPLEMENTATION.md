@@ -2520,13 +2520,27 @@ out of F9.6.
 - [x] Adversarial review (hostile-input + algorithm-correctness lenses on the rewritten stream state
       machine) + re-ran the F9.4 campaign against the hardened readers (no crashers).
 
-**Landed** (uncommitted → owner approval): `xml/stream.ts` (chunk-held resumable scan — linear total
-work, one join per construct; `MAX_UNFINISHED_CONSTRUCT` 64 MiB typed cap), `zip/inflate.ts` (typed
-`part-too-large` on the cap, distinguishable from a corrupt stream), `zip/central-directory.ts` (the
-two default guards + method-aware absolute check closing the STORED bypass), `reader/workbook.ts`
-(`ReadOptions` doc + the ratio knob). Tests: stream resume/linearity/cap units, zip guard + STORED
-units, the fuzz end-to-end file. Probe measured the fixed stream linear (50 MB in 2.8 ms vs the old
-quadratic 13 s at 25 MB). README zip-bomb note updated (guards now on by default).
+**Landed** `477b2bb`: `xml/stream.ts` (chunk-held resumable scan — linear total work, one join per
+construct; `MAX_UNFINISHED_CONSTRUCT` 64 MiB typed cap), `zip/inflate.ts` (typed `part-too-large` on
+the cap, distinguishable from a corrupt stream), `zip/central-directory.ts` (the two default guards +
+method-aware absolute check closing the STORED bypass), `reader/workbook.ts` (`ReadOptions` doc + the
+ratio knob). Tests: stream resume/linearity/cap units, zip guard + STORED units, the fuzz end-to-end
+file. Probe measured the fixed stream linear (50 MB in 2.8 ms vs the old quadratic 13 s at 25 MB).
+README zip-bomb note updated (guards now on by default).
+
+**Review follow-up** (post-commit review of `477b2bb`, 5 CONFIRMED defects — all fixed, uncommitted →
+owner approval): (1) HIGH — the `<!…>`/`</…>` 1-char terminator's resume overlap was `slice(-0)` =
+the whole window, so declarations re-searched quadratically again; fixed (`tail=""` for a 1-char
+terminator). (2) MED — close tags routed through the quote-aware `scanTag`, but the tokenizer ends
+`</…>` at the first plain `>`; now share the `gt` (plain-`>`) path with declarations. (3) MED —
+`ENTITY_PATTERN` accepted unbounded numeric charrefs while the stream's window caps at 16, so a padded
+ref split across a chunk diverged; bounded to ≤6 hex/≤7 decimal (both paths agree). (4) HIGH — a part
+decoding to 512 MiB–2 GiB passes the byte guards but overflows V8's ~512 MiB string limit → bare
+`Error`; new `reader/decode.ts` `decodeText` wraps every whole-part decode → typed `part-too-large`.
+(5) MED — `streamRows` building a >512 MiB cell value threw bare `RangeError`; guarded → typed.
+Re-verified: differential fuzz streamed==one-shot 0 divergences over 40k strings + curated; decl now
+linear; both string-ceiling crashes now typed (probe). New tests: stream close-tag/charref/decl pins +
+decl-linearity, entities bound, `decodeText`.
 
 **Acceptance.** A worksheet part that is one giant unterminated construct fails typed (or streams in
 O(n)) instead of hanging/growing unboundedly; a default `openXlsx`/`openXlsb`/`openOds` on a

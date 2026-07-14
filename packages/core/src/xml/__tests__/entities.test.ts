@@ -40,4 +40,15 @@ describe("decodeXmlEntities", () => {
 		expect(decodeXmlEntities("5 & 6")).toBe("5 & 6"); // bare ampersand
 		expect(decodeXmlEntities("a &amp b")).toBe("a &amp b"); // missing semicolon
 	});
+
+	it("leaves an over-long numeric reference literal — bounded to fit the stream window (F9.7)", () => {
+		// The digit count is capped at 6 hex / 7 decimal (enough for U+10FFFF); a longer run, even
+		// pure leading-zero padding, stays literal so a straddling reference decodes the same in the
+		// streaming and one-shot tokenizers (they must agree on a maximum entity length).
+		expect(decodeXmlEntities("&#x10FFFF;")).toBe("\u{10FFFF}"); // the longest DECODABLE hex ref
+		expect(decodeXmlEntities("&#1114111;")).toBe("\u{10FFFF}"); // the longest DECODABLE decimal ref
+		expect(decodeXmlEntities("&#x0000041;")).toBe("&#x0000041;"); // 7 hex digits → literal
+		expect(decodeXmlEntities("&#00000065;")).toBe("&#00000065;"); // 8 decimal digits → literal
+		expect(decodeXmlEntities("&#x0000000000000041;")).toBe("&#x0000000000000041;");
+	});
 });

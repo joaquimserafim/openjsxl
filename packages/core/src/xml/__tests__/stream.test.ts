@@ -142,6 +142,19 @@ describe("createXmlStream — F9.7 resumable scan", () => {
 		expect(tokens[0]?.kind).toBe("open");
 	});
 
+	it("streams a giant '<!…>' declaration in LINEAR time (F9.7 review: the 1-char-terminator O(n²) bug)", () => {
+		// The `<!DOCTYPE …>` (and `</…>`) terminator is a single '>', so its resume overlap must be
+		// EMPTY — a `slice(-0)` bug kept the whole window and re-searched it every push (quadratic).
+		// A 32 MiB unterminated declaration must stream well under a second (it was ~5.5s when quadratic).
+		const stream = createXmlStream();
+		stream.push("<!DOCTYPE ");
+		const filler = "x".repeat(64 * 1024);
+		const t0 = performance.now();
+		for (let n = 0; n < 512; n++) expect(stream.push(filler)).toEqual([]); // 32 MiB, no '>'
+		expect(performance.now() - t0).toBeLessThan(1500);
+		expect(stream.push(">ok<x/>").at(-1)?.kind).toBe("open");
+	});
+
 	it("fails typed once a single unterminated construct exceeds MAX_UNFINISHED_CONSTRUCT", () => {
 		const stream = createXmlStream();
 		stream.push("<!--");
@@ -181,6 +194,12 @@ describe("createXmlStream — F9.7 resumable scan", () => {
 			">--\n<\n<!--]]></a>",
 			'& <="x"<?<?]]>\t',
 			"text<?pi never closes",
+			'</a b="x><t q=">"/>', // F9.7 REVIEW: a close tag ends at the first plain '>' (quote-UNAWARE)
+			"</a '>' b>c", // a quote inside a close-tag name doesn't protect '>'
+			"t&#x0000000000000041;u", // F9.7 REVIEW: an over-long numeric charref stays literal in both paths
+			"t&#00000000000000065;u",
+			"ok&#x41;&#160;done", // valid charrefs still decode when split anywhere
+			"<!DOCTYPE x '>' y>z", // a declaration '>' is quote-unaware
 		];
 		for (const xml of samples) {
 			const expected = mergeText([...tokenize(xml)]);
@@ -232,6 +251,11 @@ describe("createXmlStream — F9.7 resumable scan", () => {
 			'c="<"',
 			"  ",
 			"\n",
+			'</a b=">"',
+			"</x '>'",
+			"&#x0000041;",
+			"&#00000065;",
+			"&#x41;",
 		];
 		for (let iter = 0; iter < 3000; iter++) {
 			let xml = "";

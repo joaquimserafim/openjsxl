@@ -44,14 +44,15 @@ const MAX_ENTITY_TAIL = 16;
 export const MAX_UNFINISHED_CONSTRUCT = 64 * 1024 * 1024;
 
 // The delimited (non-tag) constructs: opener length + terminator (searched with a plain indexOf,
-// quote-UNAWARE — exactly as the tokenizer scans each). A tag is handled separately because its
-// terminator (`>`) must respect quoted attribute values. `decl` is a `<!…>` declaration that is
-// not a comment or CDATA (e.g. `<!DOCTYPE …>`): the tokenizer ends it at the first plain `>`.
+// quote-UNAWARE — exactly as the tokenizer scans each). An OPEN tag is handled separately because
+// its terminator (`>`) must respect quoted attribute values. `gt` covers the two constructs the
+// tokenizer ends at the first plain `>`: a `<!…>` declaration (e.g. `<!DOCTYPE …>`) and a `</…>`
+// close tag.
 const DELIMS = {
 	comment: { open: COMMENT_OPEN.length, term: "-->" },
 	cdata: { open: CDATA_OPEN.length, term: "]]>" },
 	pi: { open: 2, term: "?>" },
-	decl: { open: 2, term: ">" },
+	gt: { open: 2, term: ">" },
 } as const;
 
 type PendingKind = keyof typeof DELIMS | "tag";
@@ -159,11 +160,14 @@ function safeBoundary(buf: string): {
 			const end = buf.indexOf("]]>", lt + CDATA_OPEN.length);
 			if (end === -1) return { cut: lt, open: { kind: "cdata", tagState: TAG_START } };
 			i = end + 3;
-		} else if (buf[lt + 1] === "!") {
+		} else if (buf[lt + 1] === "!" || buf[lt + 1] === "/") {
 			// A `<!…>` declaration that is NOT `<!--`/`<![CDATA[` (both handled above, their
-			// partials by the marker check): the tokenizer ends it at the first plain `>`.
+			// partials by the marker check), OR a `</…>` close tag: the tokenizer ends BOTH at the
+			// first plain `>` — quote-UNAWARE (tokenizer.ts:75 / :82), unlike an open tag's value
+			// quotes. Routing a close tag through the quote-aware scanTag would end it at a later
+			// `>`, splitting the stream where one-shot would not (the F9.7 review's close-tag bug).
 			const end = buf.indexOf(">", lt + 2);
-			if (end === -1) return { cut: lt, open: { kind: "decl", tagState: TAG_START } };
+			if (end === -1) return { cut: lt, open: { kind: "gt", tagState: TAG_START } };
 			i = end + 1;
 		} else if (buf[lt + 1] === "?") {
 			const end = buf.indexOf("?>", lt + 2);
@@ -286,7 +290,10 @@ export function createXmlStream(): XmlStream {
 			if (at === -1) {
 				held.push(text);
 				heldLen += text.length;
-				tail = window.slice(-(term.length - 1));
+				// Keep only the last term.length-1 chars as the next overlap. A 1-char terminator
+				// (`gt`) can't straddle a boundary, so its tail is EMPTY — `slice(-0)` would keep the
+				// WHOLE window and re-search it every push (the F9.7 review's decl O(n²) bug).
+				tail = term.length > 1 ? window.slice(-(term.length - 1)) : "";
 				capCheck();
 				return tokens;
 			}
