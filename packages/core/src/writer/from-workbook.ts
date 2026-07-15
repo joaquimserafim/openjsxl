@@ -1,6 +1,7 @@
 import { XlsxError } from "../errors";
 import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1";
 import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
+import type { DefinedName } from "../ooxml/workbook";
 import type { Workbook } from "../reader/workbook";
 import type {
 	Cell,
@@ -46,6 +47,41 @@ export function uniquifyTableName(name: string, seen: Set<string>): string {
 	}
 }
 
+/**
+ * Drop later per-scope case-insensitive DUPLICATE defined names (F10.1). The tolerant reader returns
+ * each name individually writer-legal but does NOT dedupe across the workbook, so a foreign file with
+ * two same-scope names that collide case-insensitively (which Excel itself forbids) would otherwise
+ * make the subsequent writeXlsx reject the pair and abort a legitimate save. Keep the FIRST occurrence
+ * in document order — a defined name can't be suffix-renamed like a table (formulas reference it by
+ * name), so a genuine collision is resolved by dropping, exactly as Excel repairs such a file.
+ * Exported for unit testing. Returns the input array UNCHANGED (same reference) when there are no
+ * duplicates, so the common clean-file path adds no allocation.
+ */
+export function dedupeDefinedNames(names: readonly DefinedName[]): readonly DefinedName[] {
+	const seen = new Set<string>();
+	let duplicate = false;
+	for (const dn of names) {
+		const scopeKey = dn.localSheetId !== undefined ? String(dn.localSheetId) : "*";
+		const key = `${scopeKey} ${dn.name.toUpperCase()}`;
+		if (seen.has(key)) {
+			duplicate = true;
+			break;
+		}
+		seen.add(key);
+	}
+	if (!duplicate) return names;
+	seen.clear();
+	const out: DefinedName[] = [];
+	for (const dn of names) {
+		const scopeKey = dn.localSheetId !== undefined ? String(dn.localSheetId) : "*";
+		const key = `${scopeKey} ${dn.name.toUpperCase()}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(dn);
+	}
+	return out;
+}
+
 // Bridge the reader to the writer: turn an open Workbook into the plain-data input writeXlsx wants,
 // so a file can be read, optionally tweaked, and written back. This closes the round trip (F3.3);
 // since F4.4 it carries STYLES too — the CellStyle that sheet.style(ref) resolves is exactly the
@@ -64,10 +100,13 @@ export function uniquifyTableName(name: string, seen: Set<string>): string {
 //   the MEDIA_MIME_TO_EXT set — png, jpeg, gif, bmp, tiff, webp, x-emf, x-wmf) makes the
 //   subsequent writeXlsx throw a TYPED invalid-input — the whole rewrite refuses rather than
 //   silently dropping the picture.
-//   NOT carried (documented drops, F9.6): DEFINED NAMES — the reader exposes
-//   Workbook.definedNames but WorkbookInput has no field for them, so a named-range workbook
-//   rewrites with its formula TEXT intact and the <definedNames> part gone (Excel recalculates
-//   such formulas to #NAME?). IN-CELL RICH TEXT — per-run formatting flattens to plain text at
+//   NOW CARRIED (F10.1): DEFINED NAMES — Workbook.definedNames crosses the bridge into
+//   WorkbookInput.definedNames, so a named-range workbook keeps its <definedNames> and its formulas
+//   resolve on open instead of recalculating to #NAME?. The reader already dropped any name it could
+//   not re-emit (an illegal identifier, an empty/oversized refersTo, a sheet-scope past the sheet
+//   list), and the bridge drops a later per-scope case-insensitive DUPLICATE (a name can't be
+//   suffix-renamed like a table — formulas reference it), so what crosses is always writer-legal.
+//   NOT carried (documented drops): IN-CELL RICH TEXT — per-run formatting flattens to plain text at
 //   read (the concatenated value is what crosses the bridge).
 //   Formula degradations (documented, values stay exact): a SHARED-formula dependent carries its
 //   TRANSLATED text (not the shared grouping); an ARRAY formula carries the master's text as a plain
@@ -227,5 +266,14 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when
 	// the workbook has no theme part — then the writer falls back to the built-in Office theme.
 	const themeXml = workbook.themeXml;
-	return themeXml !== undefined ? { sheets, themeXml } : { sheets };
+	// Carry defined names (F10.1) — each already writer-legal (the reader dropped what it couldn't
+	// re-emit); dedupe a foreign file's per-scope duplicate so the save doesn't abort. Attach only when
+	// non-empty, so a names-free workbook yields the exact same WorkbookInput — and bytes — as before.
+	const definedNames = dedupeDefinedNames(workbook.definedNames);
+	const out: WorkbookInput = {
+		sheets,
+		...(themeXml !== undefined ? { themeXml } : {}),
+		...(definedNames.length > 0 ? { definedNames } : {}),
+	};
+	return out;
 }

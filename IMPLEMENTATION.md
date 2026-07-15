@@ -2631,7 +2631,7 @@ recipe.
 area/titles ride on it) → F10.2 → F10.3 → F10.4 → F10.5 (the drop-list documents the FINAL
 carry set) → F10.6 (freeze) → F10.7 (README documents the frozen surface) → F10.8 (release).
 
-### F10.1 — Defined names: write + bridge carry ☐
+### F10.1 — Defined names: write + bridge carry ☑
 
 **Context.** The reader has modelled defined names since F8.2 (`DefinedName` —
 `ooxml/workbook.ts`; `Workbook.definedNames` — `reader/workbook.ts`), but `WorkbookInput`
@@ -2660,17 +2660,40 @@ existing name-resolution behavior — constants and simple ranges resolve, the r
 `#NAME?` on use); `functionGroups` / `externalReferences`; the `comment` attribute.
 
 **Tasks**
-- [ ] Shared identifier module extracted from `ooxml/table.ts` + defined-name rules on top
-      (built-in `_xlnm.*` allow-list, per-scope uniqueness); table code keeps byte-identical
-      behavior.
-- [ ] Writer: `WorkbookInput.definedNames` validation + `workbookXml` emission + order pin +
-      byte-identity pin (absent field → pre-M10 bytes) + BOTH writers (decision 4).
-- [ ] Reader drop-to-writer-legal true-up + pins (hostile fixtures: name with a space /
-      cell-ref shape / oversized refersTo → dropped named, never a bare throw).
-- [ ] Bridge carry + corpus snapshot extension + fixtures (openpyxl-authored names incl. a
-      sheet-local one and a built-in `Print_Area`; our output read back by openpyxl with
-      `warnings.simplefilter("error")`).
-- [ ] Adversarial review (round-trip + hostile-input lenses) + gates + byte-identity recipe.
+- [x] Shared identifier module (`ooxml/name.ts`) extracted from `ooxml/table.ts` (MAX_NAME_LEN /
+      nameProblem / normalizeName, re-exported under the historical table names — table behavior
+      byte-identical, tests green) + defined-name layer: `definedNameProblem` (the `_xlnm.*`
+      built-in allow-list) + `definedNameEmittable` (the reader's drop predicate).
+- [x] Writer: `WorkbookInput.definedNames` (+ `StreamWorkbookInput`) validation
+      (`validateDefinedNames`, single-read TOCTOU, `isPlainRecord` + unknown-key reject, per-scope
+      case-insensitive uniqueness) + `workbookXml` emission in the slot after `<sheets>` + order
+      pin + byte-identity pin (absent → pre-M10 bytes) + BOTH writers.
+- [x] Reader drop-to-writer-legal true-up + pins (name with a space / cell-ref shape / oversized
+      or XML-unsafe refersTo / bad `_xlnm.` / out-of-range scope → dropped named, never a bare throw).
+- [x] Bridge carry (`dedupeDefinedNames`) + corpus snapshot extension + fixture
+      `openpyxl-defined-names.xlsx` (openpyxl 3.1.5: global range/constant/hidden + sheet-local +
+      `_xlnm.Print_Area`); our output read back by openpyxl `warnings.simplefilter("error")` clean,
+      the print area recognized.
+- [x] Adversarial review (4 lenses + refuting verifiers) + gates + byte-identity recipe (5 canonical
+      inputs byte-IDENTICAL vs pre-F10.1) + openpyxl cross-validation both directions.
+
+**Review** (4-lens adversarial workflow + refuting verifiers; 2 CONFIRMED / 1 UNVERIFIED-then-settled /
+1 REFUTED — all resolved before commit):
+- **CONFIRMED (MEDIUM) — sheet-count mismatch, fixed.** parseWorkbook validated `localSheetId` against
+  the RAW `<sheet>` count, but `loadWorkbook` drops sheets whose part is missing/external/dangling and
+  compacts the survivors — so a scoped name could survive the reader yet be rejected by the writer,
+  aborting the rewrite (and, worse, a shifted index silently changed scope). Fixed in `loadWorkbook`:
+  build a raw→loaded index map, remap each scoped name's `localSheetId`, DROP a name whose scope sheet
+  didn't load. Pinned (`reader/__tests__/defined-names.test.ts` — dropped-sheet reconciliation).
+- **UNVERIFIED→settled (MEDIUM) — `@name` ST_Xstring, fixed.** `@name` is the SAME schema type
+  (ST_Xstring) as a table `displayName`, which F9.6 encodes/decodes; defined names didn't. Made
+  consistent: reader `decodeXstring(@name)`, writer `encodeXstring(@name)` — a no-op for every normal
+  name (byte-identity holds), correct for a name colliding with the `_xHHHH_` escape shape. Real Excel
+  is the authority for ST_Xstring (owner-verifiable, as in F9.6); openpyxl treats @name AND displayName
+  as plain, so it can't distinguish. Pinned (reader decode + writer round-trip tests).
+- **REFUTED (LOW).** `definedNameProblem`'s `_xlnm.` branch alleged unbounded O(n) before the length
+  cap — refuted (linear work on already-linear input, no amplification); added an early length guard
+  anyway for path parity (defense-in-depth).
 
 **Acceptance.** A named-range workbook round-trips with `<definedNames>` intact and its
 formulas recalculating (owner-verifiable in real Excel); invalid caller input fails typed;

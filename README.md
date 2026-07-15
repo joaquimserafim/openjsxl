@@ -264,17 +264,19 @@ await writeFile('out.xlsx', await writeXlsx({ ...input, sheets }));
 ```
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
-pictures, geometry, structural metadata, tables, data validation, and conditional formatting**:
+pictures, geometry, structural metadata, defined names, tables, data validation, and conditional
+formatting**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
 | string, number, boolean, `Date` values | error cells without a formula (written as their text) |
 | number formats — built-in & custom codes | absolute-anchored pictures & non-picture drawings (shapes, charts) — skipped on read |
 | fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
-| colors: rgb, indexed, theme + tint (raw) | defined names / named ranges — read (`Workbook.definedNames`) but dropped on write, so a formula like `=Total*2` recalculates as `#NAME?` |
-| control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
+| colors: rgb, indexed, theme + tint (raw) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
+| control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | |
 | custom theme part (carried byte-identical) | |
 | formula text + cached value | |
+| defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | |
 | comments (author + text, Excel-visible) | |
 | anchored pictures (bytes byte-exact, anchor, type, name) | |
 | empty cells (sparse), incl. styled blanks | |

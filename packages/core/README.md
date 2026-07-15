@@ -94,9 +94,8 @@ non-finite number, invalid `Date`, malformed or overlapping merges) throws `Xlsx
 `code: 'invalid-input'` — string *content* never throws: XML-illegal characters (controls,
 lone surrogates) store via the `_xHHHH_` escape Excel itself uses, and round-trip. The round
 trip is lossless for values, types, sheet names/order, styles, formulas, comments, pictures,
-custom themes, geometry, merges, hyperlinks, visibility, tables, data validations, and
-conditional formatting; defined names are read (`Workbook.definedNames`) but not carried on
-write, and in-cell rich text flattens to plain text.
+custom themes, geometry, merges, hyperlinks, visibility, defined names, tables, data
+validations, and conditional formatting; in-cell rich text flattens to plain text.
 
 ## Other formats (read-only)
 

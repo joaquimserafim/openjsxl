@@ -3,6 +3,7 @@
 // JS value, so the caller never spells out `t="..."` or number formats. This is the "value
 // extractor, not object model" philosophy applied to writing.
 
+import type { DefinedName } from "../ooxml/workbook";
 import type {
 	CellStyle,
 	ColumnProps,
@@ -133,6 +134,16 @@ export interface WorkbookInput {
 	 * ignored when no written style needs a theme part.
 	 */
 	readonly themeXml?: string;
+	/**
+	 * Workbook-level defined (named) ranges and constants (F10.1), emitted as `<definedNames>`. Each
+	 * entry is a {@link DefinedName}: a legal identifier `name`, a stored-form `refersTo` formula (no
+	 * leading `=`, e.g. `'Sheet1'!$A$1:$B$2` or `42`), an optional 0-based `localSheetId` for a
+	 * sheet-scoped name, and an optional `hidden` flag. Invalid entries are rejected with a typed
+	 * {@link import("../errors").XlsxError}. Absent (or empty) emits nothing, so a names-free workbook
+	 * stays byte-identical. The reader's `Workbook.definedNames` is exactly this shape, so a workbook
+	 * round-trips its names through {@link workbookToInput}.
+	 */
+	readonly definedNames?: readonly DefinedName[];
 }
 
 /**
@@ -181,6 +192,8 @@ export interface StreamSheetInput {
 export interface StreamWorkbookInput {
 	readonly sheets: readonly StreamSheetInput[];
 	readonly themeXml?: string;
+	/** Workbook-level defined names (F10.1) — the same {@link DefinedName} shape as {@link WorkbookInput}. */
+	readonly definedNames?: readonly DefinedName[];
 }
 
 export interface WriteOptions {

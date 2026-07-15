@@ -1,6 +1,8 @@
 import type { SheetState } from "../types";
 import { localName, relationshipId } from "../utils";
 import { tokenize } from "../xml";
+import { definedNameEmittable } from "./name";
+import { decodeXstring } from "./xstring";
 
 // xl/workbook.xml lists the workbook's sheets in tab order. Each <sheet> gives a display
 // name and an r:id — NOT a filename — that points into workbook.xml.rels to locate the
@@ -67,7 +69,11 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 					raw === "hidden" || raw === "veryHidden" ? raw : "visible";
 				sheets.push({ name, rid, visible: state === "visible", state });
 			} else if (tag === "definedName" && !token.selfClosing) {
-				dnName = token.attrs.name;
+				// @name is ST_Xstring, the same schema type as a table displayName (F9.6) — Excel and
+				// openpyxl decode it, so a stored `_x005F_x0041_` IS the name `_x0041_`. Decode here so
+				// the model name equals its true value and re-encodes losslessly on write.
+				dnName =
+					token.attrs.name !== undefined ? decodeXstring(token.attrs.name) : undefined;
 				const rawId = token.attrs.localSheetId;
 				const id = rawId !== undefined ? Number.parseInt(rawId, 10) : Number.NaN;
 				dnLocalSheetId = Number.isInteger(id) && id >= 0 ? id : undefined;
@@ -88,5 +94,13 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 			}
 		}
 	}
-	return { sheets, date1904, definedNames };
+	// F10.1 decision 3: keep only names the strict writer could re-emit, so `Workbook.definedNames`
+	// holds writer-legal entries only (the shared-model invariant — what the reader returns IS what
+	// the writer accepts). A foreign producer's illegal name, an empty/oversized/XML-unsafe `refersTo`,
+	// or a sheet-scope pointing past the sheet list is DROPPED — a named, tested degradation. A defined
+	// name is dropped rather than normalized (unlike a table name): it is referenced by formulas, so
+	// renaming it would silently break those links. Such an illegal name is also unreferenceable by any
+	// valid formula, so dropping it never changes what the evaluator resolves.
+	const emittable = definedNames.filter((dn) => definedNameEmittable(dn, sheets.length));
+	return { sheets, date1904, definedNames: emittable };
 }

@@ -193,6 +193,15 @@ git-ignored [`../local/`](../local) directory and are never committed.
   bridge and openpyxl reads our re-written output warnings-as-errors clean. numFmt-in-dxf and the x14
   dataBar degrade are pinned by crafted-XML unit tests; a real Excel x14 dataBar file is an F9.4 ask.
 
+- **`openpyxl-defined-names.xlsx`** — authored by **openpyxl 3.1.5** to exercise defined-name read +
+  bridge carry (F10.1): a `Data` sheet plus a bare `Plain` sheet, with five `<definedName>`s spanning
+  the surface — a global **range** (`Amounts` → `Data!$B$1:$B$3`), a global **constant** (`TaxRate` →
+  `0.2`), a global **hidden** name (`SecretName`, `hidden="1"`), a **sheet-local** name (`FirstItem`,
+  `localSheetId="0"`), and a built-in **`_xlnm.Print_Area`** (`localSheetId="0"`, from `Data.print_area`).
+  The reader returns all five verbatim (`reader/__tests__/defined-names.test.ts`), the corpus property
+  round-trips them through the bridge, and openpyxl reads our re-written output warnings-as-errors
+  clean — recognizing the round-tripped `_xlnm.Print_Area` as the sheet's print area.
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

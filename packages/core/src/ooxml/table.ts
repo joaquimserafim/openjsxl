@@ -1,79 +1,24 @@
 import type { DxfStyle, TableColumn, TableInfo, TableStyleInfo } from "../types";
-import { isXmlSafe, localName } from "../utils";
+import { localName } from "../utils";
 import { tokenize } from "../xml";
 import { parseRef } from "./a1";
+import { normalizeName } from "./name";
 import { decodeXstring } from "./xstring";
 
 // Table part parser (F9.1). Reads `xl/tables/tableN.xml` into the shared {@link TableInfo} model. The
 // reader is TOLERANT: absent attributes degrade to Excel's defaults (header on, totals off), and a
 // part with no usable name or ref yields `undefined` (the caller drops it) rather than throwing.
 
-/**
- * The maximum length of a table display name (decision 8). Single-sourced: the tolerant reader clamps
- * an over-long name here; the strict writer rejects one with a typed error.
- */
-export const MAX_TABLE_NAME_LEN = 255;
-
-// A defined-name-shaped token that looks like a cell reference (`A1`, `ABC12`) — forbidden as a table
-// name, along with the reserved bare `C`/`R`.
-const CELL_REF_NAME = /^[A-Za-z]{1,3}[0-9]+$/;
-
-/**
- * The ways a table display name can be illegal, in the order the writer checks them. A table name is a
- * defined-name-style identifier (decision 8): non-empty, ≤ {@link MAX_TABLE_NAME_LEN}, XML-safe, no
- * whitespace, starts with a letter (any Unicode letter — non-English Excel locales auto-name tables
- * `Таблица1`/`テーブル1`, F9.6) / underscore / backslash, and doesn't look like a cell reference (or the
- * reserved bare `C`/`R` — cell refs are ASCII, so the shape check stays ASCII). Excel repair-prompts on
- * a name that breaks these.
- */
-export type TableNameProblem =
-	| "empty"
-	| "too-long"
-	| "not-xml-safe"
-	| "whitespace"
-	| "bad-start"
-	| "cell-ref";
-
-/**
- * The FIRST rule a table display name breaks, or `undefined` when it is a legal identifier. Single-
- * sourced so the tolerant reader and the strict writer share ONE definition of "legal table name": the
- * reader normalizes a name that has a problem (F9.5), the writer rejects one — they cannot drift apart.
- */
-export function tableNameProblem(name: string): TableNameProblem | undefined {
-	if (name.length === 0) return "empty";
-	if (name.length > MAX_TABLE_NAME_LEN) return "too-long";
-	if (!isXmlSafe(name)) return "not-xml-safe";
-	if (/\s/.test(name)) return "whitespace";
-	if (!/^[\p{L}_\\]/u.test(name)) return "bad-start";
-	if (CELL_REF_NAME.test(name) || /^[CcRr]$/.test(name)) return "cell-ref";
-	return undefined;
-}
-
-/**
- * Rewrite a table display name into a legal identifier ({@link tableNameProblem} of the result is
- * `undefined`) — F9.5's normalize-and-keep degradation, so a foreign table with an odd name survives a
- * read→write round-trip instead of aborting the save. An already-legal name is returned UNCHANGED (a
- * clean file stays byte-identical); an illegal one is repaired deterministically: non-XML-safe chars
- * dropped, whitespace runs collapsed to `_`, a non-letter start prefixed with `_`, a cell-reference
- * shape broken with a trailing `_`, clamped to length — and `"Table"` if nothing legal survives.
- */
-export function normalizeTableName(name: string): string {
-	if (tableNameProblem(name) === undefined) return name; // already legal — never touch it
-	let s = "";
-	for (const ch of name) {
-		if (/\s/.test(ch)) {
-			if (!s.endsWith("_")) s += "_";
-		} else if (isXmlSafe(ch)) {
-			s += ch;
-		}
-	}
-	if (s.length > MAX_TABLE_NAME_LEN) s = s.slice(0, MAX_TABLE_NAME_LEN);
-	if (!/^[\p{L}_\\]/u.test(s)) s = `_${s}`.slice(0, MAX_TABLE_NAME_LEN);
-	if (CELL_REF_NAME.test(s) || /^[CcRr]$/.test(s)) {
-		s = s.length < MAX_TABLE_NAME_LEN ? `${s}_` : `_${s.slice(1)}`;
-	}
-	return tableNameProblem(s) === undefined ? s : "Table";
-}
+// A table display name obeys the shared defined-name-style identifier grammar (decision 8). F10.1
+// extracted that core to ooxml/name.ts (a table name and a workbook defined name are the same grammar,
+// single-sourced so they can never drift). These re-exports keep the historical table-name spelling
+// stable for importers and tests.
+export {
+	MAX_NAME_LEN as MAX_TABLE_NAME_LEN,
+	type NameProblem as TableNameProblem,
+	nameProblem as tableNameProblem,
+	normalizeName as normalizeTableName,
+} from "./name";
 
 /**
  * The width/height (in cells) of an A1 range like `"A1:C5"` — or a single cell `"A1"` — or `undefined`
@@ -229,7 +174,7 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 	}
 
 	if (name === undefined || ref === undefined) return undefined;
-	const legalName = normalizeTableName(name); // F9.5: degrade an odd name to a writer-legal identifier
+	const legalName = normalizeName(name); // F9.5: degrade an odd name to a writer-legal identifier
 	// Resolve each column's highlight dxf indexes to inline styles (F9.3 retrofit).
 	const outColumns: TableColumn[] = columns.map((c) => {
 		const col: {

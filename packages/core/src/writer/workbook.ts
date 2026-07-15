@@ -8,6 +8,7 @@ import {
 	requireWorkbookObject,
 	sheetSideParts,
 	themeToEmit,
+	validateDefinedNames,
 	validateSheetMeta,
 	workbookRelsXml,
 	workbookXml,
@@ -70,6 +71,9 @@ export async function writeXlsx(
 	const date1904 = options?.date1904 === true;
 	// Read the caller's optional carried theme ONCE too. It only matters if a style needs a theme part.
 	const carriedTheme = workbook.themeXml;
+	// Read the caller's optional defined names ONCE (single-read TOCTOU) and validate into the trusted
+	// array workbook.xml emits (F10.1). Absent → [] → no <definedNames> → byte-identical output.
+	const definedNames = validateDefinedNames(workbook.definedNames, sheets.length);
 
 	// Render every worksheet up front — this is also where invalid cell values and styles surface —
 	// interning every style into one shared registry. What the registry saw decides whether
@@ -113,7 +117,7 @@ export async function writeXlsx(
 		),
 	);
 	add("_rels/.rels", packageRelsXml());
-	add("xl/workbook.xml", workbookXml(names, states, date1904));
+	add("xl/workbook.xml", workbookXml(names, states, date1904, definedNames));
 	add("xl/_rels/workbook.xml.rels", workbookRelsXml(sheets.length, needStyles, needTheme));
 	if (needStyles) add("xl/styles.xml", styles.stylesXml());
 	if (needTheme) add("xl/theme/theme1.xml", themeToEmit(carriedTheme));

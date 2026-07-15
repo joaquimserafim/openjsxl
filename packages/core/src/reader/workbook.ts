@@ -579,20 +579,44 @@ async function loadWorkbook(
 		}
 	}
 
-	// Resolve each sheet's r:id to a part path.
+	// Resolve each sheet's r:id to a part path. A sheet whose worksheet part is missing, external, or
+	// dangling is DROPPED — so the loaded list can be shorter than workbook.xml declared, and the
+	// survivors compact to a new 0-based order. Track raw→loaded so sheet-scoped defined names can be
+	// re-indexed against the sheets that actually loaded.
 	const sheets: Array<{ info: SheetInfo; path: string }> = [];
-	for (const entry of workbookSheets) {
+	const rawToLoaded = new Map<number, number>();
+	for (let raw = 0; raw < workbookSheets.length; raw++) {
+		const entry = workbookSheets[raw];
+		if (entry === undefined) continue;
 		const rel = workbookRels.get(entry.rid);
 		if (rel === undefined || rel.targetMode === "External") continue;
 		const path = resolveTarget(workbookDir, rel.target);
 		if (!zip.has(path)) continue;
+		rawToLoaded.set(raw, sheets.length);
 		sheets.push({
 			info: { name: entry.name, path, visible: entry.visible, state: entry.state },
 			path,
 		});
 	}
 
-	return { zip, context, sheets, themeXml, definedNames };
+	// Reconcile sheet-scoped defined names to the LOADED sheets (F10.1). parseWorkbook validated each
+	// localSheetId against the RAW workbook.xml sheet count, but dropping a sheet both shrinks and
+	// re-indexes that list — so remap a scoped name's localSheetId to its sheet's new position, and DROP
+	// a name whose scope sheet didn't load. This keeps every localSheetId a valid index into the loaded
+	// `sheets` — the shared-model invariant the writer's validateDefinedNames relies on (it checks
+	// localSheetId against the loaded count). Nothing dropped → the map is the identity and the array
+	// passes through untouched (byte-identity path).
+	const reconciledNames =
+		rawToLoaded.size === workbookSheets.length
+			? definedNames
+			: definedNames.flatMap((dn) => {
+					if (dn.localSheetId === undefined) return [dn];
+					const loaded = rawToLoaded.get(dn.localSheetId);
+					if (loaded === undefined) return [];
+					return loaded === dn.localSheetId ? [dn] : [{ ...dn, localSheetId: loaded }];
+				});
+
+	return { zip, context, sheets, themeXml, definedNames: reconciledNames };
 }
 
 /**

@@ -7,6 +7,7 @@ import {
 	requireWorkbookObject,
 	sheetSideParts,
 	themeToEmit,
+	validateDefinedNames,
 	validateSheetMeta,
 	workbookRelsXml,
 	workbookXml,
@@ -58,6 +59,8 @@ async function* buildStreamParts(
 	const date1904 = options?.date1904 === true;
 	// Read the caller's optional carried theme ONCE (single-read TOCTOU, matching writeXlsx).
 	const carriedTheme = workbook.themeXml;
+	// Read + validate the optional defined names ONCE (F10.1), matching writeXlsx — absent → byte-identical.
+	const definedNames = validateDefinedNames(workbook.definedNames, names.length);
 	const styles = createStyleRegistry();
 	const media = createMediaRegistry();
 	const tableCtx = createTableContext();
@@ -93,7 +96,10 @@ async function* buildStreamParts(
 	const needTheme = styles.usesTheme();
 	if (needStyles) yield { name: "xl/styles.xml", data: encode(styles.stylesXml()) };
 	if (needTheme) yield { name: "xl/theme/theme1.xml", data: encode(themeToEmit(carriedTheme)) };
-	yield { name: "xl/workbook.xml", data: encode(workbookXml(names, states, date1904)) };
+	yield {
+		name: "xl/workbook.xml",
+		data: encode(workbookXml(names, states, date1904, definedNames)),
+	};
 	yield {
 		name: "xl/_rels/workbook.xml.rels",
 		data: encode(workbookRelsXml(sheets.length, needStyles, needTheme)),

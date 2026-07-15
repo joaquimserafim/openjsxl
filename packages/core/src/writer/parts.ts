@@ -1,9 +1,13 @@
 import { XlsxError } from "../errors";
 import { MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
+import { MAX_FORMULA_LEN } from "../ooxml/formula";
+import { type DefinedNameProblem, definedNameProblem, MAX_NAME_LEN } from "../ooxml/name";
+import type { DefinedName } from "../ooxml/workbook";
+import { encodeXstring } from "../ooxml/xstring";
 import type { SheetState } from "../types";
 import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
-import { escapeAttr, isXmlSafe } from "./xml";
+import { escapeAttr, escapeText, isPlainRecord, isXmlSafe } from "./xml";
 
 // The OPC part builders shared by the buffered writer (writeXlsx) and the streaming writer
 // (streamXlsx). Every function here returns the EXACT bytes writeXlsx used to build inline, so the
@@ -180,12 +184,14 @@ export function packageRelsXml(): string {
 /**
  * `xl/workbook.xml` — the sheet list, with visibility state and the active-tab fix-up. `names` are the
  * VALIDATED names from {@link validateSheetMeta} (not re-read from the caller), so a getter can't slip
- * a different name in between validation and emission.
+ * a different name in between validation and emission. `definedNames` are the VALIDATED entries from
+ * {@link validateDefinedNames}; they emit in the load-bearing CT_Workbook slot right after `<sheets>`.
  */
 export function workbookXml(
 	names: readonly string[],
 	states: readonly SheetState[],
 	date1904: boolean,
+	definedNames: readonly DefinedName[] = [],
 ): string {
 	const workbookPr = date1904 ? '<workbookPr date1904="1"/>' : "";
 	// The active tab defaults to index 0; when the FIRST sheet is hidden that default would point at a
@@ -202,7 +208,169 @@ export function workbookXml(
 			return `<sheet name="${escapeAttr(name)}" sheetId="${i + 1}"${state} r:id="rId${i + 1}"/>`;
 		})
 		.join("");
-	return `${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}${bookViews}<sheets>${sheetsXml}</sheets></workbook>`;
+	return `${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}${bookViews}<sheets>${sheetsXml}</sheets>${definedNamesXml(definedNames)}</workbook>`;
+}
+
+// <definedNames> — one <definedName> per already-validated entry, emitted in the CT_Workbook slot
+// right after <sheets> (element order is load-bearing; Excel repair-prompts on a violation). Absent
+// (no element at all) when there are none, so a names-free workbook keeps its exact pre-F10.1 bytes.
+// Entries are trusted here — validateDefinedNames has already checked and single-read them.
+function definedNamesXml(names: readonly DefinedName[]): string {
+	if (names.length === 0) return "";
+	const items = names
+		.map((dn) => {
+			// CT_DefinedName attribute order: name, …, localSheetId, hidden. @name is ST_Xstring (the
+			// same type as a table displayName, F9.6), so encode it — a name like `_x0041_` survives Excel's
+			// decode. refersTo is element TEXT (a stored-form formula), escaped like cell-formula text.
+			const scope = dn.localSheetId !== undefined ? ` localSheetId="${dn.localSheetId}"` : "";
+			const hidden = dn.hidden ? ' hidden="1"' : "";
+			return `<definedName name="${escapeAttr(encodeXstring(dn.name))}"${scope}${hidden}>${escapeText(dn.refersTo)}</definedName>`;
+		})
+		.join("");
+	return `<definedNames>${items}</definedNames>`;
+}
+
+// Human message for an illegal defined name, by problem code (the writer names WHY it rejected).
+function definedNameProblemMessage(name: string, problem: DefinedNameProblem): string {
+	switch (problem) {
+		case "empty":
+			return "must not be empty";
+		case "too-long":
+			return `"${name}" exceeds ${MAX_NAME_LEN} characters`;
+		case "not-xml-safe":
+			return `"${name}" contains a character not allowed in XML`;
+		case "whitespace":
+			return `"${name}" must not contain whitespace`;
+		case "bad-start":
+			return `"${name}" must start with a letter, underscore, or backslash`;
+		case "cell-ref":
+			return `"${name}" must not look like a cell reference`;
+		case "bad-builtin":
+			return `"${name}" uses the reserved "_xlnm." prefix but is not a spec built-in name`;
+	}
+}
+
+/**
+ * Validate `WorkbookInput.definedNames` (F10.1) into the trusted array {@link workbookXml} emits — or
+ * `[]` when absent, so a names-free workbook stays byte-identical. Each entry's properties are read
+ * exactly ONCE into locals (single-read TOCTOU) before validating and building the returned object, so
+ * a getter/Proxy can't vary a value between check and emission. Rejects — with a typed {@link
+ * XlsxError} — anything the writer can't emit: a non-array, a non-plain-object entry, an unknown
+ * property, an illegal name (the shared defined-name grammar + the reserved `_xlnm.` prefix), a
+ * `refersTo` that isn't a non-empty stored-form (no leading `=`) XML-safe formula within Excel's
+ * ceiling, a `localSheetId` that isn't an integer index of an existing sheet, a non-boolean `hidden`,
+ * or a duplicate name within one scope (case-insensitive, exactly as Excel treats them). The rules
+ * mirror the reader's `definedNameEmittable` drop test — same bounds, opposite response.
+ */
+export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedName[] {
+	if (raw === undefined) return [];
+	if (!Array.isArray(raw)) {
+		throw new XlsxError("invalid-input", "definedNames must be an array");
+	}
+	const out: DefinedName[] = [];
+	// Duplicate detection per scope: key = `${scopeKey} ${NAME_UPPERCASE}`. scopeKey is "*" (global) or
+	// the sheet index; a legal name has no whitespace (nameProblem rejects it), so the single-space
+	// separator can never merge two distinct scope/name pairs.
+	const seen = new Set<string>();
+	for (let i = 0; i < raw.length; i++) {
+		const entry = raw[i];
+		if (!isPlainRecord(entry)) {
+			throw new XlsxError("invalid-input", `definedNames[${i}] must be an object`);
+		}
+		for (const key of Object.keys(entry)) {
+			if (
+				key !== "name" &&
+				key !== "refersTo" &&
+				key !== "localSheetId" &&
+				key !== "hidden"
+			) {
+				throw new XlsxError(
+					"invalid-input",
+					`definedNames[${i}] has an unknown property "${key}"`,
+				);
+			}
+		}
+		const name = entry.name;
+		const refersTo = entry.refersTo;
+		const localSheetId = entry.localSheetId;
+		const hidden = entry.hidden;
+		if (typeof name !== "string") {
+			throw new XlsxError("invalid-input", `definedNames[${i}].name must be a string`);
+		}
+		const problem = definedNameProblem(name);
+		if (problem !== undefined) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}].name ${definedNameProblemMessage(name, problem)}`,
+			);
+		}
+		if (typeof refersTo !== "string") {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): refersTo must be a string`,
+			);
+		}
+		if (refersTo.length === 0) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): refersTo must not be empty`,
+			);
+		}
+		if (refersTo.length > MAX_FORMULA_LEN) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): refersTo exceeds Excel's ${MAX_FORMULA_LEN}-character limit`,
+			);
+		}
+		if (refersTo.startsWith("=")) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): refersTo must be in stored form, without a leading "="`,
+			);
+		}
+		if (!isXmlSafe(refersTo)) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): refersTo contains a character not allowed in XML`,
+			);
+		}
+		let scopeKey = "*"; // workbook-global scope
+		if (localSheetId !== undefined) {
+			if (
+				typeof localSheetId !== "number" ||
+				!Number.isInteger(localSheetId) ||
+				localSheetId < 0 ||
+				localSheetId >= sheetCount
+			) {
+				throw new XlsxError(
+					"invalid-input",
+					`definedNames[${i}] ("${name}"): localSheetId must be an integer index of an existing sheet (0..${sheetCount - 1})`,
+				);
+			}
+			scopeKey = String(localSheetId);
+		}
+		if (hidden !== undefined && typeof hidden !== "boolean") {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}] ("${name}"): hidden must be a boolean`,
+			);
+		}
+		const dupKey = `${scopeKey} ${name.toUpperCase()}`;
+		if (seen.has(dupKey)) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}]: duplicate name "${name}" in the same scope (names are case-insensitive)`,
+			);
+		}
+		seen.add(dupKey);
+		out.push({
+			name,
+			refersTo,
+			...(localSheetId !== undefined ? { localSheetId } : {}),
+			...(hidden === true ? { hidden: true } : {}),
+		});
+	}
+	return out;
 }
 
 /** `xl/_rels/workbook.xml.rels` — worksheet targets plus styles.xml/theme1.xml when present. */
