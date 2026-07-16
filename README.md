@@ -274,17 +274,16 @@ formatting, autofilters, protection, and print setup**:
 | fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
 | colors: rgb, indexed, theme + tint (raw) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
 | control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | autofilter **criteria** & sort state — the filter range carries, the per-column filter/sort is dropped |
-| | printer-settings binary (`printerSettings.bin`) & manual page breaks — dropped |
-| custom theme part (carried byte-identical) | |
-| formula text + cached value | |
-| defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | |
-| comments (author + text, Excel-visible) | |
-| anchored pictures (bytes byte-exact, anchor, type, name) | |
-| empty cells (sparse), incl. styled blanks | |
-| column widths, row heights, hidden, freeze | |
-| merged ranges & hyperlinks | |
-| sheet visibility (hidden / veryHidden) | |
-| sheet names & tab order | |
+| custom theme part (carried byte-identical) | printer-settings binary (`printerSettings.bin`) & manual page breaks — dropped |
+| formula text + cached value | **VBA macros** — an `.xlsm` opens and reads, but rewriting writes a plain `.xlsx` and the macros are dropped (check `Workbook.macroEnabled` to warn first) |
+| defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | row/column **outline grouping** (`outlineLevel`/`collapsed`) — the group nesting is dropped (values, width/height/hidden survive) |
+| comments (author + text, Excel-visible) | sheet **tab colors** and other `sheetPr` — dropped |
+| anchored pictures (bytes byte-exact, anchor, type, name) | **document properties** (author, title, created/modified) — no `docProps` is emitted (deterministic bytes) |
+| empty cells (sparse), incl. styled blanks | **pivot tables** — dropped |
+| column widths, row heights, hidden, freeze | **external workbook links** — a formula's `[1]Sheet!` reference re-emits as text with no target |
+| merged ranges & hyperlinks | **gradient fills** — read as no fill |
+| sheet visibility (hidden / veryHidden) | **threaded comment** thread structure — the text survives as a legacy comment; replies/authorship threading is dropped |
+| sheet names & tab order | `calcChain`/`calcPr` — dropped; Excel recomputes the dependency chain on open |
 | tables (name, range, columns, header/totals, style) | |
 | data validations (dropdowns & input rules) | |
 | conditional formatting (highlights, scales, bars, icon sets) | |

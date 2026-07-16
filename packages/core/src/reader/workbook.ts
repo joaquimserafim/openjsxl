@@ -504,6 +504,13 @@ export class Workbook {
 	readonly definedNames: readonly DefinedName[];
 	/** Workbook-level `<workbookProtection>` (F10.3), or `undefined`. Empty for ods/xlsb/csv. */
 	readonly protection: WorkbookProtection | undefined;
+	/**
+	 * Whether this is a MACRO-ENABLED workbook — an `.xlsm`/`.xltm`, sniffed from the workbook's content
+	 * type (F10.5). openjsxl reads such files but writes only `.xlsx`: rewriting one through
+	 * {@link workbookToInput} → `writeXlsx` DROPS the VBA project (macros). Check this flag to warn a user
+	 * before a rewrite discards their macros. Always `false` for `.xlsx` and for ods/xlsb/csv.
+	 */
+	readonly macroEnabled: boolean;
 	readonly #byName: Map<string, Worksheet>;
 	readonly #themeXml: string | undefined;
 	// Note: `Worksheet` here is the public interface (../types), so this same `Workbook` class is
@@ -520,12 +527,14 @@ export class Workbook {
 		themeXml?: string,
 		definedNames: readonly DefinedName[] = [],
 		protection?: WorkbookProtection,
+		macroEnabled = false,
 	) {
 		this.sheets = sheets;
 		this.#byName = byName;
 		this.#themeXml = themeXml;
 		this.definedNames = definedNames;
 		this.protection = protection;
+		this.macroEnabled = macroEnabled;
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
@@ -579,6 +588,8 @@ interface LoadedWorkbook {
 	readonly definedNames: readonly DefinedName[];
 	/** Workbook `<workbookProtection>` (F10.3), or `undefined`. */
 	readonly protection: WorkbookProtection | undefined;
+	/** Whether the workbook part's content type is macro-enabled (`.xlsm`/`.xltm`) — F10.5. */
+	readonly macroEnabled: boolean;
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -600,6 +611,14 @@ async function loadWorkbook(
 	}
 	const workbookPath = resolveTarget("", office.target);
 	const workbookDir = directoryOf(workbookPath);
+
+	// Macro-enabled sniff (F10.5): the workbook part's content type in [Content_Types].xml is
+	// `…(sheet|template).macroEnabled.main+xml` for an `.xlsm`/`.xltm`. openjsxl reads these but writes
+	// only `.xlsx`, so a rewrite drops the VBA project — this flag lets a caller warn first. A malformed
+	// package with no `[Content_Types].xml` reads as not macro-enabled.
+	const macroEnabled =
+		zip.has("[Content_Types].xml") &&
+		(await readText(zip, "[Content_Types].xml")).includes("macroEnabled.main");
 
 	// Workbook sheet list + date system + the workbook's own relationships.
 	const {
@@ -693,7 +712,15 @@ async function loadWorkbook(
 					return loaded === dn.localSheetId ? [dn] : [{ ...dn, localSheetId: loaded }];
 				});
 
-	return { zip, context, sheets, themeXml, definedNames: reconciledNames, protection };
+	return {
+		zip,
+		context,
+		sheets,
+		themeXml,
+		definedNames: reconciledNames,
+		protection,
+		macroEnabled,
+	};
 }
 
 /**
@@ -721,10 +748,8 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml, definedNames, protection } = await loadWorkbook(
-		source,
-		options,
-	);
+	const { zip, context, sheets, themeXml, definedNames, protection, macroEnabled } =
+		await loadWorkbook(source, options);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = [];
@@ -770,7 +795,7 @@ export async function openXlsx(
 		}
 	}
 
-	return new Workbook(infos, byName, themeXml, definedNames, protection);
+	return new Workbook(infos, byName, themeXml, definedNames, protection, macroEnabled);
 }
 
 /**

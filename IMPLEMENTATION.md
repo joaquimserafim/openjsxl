@@ -2860,7 +2860,7 @@ empty `{}` for a field emits nothing (byte-identity), a tiny exponential margin 
 clean result is by design — F10.4 pre-applied the two prior-review lessons: the customSheetView depth-
 scoping (F10.2) and uint32 integer bounds vs the exponential-emit class (F10.3 spinCount).
 
-### F10.5 — Fidelity truth-up + `.xlsm` policy ☐
+### F10.5 — Fidelity truth-up + `.xlsm` policy ☑
 
 **Context.** The README fidelity table's "Not carried (yet)" column omits several REAL drops
 (verified 2026-07-14): row/col outline grouping (`outlineLevel`/`collapsed`), tab colors /
@@ -2887,20 +2887,28 @@ exist (fixture with the feature → reads clean, output lacks it, never a bare t
 round-trip (`vbaProject.bin` carry would change the workbook content type and re-emit live
 macros — deliberately out for 1.0, revisit only on user demand).
 
-**Tasks**
-- [ ] Audit sweep: diff `reader/worksheet.ts`'s parsed-element set and `writer/parts.ts`'s
-      emitted-part set against CT_Worksheet/CT_Workbook + the OPC part inventory → the
-      authoritative drop list (goes in the session scratchpad; conclusions into the docs).
-- [ ] README table rows + package-README mirrors + from-workbook.ts header true-up (all
-      agree, exactly).
-- [ ] `.xlsm` decision presented → implement the pick (+ a macro-enabled fixture either way;
-      `detectSpreadsheetFormat` already routes `.xlsm` → `'xlsx'` — unchanged).
-- [ ] Drop pins for every newly-documented drop that lacks one.
-- [ ] Docs-accuracy review lens (does the README match the code, line by line) + gates.
+**`.xlsm` decision (owner, 2026-07-15): option (b)** — additive read-only `Workbook.macroEnabled`
+(sniffed from the workbook content type `…macroEnabled.main`) + README warning. Non-breaking; a
+caller can warn before a rewrite discards macros. openjsxl still writes `.xlsx` only.
 
-**Acceptance.** The README drop-list and the code agree exactly; `.xlsm` behavior is
-explicit, tested, and documented; every documented drop has a pin proving "reads clean,
-drops named, never bare-throws".
+**Tasks**
+- [x] Audit sweep: parsed-vs-emitted diff → authoritative drop list; verified line-by-line against
+      code (outline grouping = no model field; tab colors/`sheetPr` = not parsed; docProps = not
+      emitted; pivots = only the protection FLAG, no content; external links / threaded threads /
+      calcChain = 0 refs; gradient fill = "not representable"; VBA = no vbaProject handling).
+- [x] README table rows (root) + package-README mirrors (core + facade) + `from-workbook.ts` header
+      true-up — all four agree; every remaining drop named with its consequence.
+- [x] `.xlsm` option (b): `Workbook.macroEnabled` sniff in `loadWorkbook` (content-type substring,
+      no false-positive on a plain `.xlsx`); `detectSpreadsheetFormat` unchanged. Fixture
+      `crafted-macro-enabled.xlsm` + pin (true for `.xlsm`, false after rewrite, data survives).
+- [x] Drop pins: `documented-drops.test.ts` (outline/tabColor/docProps read clean + round-trip, never
+      throw) over `openpyxl-dropped-features.xlsx`; corpus property pins the value round-trip.
+- [x] Docs-accuracy review (every drop-list claim grep-verified against code) + gates. **Examples:
+      new `14-names-autofilter-protection-print.mjs` (M10 features + macroEnabled pattern); all 14 run.**
+
+**Acceptance.** The README drop-list and the code agree exactly (verified); `.xlsm` behavior is
+explicit (`Workbook.macroEnabled`), tested, and documented; every documented drop has a pin proving
+"reads clean, drops named, never bare-throws".
 
 ### F10.6 — API freeze pass ☐
 

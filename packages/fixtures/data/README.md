@@ -228,6 +228,19 @@ git-ignored [`../local/`](../local) directory and are never committed.
   openpyxl reads our re-written output warnings-as-errors clean (landscape, fit-to-page, and the header
   text preserved).
 
+- **`crafted-macro-enabled.xlsm`** — a hand-crafted minimal macro-enabled workbook (F10.5): a valid
+  1-sheet package whose `[Content_Types].xml` types the workbook part as
+  `…ms-excel.sheet.macroEnabled.main+xml` and which carries a stub `xl/vbaProject.bin`. `openXlsx` reads it
+  (`Workbook.macroEnabled === true`, the cell data loads); a rewrite through the bridge produces a plain
+  `.xlsx` WITHOUT the VBA project (macros dropped, documented) — `reader/__tests__/macro-enabled.test.ts`.
+  Byte-deterministic (fixed 1980 zip timestamps). Not a real Excel file — VBA authoring needs Excel.
+
+- **`openpyxl-dropped-features.xlsx`** — authored by **openpyxl 3.1.5** to pin the documented-drops
+  contract (F10.5): a `Grouped` sheet with row/column **outline levels**, a sheet **tab color**, and
+  workbook **docProps** (creator/title). openjsxl reads it clean and keeps the cell values across a
+  rewrite, but does not surface any of those unmodelled features — never a bare throw
+  (`reader/__tests__/documented-drops.test.ts`; the corpus property pins the value round-trip).
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

@@ -97,8 +97,12 @@ trip is lossless for values, types, sheet names/order, styles, formulas, comment
 custom themes, geometry, merges, hyperlinks, visibility, defined names, tables, data
 validations, conditional formatting, autofilter ranges, protection (sheet/workbook locks +
 per-cell locked/hidden, password hashes verbatim), and print setup (margins, page setup,
-print options, header/footer); in-cell rich text flattens to plain text, and an autofilter's
-per-column criteria and sort state are not carried.
+print options, header/footer). Documented drops (never silent): in-cell rich text flattens to
+plain text; an autofilter's per-column criteria/sort, row/column outline grouping, sheet tab
+colors, document properties, pivot tables, external-workbook links, gradient fills, and threaded
+-comment threading are not carried; and **VBA macros** — an `.xlsm` reads but rewrites to a plain
+`.xlsx` without them (`Workbook.macroEnabled` flags a macro-enabled source). Full list: the root
+README's fidelity table.
 
 ## Other formats (read-only)
 

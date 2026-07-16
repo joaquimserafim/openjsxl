@@ -18,7 +18,8 @@
 		"formats": "node 11-other-formats.mjs",
 		"formulas": "node 12-formulas.mjs",
 		"tables": "node 13-tables-validation-formatting.mjs",
-		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs && node 07-styles-and-layout.mjs && node 08-streaming-write.mjs && node 09-comments-formulas-theme.mjs && node 10-images.mjs && node 11-other-formats.mjs && node 12-formulas.mjs && node 13-tables-validation-formatting.mjs"
+		"m10": "node 14-names-autofilter-protection-print.mjs",
+		"all": "node 01-read-cells.mjs && node 02-sheet-to-json.mjs && node 03-stream-rows.mjs && node 04-metadata.mjs && node 05-error-handling.mjs && node 06-write.mjs && node 07-styles-and-layout.mjs && node 08-streaming-write.mjs && node 09-comments-formulas-theme.mjs && node 10-images.mjs && node 11-other-formats.mjs && node 12-formulas.mjs && node 13-tables-validation-formatting.mjs && node 14-names-autofilter-protection-print.mjs"
 	},
 	"dependencies": {
 		"openjsxl": "workspace:*"

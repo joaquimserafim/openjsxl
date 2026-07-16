@@ -32,6 +32,7 @@ node examples/10-images.mjs          # anchored pictures: write, read back, roun
 node examples/11-other-formats.mjs   # detect + read .xlsb/.ods/.csv into the same Workbook API (0.7)
 node examples/12-formulas.mjs        # parse + evaluate formulas: built-ins, UDFs, errors, cycles (0.8)
 node examples/13-tables-validation-formatting.mjs # tables, data validation, conditional formatting (0.9)
+node examples/14-names-autofilter-protection-print.mjs # defined names, autofilter, protection, print setup, macros (1.0)
 ```
 
 Or all of them: `pnpm --filter openjsxl-examples all`.

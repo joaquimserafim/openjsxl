@@ -112,8 +112,15 @@ export function dedupeDefinedNames(names: readonly DefinedName[]): readonly Defi
 //   not re-emit (an illegal identifier, an empty/oversized refersTo, a sheet-scope past the sheet
 //   list), and the bridge drops a later per-scope case-insensitive DUPLICATE (a name can't be
 //   suffix-renamed like a table — formulas reference it), so what crosses is always writer-legal.
-//   NOT carried (documented drops): IN-CELL RICH TEXT — per-run formatting flattens to plain text at
-//   read (the concatenated value is what crosses the bridge).
+//   NOT carried (documented drops — never a silent change; see the root README fidelity table):
+//   IN-CELL RICH TEXT flattens to plain text at read (the concatenated value crosses the bridge);
+//   autoFilter per-column CRITERIA + sort state (the range carries — F10.2); row/column OUTLINE
+//   grouping (outlineLevel/collapsed); sheet TAB COLORS / sheetPr; DOCUMENT PROPERTIES (author/title/
+//   created — no docProps is emitted, keeping bytes deterministic); PIVOT TABLES; EXTERNAL-workbook
+//   links (a `[1]Sheet!` formula ref re-emits as text with no target); GRADIENT fills (read as no
+//   fill); THREADED-comment thread structure (text survives via the legacy comment part). And VBA
+//   MACROS — an `.xlsm` opens and its data reads, but the rewrite is a plain `.xlsx` without the VBA
+//   project; `Workbook.macroEnabled` flags a macro-enabled source so a caller can warn first (F10.5).
 //   Formula degradations (documented, values stay exact): a SHARED-formula dependent carries its
 //   TRANSLATED text (not the shared grouping); an ARRAY formula carries the master's text as a plain
 //   formula (the spilled cells keep their cached values); a `dataTable` formula carries no text (its

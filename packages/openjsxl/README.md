@@ -78,9 +78,11 @@ const bytes = await writeXlsx({
 values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
 hyperlinks, sheet visibility, defined names, tables, data validations, conditional formatting,
 autofilter ranges, protection (sheet/workbook locks + per-cell locked/hidden), and print setup
-(margins, orientation, scale, header/footer) all round-trip. Not carried (yet): in-cell rich text
-flattens to plain text, and an autofilter's per-column criteria/sort are dropped — see the project
-README's fidelity table.
+(margins, orientation, scale, header/footer) all round-trip. Documented drops (never silent):
+in-cell rich text flattens to plain text; autofilter criteria/sort, outline grouping, tab colors,
+document properties, pivot tables, external links, and gradient fills are not carried; and **VBA
+macros** — an `.xlsm` reads but rewrites without them (`Workbook.macroEnabled` flags it). Full
+list: the project README's fidelity table.
 
 **Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
 Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
