@@ -73,3 +73,31 @@ export function formatRef(ref: CellRef): string {
 	if (!Number.isInteger(ref.row) || ref.row < 1) throw new Error(`invalid row index: ${ref.row}`);
 	return `${indexToColumn(ref.col)}${ref.row}`;
 }
+
+// Strictly canonical A1: uppercase letters, no leading zeros — the form every real producer writes and
+// the only form the writer emits. Three letters cap the column at ZZZ (18,278), so columnToIndex can't
+// overflow; the grid bound is checked after.
+const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/;
+
+/**
+ * Parse a canonical, in-grid single cell like `"A1"` to its `{col,row}`, or `undefined` when it is not
+ * canonical (lowercase, leading zero, non-A1) or falls outside Excel's grid. Shared so the tolerant
+ * reader (which DROPS a hostile ref) and the strict writer (which REJECTS one) agree on "valid cell".
+ */
+export function parseCanonicalCell(ref: string): CellRef | undefined {
+	if (!CANONICAL_CELL.test(ref)) return undefined;
+	const parsed = parseRef(ref);
+	return parsed.col <= MAX_COL && parsed.row <= MAX_ROW ? parsed : undefined;
+}
+
+/**
+ * Parse a canonical, in-grid A1 range like `"A1:C3"` (or a single cell `"A1"`) to its two corners, or
+ * `undefined` when either end is not canonical / in-grid. Corners are returned as written, not sorted.
+ */
+export function parseCanonicalRange(ref: string): { from: CellRef; to: CellRef } | undefined {
+	const colon = ref.indexOf(":");
+	const from = parseCanonicalCell(colon === -1 ? ref : ref.slice(0, colon));
+	const to = colon === -1 ? from : parseCanonicalCell(ref.slice(colon + 1));
+	if (from === undefined || to === undefined) return undefined;
+	return { from, to };
+}

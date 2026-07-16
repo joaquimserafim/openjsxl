@@ -1,7 +1,7 @@
 import type { SheetState } from "../types";
 import { localName, relationshipId } from "../utils";
 import { tokenize } from "../xml";
-import { definedNameEmittable } from "./name";
+import { definedNameEmittable, isFilterDatabaseName } from "./name";
 import { decodeXstring } from "./xstring";
 
 // xl/workbook.xml lists the workbook's sheets in tab order. Each <sheet> gives a display
@@ -101,6 +101,12 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 	// name is dropped rather than normalized (unlike a table name): it is referenced by formulas, so
 	// renaming it would silently break those links. Such an illegal name is also unreferenceable by any
 	// valid formula, so dropping it never changes what the evaluator resolves.
-	const emittable = definedNames.filter((dn) => definedNameEmittable(dn, sheets.length));
+	// Strip the reserved `_xlnm._FilterDatabase` (F10.2): it is internal bookkeeping owned by a sheet's
+	// autoFilter, surfaced as `Worksheet.autoFilter` and re-synthesized on write — never a public defined
+	// name (matches openpyxl, which reports `defined_names == []` for a filtered sheet). Then keep only
+	// names the strict writer could re-emit (decision 3, shared-model invariant).
+	const emittable = definedNames.filter(
+		(dn) => !isFilterDatabaseName(dn.name) && definedNameEmittable(dn, sheets.length),
+	);
 	return { sheets, date1904, definedNames: emittable };
 }

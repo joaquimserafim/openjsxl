@@ -264,8 +264,8 @@ await writeFile('out.xlsx', await writeXlsx({ ...input, sheets }));
 ```
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
-pictures, geometry, structural metadata, defined names, tables, data validation, and conditional
-formatting**:
+pictures, geometry, structural metadata, defined names, tables, data validation, conditional
+formatting, and autofilters**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
@@ -273,7 +273,7 @@ formatting**:
 | number formats — built-in & custom codes | absolute-anchored pictures & non-picture drawings (shapes, charts) — skipped on read |
 | fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
 | colors: rgb, indexed, theme + tint (raw) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
-| control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | |
+| control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | autofilter **criteria** & sort state — the filter range carries, the per-column filter/sort is dropped |
 | custom theme part (carried byte-identical) | |
 | formula text + cached value | |
 | defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | |
@@ -287,6 +287,7 @@ formatting**:
 | tables (name, range, columns, header/totals, style) | |
 | data validations (dropdowns & input rules) | |
 | conditional formatting (highlights, scales, bars, icon sets) | |
+| autofilter range (filter dropdowns; the paired `_xlnm._FilterDatabase` is managed automatically) | |
 
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
@@ -411,6 +412,9 @@ read → modify → write carries them across untouched:
 - **Conditional formatting** (`Worksheet.conditionalFormatting` ↔ `SheetInput.conditionalFormatting`)
   — highlight rules (`cellIs`/`expression`/`top10`/text/… with an inline differential style), color
   scales, data bars, and icon sets. Rule priorities are renumbered densely on write.
+- **AutoFilter** (`Worksheet.autoFilter` ↔ `SheetInput.autoFilter`) — the filter-dropdown range,
+  `{ ref: 'A1:C10' }`. On write the paired hidden `_xlnm._FilterDatabase` defined name Excel expects
+  is created for you; per-column filter *criteria* and sort state are not carried.
 
 ```ts
 const bytes = await writeXlsx({
@@ -424,6 +428,7 @@ const bytes = await writeXlsx({
 			rules: [{ type: 'cellIs', priority: 1, operator: 'lessThan', formulas: ['10'],
 				dxf: { fill: { bgColor: { rgb: 'FFFFC7CE' } } } }],
 		}],
+		autoFilter: { ref: 'A1:C2' },
 	}],
 });
 ```

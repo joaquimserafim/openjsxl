@@ -12,6 +12,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetAutoFilter,
 	SheetImage,
 	SheetState,
 	TableInfo,
@@ -225,6 +226,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			tables?: readonly TableInfo[];
 			dataValidations?: readonly DataValidation[];
 			conditionalFormatting?: readonly ConditionalFormatting[];
+			autoFilter?: SheetAutoFilter;
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -261,6 +263,10 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// Conditional formatting (F9.3) — structural pass-through; the inline dxf re-interns on write.
 		const conditionalFormatting = worksheet.conditionalFormatting;
 		if (conditionalFormatting.length > 0) sheet.conditionalFormatting = conditionalFormatting;
+		// autoFilter (F10.2) — structural pass-through. The writer re-emits <autoFilter> and re-synthesizes
+		// the paired _xlnm._FilterDatabase name (which the reader stripped), so the filter round-trips once.
+		const autoFilter = worksheet.autoFilter;
+		if (autoFilter !== undefined) sheet.autoFilter = autoFilter;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

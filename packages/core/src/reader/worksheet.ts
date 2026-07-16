@@ -10,11 +10,21 @@ import {
 	MAX_FORMULA_LEN,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
+	parseCanonicalRange,
 	parseRef,
 	type Relationship,
 	translateFormula,
 } from "../ooxml";
-import type { Cell, ColumnProps, Comment, FreezePane, Hyperlink, Row, RowProps } from "../types";
+import type {
+	Cell,
+	ColumnProps,
+	Comment,
+	FreezePane,
+	Hyperlink,
+	Row,
+	RowProps,
+	SheetAutoFilter,
+} from "../types";
 import { localName, relationshipId } from "../utils";
 import { createXmlStream, tokenize, type XmlToken } from "../xml";
 
@@ -620,6 +630,37 @@ export function parseMergedCells(xml: string): string[] {
 		}
 	}
 	return ranges;
+}
+
+/**
+ * The sheet's autoFilter range (filter dropdowns), or `undefined` when the sheet declares none (F10.2).
+ * ONLY an `<autoFilter>` that is a DIRECT child of `<worksheet>` is the sheet-level filter: `<autoFilter>`
+ * also nests inside `<customSheetViews>/<customSheetView>` (a saved view that retained a filter), and a
+ * flat scan would surface that as an active filter the sheet doesn't have — the exact trap parseFreezePane
+ * was hardened against for `<pane>`. So the scan tracks nesting depth and accepts the filter only at
+ * depth 1 (worksheet the sole open ancestor). The range is validated as a canonical, in-grid A1 range and
+ * kept SYMBOLIC (never expanded per-cell — F4.4/F4.6); a hostile or non-canonical ref is DROPPED (the
+ * strict writer would reject it, and real producers write canonical), so what the reader returns is
+ * always writable.
+ */
+export function parseAutoFilter(xml: string): SheetAutoFilter | undefined {
+	let depth = 0; // number of currently-open ancestor elements
+	for (const token of tokenize(xml)) {
+		if (token.kind === "open") {
+			// A direct child of <worksheet> has worksheet as its only open ancestor → depth === 1. A
+			// customSheetView's nested <autoFilter> sits at depth 3 and is skipped.
+			if (depth === 1 && localName(token.name) === "autoFilter") {
+				const ref = token.attrs.ref;
+				return ref !== undefined && parseCanonicalRange(ref) !== undefined
+					? { ref }
+					: undefined;
+			}
+			if (!token.selfClosing) depth++;
+		} else if (token.kind === "close") {
+			depth--;
+		}
+	}
+	return undefined;
 }
 
 /**

@@ -149,3 +149,16 @@ export function definedNameEmittable(
 	}
 	return true;
 }
+
+/** The reserved built-in name Excel uses to record a sheet's autoFilter range (F10.2). */
+export const FILTER_DATABASE_NAME = "_xlnm._FilterDatabase";
+
+/**
+ * Whether a defined name is the reserved `_xlnm._FilterDatabase` (case-insensitively). It is internal
+ * bookkeeping OWNED by a sheet's autoFilter, not a user-facing name — the reader STRIPS it from
+ * `Workbook.definedNames` (surfacing it as `Worksheet.autoFilter`) and the writer REJECTS a
+ * caller-supplied one, then SYNTHESIZES it from `SheetInput.autoFilter`. Single-sourced so both agree.
+ */
+export function isFilterDatabaseName(name: string): boolean {
+	return name.toLowerCase() === FILTER_DATABASE_NAME.toLowerCase();
+}

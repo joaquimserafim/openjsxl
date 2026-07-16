@@ -544,6 +544,17 @@ export interface CellStyle {
 	readonly alignment?: Alignment;
 }
 
+/**
+ * A sheet's autoFilter — the range that carries Excel's filter-dropdown arrows (F10.2). `ref` is an
+ * A1 range like `"A1:C10"`. Only the range is modelled; per-column filter criteria and sort state are
+ * not carried (a documented drop). Excel also records this range as a hidden `_xlnm._FilterDatabase`
+ * defined name, which the reader folds into this field and the writer synthesizes from it — so a filter
+ * has a single representation, never a duplicated defined name.
+ */
+export interface SheetAutoFilter {
+	readonly ref: string;
+}
+
 // ── The reader's worksheet surface (multi-format seam, M7) ───────────────────────────────────────
 // `Worksheet` is a structural INTERFACE, not a class, so every format's reader can return the SAME
 // public shape: the xlsx reader's `XlsxWorksheet` and the ODS reader's `OdsWorksheet` both implement
@@ -573,6 +584,8 @@ export interface Worksheet {
 	readonly dataValidations: readonly DataValidation[];
 	/** The conditional-formatting blocks on this sheet, in document order. Empty when none (or unsupported). */
 	readonly conditionalFormatting: readonly ConditionalFormatting[];
+	/** The sheet's autoFilter range (filter dropdowns), or `undefined` when none (or unsupported). */
+	readonly autoFilter: SheetAutoFilter | undefined;
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */

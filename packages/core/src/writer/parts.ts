@@ -1,7 +1,14 @@
 import { XlsxError } from "../errors";
+import { type CellRef, indexToColumn, parseCanonicalRange } from "../ooxml/a1";
 import { MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import { type DefinedNameProblem, definedNameProblem, MAX_NAME_LEN } from "../ooxml/name";
+import {
+	type DefinedNameProblem,
+	definedNameProblem,
+	FILTER_DATABASE_NAME,
+	isFilterDatabaseName,
+	MAX_NAME_LEN,
+} from "../ooxml/name";
 import type { DefinedName } from "../ooxml/workbook";
 import { encodeXstring } from "../ooxml/xstring";
 import type { SheetState } from "../types";
@@ -304,6 +311,14 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 				`definedNames[${i}].name ${definedNameProblemMessage(name, problem)}`,
 			);
 		}
+		// `_xlnm._FilterDatabase` is a legal built-in name, but it is OWNED by a sheet's autoFilter (F10.2):
+		// the writer synthesizes it from `SheetInput.autoFilter`, so a caller-supplied one would double it.
+		if (isFilterDatabaseName(name)) {
+			throw new XlsxError(
+				"invalid-input",
+				`definedNames[${i}]: "${name}" is managed by SheetInput.autoFilter — set the sheet's autoFilter instead of a defined name`,
+			);
+		}
 		if (typeof refersTo !== "string") {
 			throw new XlsxError(
 				"invalid-input",
@@ -371,6 +386,39 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 		});
 	}
 	return out;
+}
+
+// Build a sheet-qualified ABSOLUTE A1 range like `'Data'!$A$1:$C$3` from a canonical range `A1:C3`. The
+// sheet name is always single-quoted (a literal `'` doubles to `''`) — always valid, matches openpyxl,
+// and sidesteps every unquoted-name edge (spaces, leading digits, cell-ref-shaped names). `ref` is
+// pre-validated canonical, so parseCanonicalRange resolves; the fallback keeps the function total.
+function qualifiedAbsoluteRange(sheetName: string, ref: string): string {
+	const quoted = `'${sheetName.replace(/'/g, "''")}'`;
+	const range = parseCanonicalRange(ref);
+	if (range === undefined) return `${quoted}!${ref}`; // unreachable: ref is pre-validated canonical
+	const abs = (c: CellRef): string => `$${indexToColumn(c.col)}$${c.row}`;
+	const cells = ref.includes(":") ? `${abs(range.from)}:${abs(range.to)}` : abs(range.from);
+	return `${quoted}!${cells}`;
+}
+
+/**
+ * Synthesize the hidden, sheet-scoped `_xlnm._FilterDatabase` defined name a sheet's autoFilter needs
+ * (F10.2). Excel records a filter range BOTH as `<autoFilter>` and this name; openjsxl owns the name so
+ * a filter is represented once (the reader strips it, the writer re-creates it). `refersTo` is the range
+ * sheet-qualified and absolute; `localSheetId` scopes it to its sheet. `ref` is the canonical range the
+ * sheet writer already validated.
+ */
+export function filterDatabaseName(
+	sheetName: string,
+	sheetIndex: number,
+	ref: string,
+): DefinedName {
+	return {
+		name: FILTER_DATABASE_NAME,
+		refersTo: qualifiedAbsoluteRange(sheetName, ref),
+		localSheetId: sheetIndex,
+		hidden: true,
+	};
 }
 
 /** `xl/_rels/workbook.xml.rels` — worksheet targets plus styles.xml/theme1.xml when present. */

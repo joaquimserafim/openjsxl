@@ -4,6 +4,7 @@ import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
+	filterDatabaseName,
 	packageRelsXml,
 	requireWorkbookObject,
 	sheetSideParts,
@@ -99,6 +100,19 @@ export async function writeXlsx(
 	// Every table part number across the workbook, for the content-type Overrides.
 	const tablePartNumbers = worksheets.flatMap((w) => (w.tables ?? []).map((t) => t.number));
 
+	// Append the hidden _xlnm._FilterDatabase name for every sheet that declared an autoFilter (F10.2).
+	// The sheet writer validated each range once (reused here) and rejects a caller-supplied _FilterDatabase,
+	// so these can neither duplicate nor collide with the caller's names.
+	const allDefinedNames = [
+		...definedNames,
+		...worksheets.flatMap((w, i) => {
+			const name = names[i];
+			return w.autoFilterRef !== undefined && name !== undefined
+				? [filterDatabaseName(name, i, w.autoFilterRef)]
+				: [];
+		}),
+	];
+
 	const parts: ZipInput[] = [];
 	const add = (name: string, xml: string): void => {
 		parts.push({ name, data: encode(xml) });
@@ -117,7 +131,7 @@ export async function writeXlsx(
 		),
 	);
 	add("_rels/.rels", packageRelsXml());
-	add("xl/workbook.xml", workbookXml(names, states, date1904, definedNames));
+	add("xl/workbook.xml", workbookXml(names, states, date1904, allDefinedNames));
 	add("xl/_rels/workbook.xml.rels", workbookRelsXml(sheets.length, needStyles, needTheme));
 	if (needStyles) add("xl/styles.xml", styles.stylesXml());
 	if (needTheme) add("xl/theme/theme1.xml", themeToEmit(carriedTheme));

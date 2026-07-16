@@ -31,6 +31,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetAutoFilter,
 	SheetImage,
 	SheetInfo,
 	SheetState,
@@ -40,6 +41,7 @@ import type {
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
 import {
+	parseAutoFilter,
 	parseCellStyles,
 	parseColumnProps,
 	parseComments,
@@ -185,6 +187,8 @@ export class XlsxWorksheet implements Worksheet {
 	#rowProps: ReadonlyMap<number, RowProps> | undefined;
 	#freeze: FreezePane | undefined;
 	#freezeRead = false;
+	#autoFilter: SheetAutoFilter | undefined;
+	#autoFilterRead = false;
 
 	constructor(
 		info: SheetInfo,
@@ -329,6 +333,21 @@ export class XlsxWorksheet implements Worksheet {
 			this.#conditionalFormatting = parseConditionalFormatting(this.#xml, this.#context.dxfs);
 		}
 		return this.#conditionalFormatting;
+	}
+
+	/**
+	 * The sheet's autoFilter range (filter dropdowns), or `undefined` when the sheet declares none
+	 * (F10.2). Kept SYMBOLIC (the A1 range, never expanded per-cell); per-column filter criteria and
+	 * sort state are not modelled. Excel's paired hidden `_xlnm._FilterDatabase` defined name is folded
+	 * into this field and stripped from {@link Workbook.definedNames}, so a filter is represented once.
+	 * Parsed lazily on first access.
+	 */
+	get autoFilter(): SheetAutoFilter | undefined {
+		if (!this.#autoFilterRead) {
+			this.#autoFilter = parseAutoFilter(this.#xml);
+			this.#autoFilterRead = true;
+		}
+		return this.#autoFilter;
 	}
 
 	/**

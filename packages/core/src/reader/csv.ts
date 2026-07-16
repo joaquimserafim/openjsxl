@@ -107,6 +107,10 @@ class CsvWorksheet implements Worksheet {
 		return NO_CONDITIONAL_FORMATTING;
 	}
 
+	get autoFilter(): undefined {
+		return undefined;
+	}
+
 	get columns(): readonly ColumnProps[] {
 		return NO_COLUMNS;
 	}

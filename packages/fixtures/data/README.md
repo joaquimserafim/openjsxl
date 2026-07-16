@@ -202,6 +202,15 @@ git-ignored [`../local/`](../local) directory and are never committed.
   round-trips them through the bridge, and openpyxl reads our re-written output warnings-as-errors
   clean — recognizing the round-tripped `_xlnm.Print_Area` as the sheet's print area.
 
+- **`openpyxl-autofilter.xlsx`** — authored by **openpyxl 3.1.5** to exercise sheet-level autoFilter read
+  + bridge carry (F10.2): a `Data` sheet whose `<autoFilter ref="A1:C4">` carries BOTH a `<filterColumn>`
+  criteria (on the `City` column) AND a `<sortState>`, plus the paired hidden `_xlnm._FilterDatabase`
+  name openpyxl writes in `workbook.xml`. The reader surfaces only the range
+  (`Worksheet.autoFilter == { ref: "A1:C4" }`), DROPS the criteria/sort as a documented degradation, and
+  STRIPS `_xlnm._FilterDatabase` from `Workbook.definedNames` (`reader/__tests__/autofilter.test.ts`).
+  The corpus property round-trips the range through the bridge, and openpyxl reads our re-written output
+  warnings-as-errors clean — seeing the filter arrows and its own `_FilterDatabase` back.
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

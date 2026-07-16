@@ -6,6 +6,7 @@ import {
 	MAX_COL_WIDTH,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
+	parseCanonicalRange,
 	parseRef,
 } from "../ooxml/a1";
 import {
@@ -429,6 +430,33 @@ interface MergeRect {
 	readonly r1: number;
 	readonly c2: number;
 	readonly r2: number;
+}
+
+// <autoFilter> (F10.2) — the sheet-level filter range. Emitted in the CT_Worksheet slot after
+// </sheetData> (and a future <sheetProtection>) and BEFORE <mergeCells>. Returns both the element XML
+// and the validated canonical ref: the workbook writer turns that ref into the paired hidden
+// `_xlnm._FilterDatabase` defined name. The ref is read ONCE (single-read TOCTOU) and validated as a
+// canonical, in-grid A1 range — the same rule the reader uses to keep/drop a filter, so a read filter
+// re-writes cleanly. Absent → empty string + undefined ref, so an unfiltered sheet stays byte-identical.
+function autoFilterXml(
+	sheetName: string,
+	autoFilter: SheetInput["autoFilter"],
+): { xml: string; ref: string | undefined } {
+	if (autoFilter === undefined) return { xml: "", ref: undefined };
+	if (!isPlainRecord(autoFilter)) sheetInvalid(sheetName, "autoFilter must be an object");
+	for (const key of Object.keys(autoFilter)) {
+		if (key !== "ref") sheetInvalid(sheetName, `autoFilter has unknown property "${key}"`);
+	}
+	const ref = autoFilter.ref;
+	if (typeof ref !== "string") sheetInvalid(sheetName, "autoFilter.ref must be a string");
+	if (parseCanonicalRange(ref) === undefined) {
+		sheetInvalid(
+			sheetName,
+			`autoFilter.ref "${shortened(ref)}" is not a canonical A1 range like "A1:C10" within Excel's grid`,
+		);
+	}
+	// `ref` is canonical (only A–Z, digits, ':') so it carries no XML-special characters — emitted verbatim.
+	return { xml: `<autoFilter ref="${ref}"/>`, ref };
 }
 
 // <mergeCells> — Excel repair-prompts on malformed, single-cell, and overlapping merges, so all
@@ -1730,6 +1758,13 @@ export interface SheetSideParts {
 	readonly drawingRelsXml?: string;
 	/** `xl/tables/tableN.xml` parts owned by this sheet (F9.1) — present iff the sheet has tables. */
 	readonly tables?: readonly TablePart[];
+	/**
+	 * The sheet's validated autoFilter range (F10.2), when it has one — NOT an OPC part but the range the
+	 * WORKBOOK writer turns into the paired hidden `_xlnm._FilterDatabase` defined name (sheet-scoped to
+	 * this sheet). Absent when the sheet declares no autoFilter. Read once here so the range is validated
+	 * a single time and reused for both the `<autoFilter>` element and the synthesized name.
+	 */
+	readonly autoFilterRef?: string;
 }
 
 /** One emitted table part: its workbook-global number (→ `xl/tables/table{number}.xml`) and its XML. */
@@ -1832,6 +1867,7 @@ export function worksheetXml(
 	const cols = colsXml(sheet.name, sheet.columns);
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
+	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -1933,16 +1969,16 @@ export function worksheetXml(
 		tables !== undefined ? tables.map((t) => t.number) : [],
 	);
 
-	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, mergeCells,
+	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, autoFilter, mergeCells,
 	// conditionalFormatting, dataValidations, hyperlinks, drawing, legacyDrawing, tableParts
-	// (CT_Worksheet sequence — conditionalFormatting then dataValidations sit between mergeCells and
-	// hyperlinks; tableParts is last). Every optional block is an empty string when unused, so a sheet
-	// using none of them emits the exact pre-F4.5/F4.6/F5.2/F9.1/F9.2/F9.3 bytes.
+	// (CT_Worksheet sequence — autoFilter sits between sheetData and mergeCells; conditionalFormatting
+	// then dataValidations sit between mergeCells and hyperlinks; tableParts is last). Every optional
+	// block is an empty string when unused, so a sheet using none emits the exact pre-F4.5/…/F10.2 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
 		.join(
 			"",
-		)}</sheetData>${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+		)}</sheetData>${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	// Comment/drawing/table side parts are spread only when present so the optional properties stay
 	// truly absent (exactOptionalPropertyTypes).
 	return {
@@ -1955,6 +1991,7 @@ export function worksheetXml(
 			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
 		...(tables !== undefined ? { tables } : {}),
+		...(autoFilter.ref !== undefined ? { autoFilterRef: autoFilter.ref } : {}),
 	};
 }
 
@@ -2064,6 +2101,7 @@ export function streamWorksheet(
 	const cols = colsXml(sheet.name, sheet.columns);
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
+	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -2089,7 +2127,7 @@ export function streamWorksheet(
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	const footer = `</sheetData>${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,
@@ -2109,5 +2147,6 @@ export function streamWorksheet(
 			? { drawingXml: pictures.drawingXml, drawingRelsXml: pictures.drawingRelsXml }
 			: {}),
 		...(tables !== undefined ? { tables } : {}),
+		...(autoFilter.ref !== undefined ? { autoFilterRef: autoFilter.ref } : {}),
 	};
 }

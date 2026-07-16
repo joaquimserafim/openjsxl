@@ -3,6 +3,7 @@ import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
+	filterDatabaseName,
 	packageRelsXml,
 	requireWorkbookObject,
 	sheetSideParts,
@@ -78,6 +79,18 @@ async function* buildStreamParts(
 	const drawingSheets = prepared.flatMap((w, i) => (w.drawingXml !== undefined ? [i] : []));
 	const tablePartNumbers = prepared.flatMap((w) => (w.tables ?? []).map((t) => t.number));
 
+	// Append the hidden _xlnm._FilterDatabase name for every sheet that declared an autoFilter (F10.2) —
+	// the same synthesis the buffered writer does, so the two stay reader-equivalent.
+	const allDefinedNames = [
+		...definedNames,
+		...prepared.flatMap((w, i) => {
+			const name = names[i];
+			return w.autoFilterRef !== undefined && name !== undefined
+				? [filterDatabaseName(name, i, w.autoFilterRef)]
+				: [];
+		}),
+	];
+
 	// Worksheets stream first, each followed by its own side parts (rels/comments/VML/drawing) — names
 	// owned by sheetSideParts, shared with the buffered writer. streamZip consumes each part fully
 	// before the next, so after this loop every sheet's rows have rendered and the registry is complete.
@@ -98,7 +111,7 @@ async function* buildStreamParts(
 	if (needTheme) yield { name: "xl/theme/theme1.xml", data: encode(themeToEmit(carriedTheme)) };
 	yield {
 		name: "xl/workbook.xml",
-		data: encode(workbookXml(names, states, date1904, definedNames)),
+		data: encode(workbookXml(names, states, date1904, allDefinedNames)),
 	};
 	yield {
 		name: "xl/_rels/workbook.xml.rels",

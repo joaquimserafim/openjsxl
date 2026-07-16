@@ -13,6 +13,7 @@ import type {
 	FreezePane,
 	Hyperlink,
 	RowProps,
+	SheetAutoFilter,
 	SheetImage,
 	SheetState,
 	TableInfo,
@@ -122,6 +123,13 @@ export interface SheetInput {
 	 * renumbered densely by ascending caller priority (document order breaks ties).
 	 */
 	readonly conditionalFormatting?: readonly ConditionalFormatting[];
+	/**
+	 * The sheet's autoFilter range (filter dropdowns), e.g. `{ ref: "A1:C10" }` (F10.2) — the same record
+	 * `Worksheet.autoFilter` returns. Emits `<autoFilter>` plus the paired hidden `_xlnm._FilterDatabase`
+	 * defined name Excel expects; a caller-supplied `_xlnm._FilterDatabase` in {@link WorkbookInput.definedNames}
+	 * is rejected (it is managed here). `ref` must be a canonical, in-grid A1 range. Absent emits nothing.
+	 */
+	readonly autoFilter?: SheetAutoFilter;
 }
 
 export interface WorkbookInput {
@@ -186,6 +194,8 @@ export interface StreamSheetInput {
 	readonly dataValidations?: readonly DataValidation[];
 	/** Conditional-formatting blocks on this sheet (F9.3) — see {@link SheetInput.conditionalFormatting}. */
 	readonly conditionalFormatting?: readonly ConditionalFormatting[];
+	/** The sheet's autoFilter range (filter dropdowns) — see {@link SheetInput.autoFilter} (F10.2). */
+	readonly autoFilter?: SheetAutoFilter;
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */

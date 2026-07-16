@@ -2699,40 +2699,74 @@ existing name-resolution behavior — constants and simple ranges resolve, the r
 formulas recalculating (owner-verifiable in real Excel); invalid caller input fails typed;
 no-names input is byte-identical; corpus + both-direction oracle green.
 
-### F10.2 — Sheet-level autoFilter: read + write + bridge ☐
+### F10.2 — Sheet-level autoFilter: read + write + bridge ☑
 
 **Context.** M9 decision 10 deferred sheet-level autoFilter BECAUSE it pairs with the hidden
 `_xlnm._FilterDatabase` defined name — F10.1 unblocks it. Today the writer emits autoFilter
-only INSIDE table parts (`writer/sheet.ts`); a sheet-level `<autoFilter>` from a foreign
-file is silently dropped (undocumented), and "add filter dropdowns to my export" is the
-single most common writer ask this feature closes.
+only INSIDE table parts (`writer/sheet.ts:1442`, shape `<autoFilter ref="A1:C3"/>`); a
+sheet-level `<autoFilter>` from a foreign file is silently dropped (the reader has no
+autoFilter handling), and "add filter dropdowns to my export" is the single most common
+writer ask this feature closes.
 
-**Scope (in).** `SheetAutoFilter` = `{ ref: string }` in `types.ts`;
-`Worksheet.autoFilter?: SheetAutoFilter` (xlsx implements; xlsb/ods/csv degrade `undefined`,
-pinned); `SheetInput.autoFilter`; emit `<autoFilter ref="…"/>` in the decision-1 slot. When
-writing a sheet autoFilter, ALSO emit the paired hidden sheet-local `_xlnm._FilterDatabase`
-defined name (Excel parity — verify against openpyxl's output with the oracle; F10.1
-machinery). Reader: parse `@ref` through the shared a1 machinery (in-bounds range, symbolic
-— never expanded per-cell; F4.4/F4.6 posture), clamp/drop hostile refs; DROP
-`filterColumn`/`sortState` children as a NAMED degradation — documented consequence: the
-rewritten file shows filter arrows with criteria cleared, and filtered-out rows STAY hidden
-because row `hidden` flags already carry.
+**Oracle-validated design (openpyxl 3.1.5, probed 2026-07-15).** Setting `ws.auto_filter.ref
+= "A1:C3"` on a sheet `Data` writes BOTH `<autoFilter ref="A1:C3"/>` in the worksheet AND a
+sheet-scoped hidden `_xlnm._FilterDatabase` = `'Data'!$A$1:$C$3` in workbook.xml. On READ
+openpyxl surfaces the range as `auto_filter.ref` and reports `defined_names == []` — it
+STRIPS `_FilterDatabase` as internal bookkeeping owned by the filter, never a public name.
+F10.2 mirrors this exactly.
 
-**Scope (out).** Filter-criteria model (customFilters, top10, color/icon filters, dynamic),
-`sortState` carry, any change to table-internal autoFilter.
+**Interaction with F10.1 (the reconciliation — single source of truth).** `_FilterDatabase`
+is in F10.1's `_xlnm.` allow-list (`ooxml/name.ts`), so TODAY the reader carries it in
+`Workbook.definedNames` and the bridge round-trips it — which, once F10.2 synthesizes it,
+would DOUBLE-emit. F10.2 fixes this: (a) the reader STRIPS `_xlnm._FilterDatabase` from
+`definedNames` and represents the range solely as `sheet.autoFilter`; (b) the writer
+SYNTHESIZES `_FilterDatabase` from `sheet.autoFilter` and REJECTS a caller-supplied
+`_xlnm._FilterDatabase` in `WorkbookInput.definedNames` (typed — "managed by
+sheet.autoFilter"). `_FilterDatabase` stays a legal built-in (the writer CAN emit it); it is
+just never a public `definedNames` entry. This is a documented behavior change to F10.1's
+`definedNames` (a filtered file no longer surfaces `_xlnm._FilterDatabase`).
+
+**Scope (in).** `SheetAutoFilter = { ref: string }` in `types.ts`; `Worksheet.autoFilter?:
+SheetAutoFilter` (xlsx implements; xlsb/ods/csv degrade `undefined`, pinned); `SheetInput` +
+`StreamSheetInput.autoFilter`. Reader: parse `<autoFilter @ref>` through the a1 machinery
+(in-bounds range, SYMBOLIC — never expanded per-cell; F4.4/F4.6 posture), clamp/drop a
+hostile ref; strip `_FilterDatabase` (above). Writer: emit `<autoFilter ref="…"/>` in the
+schema slot AFTER `</sheetData>` and BEFORE `<mergeCells>` (and after a future
+`<sheetProtection>` — note for F10.3, which inserts before autoFilter); synthesize the paired
+hidden sheet-scoped `_FilterDatabase` (refersTo = sheet-qualified ABSOLUTE range, sheet name
+quoted only when needed — a small a1 helper). BOTH writers. Bridge carries `sheet.autoFilter`.
+
+**Scope (out).** Filter-CRITERIA model (`filterColumn`, customFilters, top10, color/icon/
+dynamic filters) and `sortState` — DROPPED as a NAMED degradation (documented: the rewritten
+file shows filter arrows with criteria cleared; filtered-out rows STAY hidden because row
+`hidden` flags already carry via F4.5). No change to table-internal autoFilter. A bare
+`_FilterDatabase` with no `<autoFilter>` element → documented drop (openpyxl parity).
 
 **Tasks**
-- [ ] Model + reader parse + degrade pins (ods/xlsb/csv `undefined`; hostile-ref
-      clamp/drop pins).
-- [ ] Writer emission + order pin + `_FilterDatabase` pairing + byte-identity pin + BOTH
-      writers.
-- [ ] Bridge carry + corpus snapshot + fixtures (a real Excel- or openpyxl-authored FILTERED
-      sheet — criteria present → named drop pinned; openpyxl reads our output clean).
-- [ ] Adversarial review + gates + byte-identity recipe.
+- [x] Model (`SheetAutoFilter`; `Worksheet`/`SheetInput`/`StreamSheetInput`) + reader parse
+      (`reader/worksheet.ts` `parseAutoFilter`) + `_FilterDatabase` strip (`ooxml/workbook.ts`) +
+      degrade pins (ods/xlsb/csv `undefined`; hostile-ref drop). Shared canonical-range validation
+      (`ooxml/a1.ts` `parseCanonicalCell`/`parseCanonicalRange`, reader-drop === writer-reject).
+- [x] Writer emission (`writer/sheet.ts` `autoFilterXml`, slot after `</sheetData>` before
+      `<mergeCells>`) + `_FilterDatabase` synthesis (`writer/parts.ts` `filterDatabaseName` +
+      `qualifiedAbsoluteRange`, sheet name always `'`-quoted) + caller-`_FilterDatabase` reject +
+      byte-identity (5 canonical inputs IDENTICAL vs pre-F10.2) + BOTH writers.
+- [x] Bridge carry (`from-workbook.ts`) + corpus snapshot extension (autoFilter) + fixture
+      `openpyxl-autofilter.xlsx` (criteria + sortState → named drop pinned; openpyxl reads our output
+      warnings-as-errors clean, arrows + `_FilterDatabase` present).
+- [x] Adversarial review (4 lenses + refuting verifiers) + gates + byte-identity recipe +
+      openpyxl cross-validation both directions.
 
-**Acceptance.** A filtered workbook round-trips with working filter arrows (owner Excel
-check); the criteria drop is documented in the README table and pinned; a hostile ref cannot
-inflate memory; unfiltered input is byte-identical.
+**Review** (4-lens adversarial workflow + refuting verifiers; ONE defect, found UNANIMOUSLY by all
+four lenses, fixed before commit):
+- **CONFIRMED (MEDIUM/HIGH) — `parseAutoFilter` unscoped scan, fixed.** The reader did a flat token
+  scan and returned the FIRST `<autoFilter>` anywhere in the worksheet XML. But `<autoFilter>` is ALSO
+  a legal child of `<customSheetView>` (a saved Custom View that retained a filter). A sheet with no
+  active filter but such a view would have its view-filter fabricated into a real sheet-level filter +
+  a synthesized `_FilterDatabase` on rewrite — a silent change, the exact trap `parseFreezePane` was
+  already hardened against for `<pane>`. Fixed by depth-tracking: accept `<autoFilter>` only as a DIRECT
+  child of `<worksheet>` (depth 1). Pinned (`reader/__tests__/autofilter.test.ts` — nested-view ignored;
+  depth-1 wins when both present). No other findings survived verification.
 
 ### F10.3 — Protection carry: workbook, sheet, and cell locked/hidden ☐
 
