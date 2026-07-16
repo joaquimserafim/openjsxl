@@ -11,7 +11,11 @@ import type {
 	ConditionalFormatting,
 	DataValidation,
 	FreezePane,
+	HeaderFooter,
 	Hyperlink,
+	PageMargins,
+	PageSetup,
+	PrintOptions,
 	RowProps,
 	SheetAutoFilter,
 	SheetImage,
@@ -138,6 +142,14 @@ export interface SheetInput {
 	 * verbatim (never computed). Absent emits nothing. Per-cell locked/hidden lives on `CellStyle.protection`.
 	 */
 	readonly protection?: SheetProtection;
+	/** The sheet's page margins (F10.4) — see {@link Worksheet.pageMargins}. All six values required. */
+	readonly pageMargins?: PageMargins;
+	/** The sheet's page setup (F10.4) — orientation, scale, fit-to-page, paper size. Absent emits nothing. */
+	readonly pageSetup?: PageSetup;
+	/** The sheet's print options (F10.4) — gridlines/headings/centering booleans. Absent emits nothing. */
+	readonly printOptions?: PrintOptions;
+	/** The sheet's header/footer (F10.4) — the six `&`-code strings + flags. Absent emits nothing. */
+	readonly headerFooter?: HeaderFooter;
 }
 
 export interface WorkbookInput {
@@ -211,6 +223,14 @@ export interface StreamSheetInput {
 	readonly autoFilter?: SheetAutoFilter;
 	/** The sheet's protection — see {@link SheetInput.protection} (F10.3). */
 	readonly protection?: SheetProtection;
+	/** The sheet's page margins (F10.4) — see {@link SheetInput.pageMargins}. */
+	readonly pageMargins?: PageMargins;
+	/** The sheet's page setup (F10.4) — see {@link SheetInput.pageSetup}. */
+	readonly pageSetup?: PageSetup;
+	/** The sheet's print options (F10.4) — see {@link SheetInput.printOptions}. */
+	readonly printOptions?: PrintOptions;
+	/** The sheet's header/footer (F10.4) — see {@link SheetInput.headerFooter}. */
+	readonly headerFooter?: HeaderFooter;
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */

@@ -153,6 +153,15 @@ export const MAX_INDENT = 250;
  * integer XML that would make Excel repair-prompt) or as a silently precision-lost integer.
  */
 export const MAX_SPIN_COUNT = 0xffffffff;
+/**
+ * Page-margin ceiling in inches (F10.4). Excel's own maximum is 49"; larger values (or non-finite ones)
+ * are hostile. SHARED bound: the reader clamps a finite margin into `[0, MAX_PAGE_MARGIN]` (and drops the
+ * whole `<pageMargins>` if a value is non-numeric/non-finite), the writer rejects one outside the range.
+ */
+export const MAX_PAGE_MARGIN = 49;
+/** Print-scale bounds as a percentage (F10.4, `<pageSetup scale>`): 10–400. Reader clamps, writer rejects. */
+export const MIN_PAGE_SCALE = 10;
+export const MAX_PAGE_SCALE = 400;
 
 // A <color> / <fgColor> / <bgColor> element's attributes → the raw Color union. The spec allows
 // exactly one addressing mode per element; if a producer emits several, precedence follows what

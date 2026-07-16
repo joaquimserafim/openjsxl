@@ -8,9 +8,12 @@ import {
 	MAX_COL,
 	MAX_COL_WIDTH,
 	MAX_FORMULA_LEN,
+	MAX_PAGE_MARGIN,
+	MAX_PAGE_SCALE,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
 	MAX_SPIN_COUNT,
+	MIN_PAGE_SCALE,
 	parseCanonicalRange,
 	parseRef,
 	type Relationship,
@@ -21,7 +24,11 @@ import type {
 	ColumnProps,
 	Comment,
 	FreezePane,
+	HeaderFooter,
 	Hyperlink,
+	PageMargins,
+	PageSetup,
+	PrintOptions,
 	Row,
 	RowProps,
 	SheetAutoFilter,
@@ -733,6 +740,192 @@ function readSheetProtection(attrs: Readonly<Record<string, string>>): SheetProt
 		if (Number.isInteger(n) && n <= MAX_SPIN_COUNT) out.spinCount = n;
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+// ── Print setup (F10.4): printOptions, pageMargins, pageSetup, headerFooter ────────────────────────
+
+/** One pass over a worksheet's four print-setup elements (each absent when the sheet declares none). */
+export interface PrintSetup {
+	readonly printOptions?: PrintOptions;
+	readonly pageMargins?: PageMargins;
+	readonly pageSetup?: PageSetup;
+	readonly headerFooter?: HeaderFooter;
+}
+
+// A finite double attribute clamped into [0, max]; undefined when absent or non-numeric/non-finite.
+function clampedDouble(v: string | undefined, max: number): number | undefined {
+	if (v === undefined) return undefined;
+	const n = Number(v);
+	if (!Number.isFinite(n)) return undefined;
+	return n < 0 ? 0 : n > max ? max : n;
+}
+
+// A non-negative integer attribute within the xsd:unsignedInt ceiling; undefined otherwise. Gated to
+// canonical digits first so a hostile 21-digit value is DROPPED, not coerced to a lossy float.
+function uintAttr(v: string | undefined): number | undefined {
+	if (v === undefined || !/^[0-9]+$/.test(v)) return undefined;
+	const n = Number(v);
+	return Number.isInteger(n) && n <= 0xffffffff ? n : undefined;
+}
+
+// An enum attribute restricted to a fixed set; undefined when absent/unrecognized (falls to spec default).
+function enumAttr<T extends string>(v: string | undefined, allowed: readonly T[]): T | undefined {
+	return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
+}
+
+function readPrintOptions(attrs: Readonly<Record<string, string>>): PrintOptions | undefined {
+	const out: Mutable<PrintOptions> = {};
+	for (const flag of [
+		"gridLines",
+		"headings",
+		"horizontalCentered",
+		"verticalCentered",
+	] as const) {
+		const b = bool01(attrs[flag]);
+		if (b !== undefined) out[flag] = b;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function readPageMargins(attrs: Readonly<Record<string, string>>): PageMargins | undefined {
+	// All six are required by the schema — produce a value only when every one is a finite number
+	// (clamped to [0, MAX_PAGE_MARGIN]); a missing/non-finite margin drops the whole element.
+	const left = clampedDouble(attrs.left, MAX_PAGE_MARGIN);
+	const right = clampedDouble(attrs.right, MAX_PAGE_MARGIN);
+	const top = clampedDouble(attrs.top, MAX_PAGE_MARGIN);
+	const bottom = clampedDouble(attrs.bottom, MAX_PAGE_MARGIN);
+	const header = clampedDouble(attrs.header, MAX_PAGE_MARGIN);
+	const footer = clampedDouble(attrs.footer, MAX_PAGE_MARGIN);
+	if (
+		left === undefined ||
+		right === undefined ||
+		top === undefined ||
+		bottom === undefined ||
+		header === undefined ||
+		footer === undefined
+	) {
+		return undefined;
+	}
+	return { left, right, top, bottom, header, footer };
+}
+
+function readPageSetup(attrs: Readonly<Record<string, string>>): PageSetup | undefined {
+	const out: Mutable<PageSetup> = {};
+	const paperSize = uintAttr(attrs.paperSize);
+	if (paperSize !== undefined) out.paperSize = paperSize;
+	const orientation = enumAttr(attrs.orientation, ["default", "portrait", "landscape"] as const);
+	if (orientation !== undefined) out.orientation = orientation;
+	// scale is a percentage in [MIN_PAGE_SCALE, MAX_PAGE_SCALE] — clamp a finite integer into range.
+	if (attrs.scale !== undefined && /^[0-9]+$/.test(attrs.scale)) {
+		const s = Number(attrs.scale);
+		if (Number.isInteger(s)) {
+			out.scale =
+				s < MIN_PAGE_SCALE ? MIN_PAGE_SCALE : s > MAX_PAGE_SCALE ? MAX_PAGE_SCALE : s;
+		}
+	}
+	const fitToWidth = uintAttr(attrs.fitToWidth);
+	if (fitToWidth !== undefined) out.fitToWidth = fitToWidth;
+	const fitToHeight = uintAttr(attrs.fitToHeight);
+	if (fitToHeight !== undefined) out.fitToHeight = fitToHeight;
+	const firstPageNumber = uintAttr(attrs.firstPageNumber);
+	if (firstPageNumber !== undefined) out.firstPageNumber = firstPageNumber;
+	const useFirstPageNumber = bool01(attrs.useFirstPageNumber);
+	if (useFirstPageNumber !== undefined) out.useFirstPageNumber = useFirstPageNumber;
+	const blackAndWhite = bool01(attrs.blackAndWhite);
+	if (blackAndWhite !== undefined) out.blackAndWhite = blackAndWhite;
+	const draft = bool01(attrs.draft);
+	if (draft !== undefined) out.draft = draft;
+	const cellComments = enumAttr(attrs.cellComments, ["none", "asDisplayed", "atEnd"] as const);
+	if (cellComments !== undefined) out.cellComments = cellComments;
+	const pageOrder = enumAttr(attrs.pageOrder, ["downThenOver", "overThenDown"] as const);
+	if (pageOrder !== undefined) out.pageOrder = pageOrder;
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const HF_CHILDREN = [
+	"oddHeader",
+	"oddFooter",
+	"evenHeader",
+	"evenFooter",
+	"firstHeader",
+	"firstFooter",
+] as const;
+
+function readHeaderFooterAttrs(attrs: Readonly<Record<string, string>>): Mutable<HeaderFooter> {
+	const out: Mutable<HeaderFooter> = {};
+	for (const flag of [
+		"differentOddEven",
+		"differentFirst",
+		"scaleWithDoc",
+		"alignWithMargins",
+	] as const) {
+		const b = bool01(attrs[flag]);
+		if (b !== undefined) out[flag] = b;
+	}
+	return out;
+}
+
+/**
+ * Parse a worksheet's four print-setup elements (F10.4) in ONE token pass. Each of `printOptions`,
+ * `pageMargins`, `pageSetup`, `headerFooter` is accepted only as a DIRECT child of `<worksheet>`
+ * (depth 1) — a `<customSheetView>` carries its own copies of all four, and a flat scan would surface
+ * those instead (the parseAutoFilter/parseFreezePane scoping precedent). The header/footer child strings
+ * carry Excel's `&`-codes verbatim, decoded as one ST_Xstring context (like an inline `<t>`).
+ */
+export function parsePrintSetup(xml: string): PrintSetup {
+	const out: Mutable<PrintSetup> = {};
+	let depth = 0;
+	let hf: Mutable<HeaderFooter> | undefined; // the depth-1 headerFooter being built
+	let inHeaderFooter = false;
+	let hfChild: (typeof HF_CHILDREN)[number] | undefined; // which child string is accumulating
+	let hfText = "";
+	for (const token of tokenize(xml)) {
+		if (token.kind === "open") {
+			const name = localName(token.name);
+			if (depth === 1) {
+				if (name === "printOptions") {
+					const po = readPrintOptions(token.attrs);
+					if (po !== undefined) out.printOptions = po;
+				} else if (name === "pageMargins") {
+					const m = readPageMargins(token.attrs);
+					if (m !== undefined) out.pageMargins = m;
+				} else if (name === "pageSetup") {
+					const ps = readPageSetup(token.attrs);
+					if (ps !== undefined) out.pageSetup = ps;
+				} else if (name === "headerFooter") {
+					hf = readHeaderFooterAttrs(token.attrs);
+					if (token.selfClosing) {
+						if (Object.keys(hf).length > 0) out.headerFooter = hf;
+						hf = undefined;
+					} else {
+						inHeaderFooter = true;
+					}
+				}
+			} else if (
+				inHeaderFooter &&
+				depth === 2 &&
+				(HF_CHILDREN as readonly string[]).includes(name)
+			) {
+				hfChild = name as (typeof HF_CHILDREN)[number];
+				hfText = "";
+			}
+			if (!token.selfClosing) depth++;
+		} else if (token.kind === "text") {
+			if (hfChild !== undefined) hfText += token.value;
+		} else {
+			depth--;
+			const cname = localName(token.name);
+			if (hfChild !== undefined && cname === hfChild) {
+				if (hfText.length > 0 && hf !== undefined) hf[hfChild] = decodeXstring(hfText);
+				hfChild = undefined;
+			} else if (inHeaderFooter && cname === "headerFooter") {
+				if (hf !== undefined && Object.keys(hf).length > 0) out.headerFooter = hf;
+				hf = undefined;
+				inHeaderFooter = false;
+			}
+		}
+	}
+	return out;
 }
 
 /**

@@ -31,7 +31,7 @@ import {
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import { MAX_SPIN_COUNT } from "../ooxml/styles";
+import { MAX_PAGE_MARGIN, MAX_PAGE_SCALE, MAX_SPIN_COUNT, MIN_PAGE_SCALE } from "../ooxml/styles";
 import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
 import { encodeXstring } from "../ooxml/xstring";
 import type {
@@ -530,6 +530,217 @@ function sheetProtectionXml(sheetName: string, protection: SheetInput["protectio
 		attrs += ` spinCount="${spin}"`;
 	}
 	return attrs === "" ? "" : `<sheetProtection${attrs}/>`;
+}
+
+// ── Print setup (F10.4): printOptions, pageMargins, pageSetup, headerFooter ────────────────────────
+// Emitted in the CT_Worksheet slot BETWEEN <hyperlinks> and <drawing>, in schema order printOptions →
+// pageMargins → pageSetup → headerFooter. Each stores ONLY explicitly-present values (attribute order
+// fixed for determinism), so a sheet with no print setup stays byte-identical. Each value is read ONCE
+// (single-read TOCTOU). Integer attrs are bounded to uint32 so `${v}` can't emit exponential notation
+// (the spinCount trap); page margins are xsd:double, where exponential IS valid, so only finiteness and
+// the shared [0, MAX_PAGE_MARGIN] range are enforced.
+
+const UINT32_MAX = 0xffffffff;
+
+const PRINT_OPTIONS_FLAGS = [
+	"horizontalCentered",
+	"verticalCentered",
+	"headings",
+	"gridLines",
+] as const;
+
+function printOptionsXml(sheetName: string, po: SheetInput["printOptions"]): string {
+	if (po === undefined) return "";
+	if (!isPlainRecord(po)) sheetInvalid(sheetName, "printOptions must be an object");
+	for (const key of Object.keys(po)) {
+		if (!(PRINT_OPTIONS_FLAGS as readonly string[]).includes(key)) {
+			sheetInvalid(sheetName, `printOptions has unknown property "${key}"`);
+		}
+	}
+	let attrs = "";
+	for (const flag of PRINT_OPTIONS_FLAGS) {
+		const v = po[flag];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean")
+			sheetInvalid(sheetName, `printOptions.${flag} must be a boolean`);
+		attrs += ` ${flag}="${v ? 1 : 0}"`;
+	}
+	return attrs === "" ? "" : `<printOptions${attrs}/>`;
+}
+
+const PAGE_MARGIN_KEYS = ["left", "right", "top", "bottom", "header", "footer"] as const;
+
+function pageMarginsXml(sheetName: string, m: SheetInput["pageMargins"]): string {
+	if (m === undefined) return "";
+	if (!isPlainRecord(m)) sheetInvalid(sheetName, "pageMargins must be an object");
+	for (const key of Object.keys(m)) {
+		if (!(PAGE_MARGIN_KEYS as readonly string[]).includes(key)) {
+			sheetInvalid(sheetName, `pageMargins has unknown property "${key}"`);
+		}
+	}
+	// All six are required by the schema.
+	let attrs = "";
+	for (const key of PAGE_MARGIN_KEYS) {
+		const v = m[key];
+		if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > MAX_PAGE_MARGIN) {
+			sheetInvalid(
+				sheetName,
+				`pageMargins.${key} must be a finite number in 0..${MAX_PAGE_MARGIN}`,
+			);
+		}
+		attrs += ` ${key}="${v}"`;
+	}
+	return `<pageMargins${attrs}/>`;
+}
+
+const PAGE_SETUP_KEYS = [
+	"paperSize",
+	"orientation",
+	"scale",
+	"fitToWidth",
+	"fitToHeight",
+	"firstPageNumber",
+	"useFirstPageNumber",
+	"blackAndWhite",
+	"draft",
+	"cellComments",
+	"pageOrder",
+] as const;
+
+function pageSetupXml(sheetName: string, ps: SheetInput["pageSetup"]): string {
+	if (ps === undefined) return "";
+	if (!isPlainRecord(ps)) sheetInvalid(sheetName, "pageSetup must be an object");
+	for (const key of Object.keys(ps)) {
+		if (!(PAGE_SETUP_KEYS as readonly string[]).includes(key)) {
+			sheetInvalid(sheetName, `pageSetup has unknown property "${key}"`);
+		}
+	}
+	const uint = (name: string, v: unknown): number => {
+		if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > UINT32_MAX) {
+			sheetInvalid(sheetName, `pageSetup.${name} must be an integer in 0..${UINT32_MAX}`);
+		}
+		return v;
+	};
+	const oneOf = (name: string, v: unknown, allowed: readonly string[]): string => {
+		if (typeof v !== "string" || !allowed.includes(v)) {
+			sheetInvalid(sheetName, `pageSetup.${name} must be one of: ${allowed.join(", ")}`);
+		}
+		return v;
+	};
+	const bool = (name: string, v: unknown): number => {
+		if (typeof v !== "boolean") sheetInvalid(sheetName, `pageSetup.${name} must be a boolean`);
+		return v ? 1 : 0;
+	};
+	// Attribute emission in CT_PageSetup schema order (single-read each).
+	let attrs = "";
+	const paperSize = ps.paperSize;
+	if (paperSize !== undefined) attrs += ` paperSize="${uint("paperSize", paperSize)}"`;
+	const scale = ps.scale;
+	if (scale !== undefined) {
+		if (
+			typeof scale !== "number" ||
+			!Number.isInteger(scale) ||
+			scale < MIN_PAGE_SCALE ||
+			scale > MAX_PAGE_SCALE
+		) {
+			sheetInvalid(
+				sheetName,
+				`pageSetup.scale must be an integer in ${MIN_PAGE_SCALE}..${MAX_PAGE_SCALE}`,
+			);
+		}
+		attrs += ` scale="${scale}"`;
+	}
+	const firstPageNumber = ps.firstPageNumber;
+	if (firstPageNumber !== undefined) {
+		attrs += ` firstPageNumber="${uint("firstPageNumber", firstPageNumber)}"`;
+	}
+	const fitToWidth = ps.fitToWidth;
+	if (fitToWidth !== undefined) attrs += ` fitToWidth="${uint("fitToWidth", fitToWidth)}"`;
+	const fitToHeight = ps.fitToHeight;
+	if (fitToHeight !== undefined) attrs += ` fitToHeight="${uint("fitToHeight", fitToHeight)}"`;
+	const pageOrder = ps.pageOrder;
+	if (pageOrder !== undefined) {
+		attrs += ` pageOrder="${oneOf("pageOrder", pageOrder, ["downThenOver", "overThenDown"])}"`;
+	}
+	const orientation = ps.orientation;
+	if (orientation !== undefined) {
+		attrs += ` orientation="${oneOf("orientation", orientation, ["default", "portrait", "landscape"])}"`;
+	}
+	const blackAndWhite = ps.blackAndWhite;
+	if (blackAndWhite !== undefined)
+		attrs += ` blackAndWhite="${bool("blackAndWhite", blackAndWhite)}"`;
+	const draft = ps.draft;
+	if (draft !== undefined) attrs += ` draft="${bool("draft", draft)}"`;
+	const cellComments = ps.cellComments;
+	if (cellComments !== undefined) {
+		attrs += ` cellComments="${oneOf("cellComments", cellComments, ["none", "asDisplayed", "atEnd"])}"`;
+	}
+	const useFirstPageNumber = ps.useFirstPageNumber;
+	if (useFirstPageNumber !== undefined) {
+		attrs += ` useFirstPageNumber="${bool("useFirstPageNumber", useFirstPageNumber)}"`;
+	}
+	return attrs === "" ? "" : `<pageSetup${attrs}/>`;
+}
+
+const HF_FLAGS = [
+	"differentOddEven",
+	"differentFirst",
+	"scaleWithDoc",
+	"alignWithMargins",
+] as const;
+const HF_CHILDREN = [
+	"oddHeader",
+	"oddFooter",
+	"evenHeader",
+	"evenFooter",
+	"firstHeader",
+	"firstFooter",
+] as const;
+
+function headerFooterXml(sheetName: string, hf: SheetInput["headerFooter"]): string {
+	if (hf === undefined) return "";
+	if (!isPlainRecord(hf)) sheetInvalid(sheetName, "headerFooter must be an object");
+	const allowed = new Set<string>([...HF_FLAGS, ...HF_CHILDREN]);
+	for (const key of Object.keys(hf)) {
+		if (!allowed.has(key))
+			sheetInvalid(sheetName, `headerFooter has unknown property "${key}"`);
+	}
+	let attrs = "";
+	for (const flag of HF_FLAGS) {
+		const v = hf[flag];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean")
+			sheetInvalid(sheetName, `headerFooter.${flag} must be a boolean`);
+		attrs += ` ${flag}="${v ? 1 : 0}"`;
+	}
+	let children = "";
+	for (const key of HF_CHILDREN) {
+		const v = hf[key];
+		if (v === undefined) continue;
+		if (typeof v !== "string") sheetInvalid(sheetName, `headerFooter.${key} must be a string`);
+		// The string carries Excel's &-codes as literal text; ST_Xstring-encode (like comment text, F9.6)
+		// then escape — so a control char or `_xHHHH_`-shaped run survives Excel's decode.
+		children += `<${key}>${escapeText(encodeXstring(v))}</${key}>`;
+	}
+	if (attrs === "" && children === "") return "";
+	return children === ""
+		? `<headerFooter${attrs}/>`
+		: `<headerFooter${attrs}>${children}</headerFooter>`;
+}
+
+// The four print-setup elements in schema order (F10.4). Empty string when the sheet declares none.
+// Takes just the four fields so both the buffered and streaming sheet inputs qualify.
+type PrintSetupInput = Pick<
+	SheetInput,
+	"printOptions" | "pageMargins" | "pageSetup" | "headerFooter"
+>;
+function printSetupXml(sheetName: string, sheet: PrintSetupInput): string {
+	return (
+		printOptionsXml(sheetName, sheet.printOptions) +
+		pageMarginsXml(sheetName, sheet.pageMargins) +
+		pageSetupXml(sheetName, sheet.pageSetup) +
+		headerFooterXml(sheetName, sheet.headerFooter)
+	);
 }
 
 // <mergeCells> — Excel repair-prompts on malformed, single-cell, and overlapping merges, so all
@@ -1942,6 +2153,7 @@ export function worksheetXml(
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
 	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
+	const printSetup = printSetupXml(sheet.name, sheet);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -2053,7 +2265,7 @@ export function worksheetXml(
 		.map(([, x]) => x)
 		.join(
 			"",
-		)}</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+		)}</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${printSetup}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	// Comment/drawing/table side parts are spread only when present so the optional properties stay
 	// truly absent (exactOptionalPropertyTypes).
 	return {
@@ -2178,6 +2390,7 @@ export function streamWorksheet(
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
 	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
+	const printSetup = printSetupXml(sheet.name, sheet);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -2203,7 +2416,7 @@ export function streamWorksheet(
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	const footer = `</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${printSetup}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,

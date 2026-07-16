@@ -10,7 +10,11 @@ import type {
 	ConditionalFormatting,
 	DataValidation,
 	FreezePane,
+	HeaderFooter,
 	Hyperlink,
+	PageMargins,
+	PageSetup,
+	PrintOptions,
 	RowProps,
 	SheetAutoFilter,
 	SheetImage,
@@ -229,6 +233,10 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			conditionalFormatting?: readonly ConditionalFormatting[];
 			autoFilter?: SheetAutoFilter;
 			protection?: SheetProtection;
+			pageMargins?: PageMargins;
+			pageSetup?: PageSetup;
+			printOptions?: PrintOptions;
+			headerFooter?: HeaderFooter;
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -273,6 +281,15 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// cell's carried style. Password material is carried verbatim (never recomputed).
 		const protection = worksheet.protection;
 		if (protection !== undefined) sheet.protection = protection;
+		// Print setup (F10.4) — structural pass-through of the four page-layout elements.
+		const pageMargins = worksheet.pageMargins;
+		if (pageMargins !== undefined) sheet.pageMargins = pageMargins;
+		const pageSetup = worksheet.pageSetup;
+		if (pageSetup !== undefined) sheet.pageSetup = pageSetup;
+		const printOptions = worksheet.printOptions;
+		if (printOptions !== undefined) sheet.printOptions = printOptions;
+		const headerFooter = worksheet.headerFooter;
+		if (headerFooter !== undefined) sheet.headerFooter = headerFooter;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

@@ -118,6 +118,22 @@ class OdsWorksheet implements Worksheet {
 		return undefined;
 	}
 
+	get pageMargins(): undefined {
+		return undefined;
+	}
+
+	get pageSetup(): undefined {
+		return undefined;
+	}
+
+	get printOptions(): undefined {
+		return undefined;
+	}
+
+	get headerFooter(): undefined {
+		return undefined;
+	}
+
 	get columns(): readonly ColumnProps[] {
 		return NO_COLUMNS;
 	}

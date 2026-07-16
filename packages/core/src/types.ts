@@ -614,6 +614,66 @@ export interface SheetAutoFilter {
 	readonly ref: string;
 }
 
+/**
+ * A sheet's page margins in inches (F10.4, `<pageMargins>`). All six are required by the schema, so the
+ * reader produces this only when every value parses to a finite, in-range number and the writer requires
+ * all six. Shared numeric bound {@link MAX_PAGE_MARGIN in ooxml/styles}.
+ */
+export interface PageMargins {
+	readonly left: number;
+	readonly right: number;
+	readonly top: number;
+	readonly bottom: number;
+	readonly header: number;
+	readonly footer: number;
+}
+
+/**
+ * A sheet's page setup (F10.4, `<pageSetup>`) — the curated attributes openpyxl carries. Only
+ * explicitly-present values are stored so an unset sheet is byte-faithful. The printer-settings
+ * relationship (`r:id` → `printerSettings.bin`) is DROPPED — opaque device-specific binary.
+ */
+export interface PageSetup {
+	readonly paperSize?: number;
+	readonly orientation?: "default" | "portrait" | "landscape";
+	/** Print scale as a percentage, 10–400. */
+	readonly scale?: number;
+	readonly fitToWidth?: number;
+	readonly fitToHeight?: number;
+	readonly firstPageNumber?: number;
+	readonly useFirstPageNumber?: boolean;
+	readonly blackAndWhite?: boolean;
+	readonly draft?: boolean;
+	readonly cellComments?: "none" | "asDisplayed" | "atEnd";
+	readonly pageOrder?: "downThenOver" | "overThenDown";
+}
+
+/** A sheet's print options (F10.4, `<printOptions>`) — booleans; only explicitly-present ones stored. */
+export interface PrintOptions {
+	readonly gridLines?: boolean;
+	readonly headings?: boolean;
+	readonly horizontalCentered?: boolean;
+	readonly verticalCentered?: boolean;
+}
+
+/**
+ * A sheet's header/footer (F10.4, `<headerFooter>`). The six strings carry Excel's `&`-code formatting
+ * verbatim (e.g. `&CMy Report`, `&RPage &P of &N`) — they are element text, escaped and ST_Xstring-aware
+ * like comment text; openjsxl does not parse the codes. Only present strings/flags are stored.
+ */
+export interface HeaderFooter {
+	readonly oddHeader?: string;
+	readonly oddFooter?: string;
+	readonly evenHeader?: string;
+	readonly evenFooter?: string;
+	readonly firstHeader?: string;
+	readonly firstFooter?: string;
+	readonly differentOddEven?: boolean;
+	readonly differentFirst?: boolean;
+	readonly scaleWithDoc?: boolean;
+	readonly alignWithMargins?: boolean;
+}
+
 // ── The reader's worksheet surface (multi-format seam, M7) ───────────────────────────────────────
 // `Worksheet` is a structural INTERFACE, not a class, so every format's reader can return the SAME
 // public shape: the xlsx reader's `XlsxWorksheet` and the ODS reader's `OdsWorksheet` both implement
@@ -647,6 +707,14 @@ export interface Worksheet {
 	readonly autoFilter: SheetAutoFilter | undefined;
 	/** The sheet's `<sheetProtection>`, or `undefined` when the sheet declares none (or unsupported). */
 	readonly protection: SheetProtection | undefined;
+	/** The sheet's page margins (F10.4), or `undefined` when none (or unsupported). */
+	readonly pageMargins: PageMargins | undefined;
+	/** The sheet's page setup (F10.4), or `undefined` when none (or unsupported). */
+	readonly pageSetup: PageSetup | undefined;
+	/** The sheet's print options (F10.4), or `undefined` when none (or unsupported). */
+	readonly printOptions: PrintOptions | undefined;
+	/** The sheet's header/footer (F10.4), or `undefined` when none (or unsupported). */
+	readonly headerFooter: HeaderFooter | undefined;
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */

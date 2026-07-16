@@ -29,7 +29,11 @@ import type {
 	DataValidation,
 	DxfStyle,
 	FreezePane,
+	HeaderFooter,
 	Hyperlink,
+	PageMargins,
+	PageSetup,
+	PrintOptions,
 	RowProps,
 	SheetAutoFilter,
 	SheetImage,
@@ -43,6 +47,7 @@ import type {
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
 import {
+	type PrintSetup,
 	parseAutoFilter,
 	parseCellStyles,
 	parseColumnProps,
@@ -52,6 +57,7 @@ import {
 	parseFreezePane,
 	parseHyperlinks,
 	parseMergedCells,
+	parsePrintSetup,
 	parseRowProperties,
 	parseSheetProtection,
 	type Row,
@@ -194,6 +200,7 @@ export class XlsxWorksheet implements Worksheet {
 	#autoFilterRead = false;
 	#protection: SheetProtection | undefined;
 	#protectionRead = false;
+	#printSetup: PrintSetup | undefined;
 
 	constructor(
 		info: SheetInfo,
@@ -365,6 +372,33 @@ export class XlsxWorksheet implements Worksheet {
 			this.#protectionRead = true;
 		}
 		return this.#protection;
+	}
+
+	// The four print-setup elements share ONE token pass (parsePrintSetup returns an object, never
+	// undefined, so its presence in the cache doubles as the "already parsed" flag). Lazy on first access.
+	#printSetupOf(): PrintSetup {
+		if (this.#printSetup === undefined) this.#printSetup = parsePrintSetup(this.#xml);
+		return this.#printSetup;
+	}
+
+	/** The sheet's page margins (F10.4), or `undefined` when it declares none. Parsed lazily. */
+	get pageMargins(): PageMargins | undefined {
+		return this.#printSetupOf().pageMargins;
+	}
+
+	/** The sheet's page setup (F10.4), or `undefined` when it declares none. Parsed lazily. */
+	get pageSetup(): PageSetup | undefined {
+		return this.#printSetupOf().pageSetup;
+	}
+
+	/** The sheet's print options (F10.4), or `undefined` when it declares none. Parsed lazily. */
+	get printOptions(): PrintOptions | undefined {
+		return this.#printSetupOf().printOptions;
+	}
+
+	/** The sheet's header/footer (F10.4), or `undefined` when it declares none. Parsed lazily. */
+	get headerFooter(): HeaderFooter | undefined {
+		return this.#printSetupOf().headerFooter;
 	}
 
 	/**

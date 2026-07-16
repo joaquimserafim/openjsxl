@@ -2815,7 +2815,7 @@ lenses, fixed before commit — byte-identity of the risky style-registry key ch
   documented shared-bounds home): the reader DROPS an out-of-range count, the writer REJECTS one typed.
   Pinned (reader drop + writer reject, both sheet & workbook). No other finding survived verification.
 
-### F10.4 — Print setup: margins, page setup, print options, header/footer ☐
+### F10.4 — Print setup: margins, page setup, print options, header/footer ☑
 
 **Context.** `pageMargins`/`pageSetup`/`printOptions`/`headerFooter` have zero handling in
 core — report-generation output prints with defaults and a foreign file's print config
@@ -2838,18 +2838,27 @@ decision-6 emission, ST_Xstring-aware like comment text).
 part itself, chartsheet printing.
 
 **Tasks**
-- [ ] Model + reader (all four elements) + clamp/drop pins + degrade pins (ods/xlsb/csv).
-- [ ] Writer emission + the four-element internal order pin + byte-identity pin + BOTH
-      writers.
-- [ ] Bridge carry + corpus snapshot + fixtures (openpyxl-authored landscape + fit-to-page +
-      header/footer file; our output read back warnings-as-errors clean).
+- [x] Model (`PageMargins`/`PageSetup`/`PrintOptions`/`HeaderFooter`) + reader `parsePrintSetup`
+      (ONE depth-scoped pass, direct `<worksheet>` child only) + clamp/drop pins + degrade pins
+      (ods/xlsb/csv `undefined`). Shared bounds `MAX_PAGE_MARGIN`/`MIN..MAX_PAGE_SCALE` (`ooxml/styles.ts`).
+- [x] Writer emission (`writer/sheet.ts` `printSetupXml`, slot between `<hyperlinks>` and `<drawing>`,
+      schema order printOptions→pageMargins→pageSetup→headerFooter) + byte-identity (5 canonical incl.
+      styled IDENTICAL vs pre-F10.4) + BOTH writers. Integer attrs uint32-bounded (no `1e+21`), margins
+      xsd:double (finite + shared range), header/footer text ST_Xstring-encoded.
+- [x] Bridge carry + corpus snapshot extension (4 fields) + fixture `openpyxl-print-setup.xlsx`
+      (landscape + fit-to-page + margins + printOptions + header/footer with `&`-codes; openpyxl reads
+      our output warnings-as-errors clean).
 - [ ] Owner real-Excel spot check: print preview of a round-tripped landscape/fit-to-1-page/
-      footer workbook matches the original (decision 7).
-- [ ] Adversarial review + gates + byte-identity recipe.
+      footer workbook matches the original (decision 7). — **owner-gated**
+- [x] Adversarial review + gates + byte-identity recipe + openpyxl cross-validation both directions.
 
-**Acceptance.** A workbook with margins + landscape + fit-to-page + a footer round-trips
-print-identical (owner check); print-config-free input is byte-identical; hostile numeric
-attrs clamp/drop named.
+**Review** (4-lens adversarial workflow + refuting verifiers — spec-conformance, round-trip/shared-model,
+hostile-input/TOCTOU, byte-identity+depth): **ZERO defects.** Each finder did real analysis (5–8 Read +
+12–19 grep/probe calls) and independently returned empty. Corroborated by hostile probes: single-read
+TOCTOU (a flipping getter is read exactly once), control-char header/footer round-trips via ST_Xstring,
+empty `{}` for a field emits nothing (byte-identity), a tiny exponential margin is valid xsd:double. The
+clean result is by design — F10.4 pre-applied the two prior-review lessons: the customSheetView depth-
+scoping (F10.2) and uint32 integer bounds vs the exponential-emit class (F10.3 spinCount).
 
 ### F10.5 — Fidelity truth-up + `.xlsm` policy ☐
 

@@ -219,6 +219,15 @@ git-ignored [`../local/`](../local) directory and are never committed.
   VERBATIM (never computed or verified). The corpus property round-trips it through the bridge, and
   openpyxl reads our re-written output warnings-as-errors clean (`reader/__tests__/protection.test.ts`).
 
+- **`openpyxl-print-setup.xlsx`** — authored by **openpyxl 3.1.5** to exercise print-setup read + bridge
+  carry (F10.4): a `Report` sheet with `<pageMargins>` (left/right/header/footer set), `<pageSetup>`
+  (landscape + `fitToWidth="1"` + A4 `paperSize="9"`), `<printOptions horizontalCentered gridLines>`, and
+  a `<headerFooter>` whose `oddHeader`/`oddFooter` carry `&`-codes (`&CQuarterly Report`, `Page &P of &N`).
+  The reader surfaces `Worksheet.pageMargins`/`pageSetup`/`printOptions`/`headerFooter`
+  (`reader/__tests__/print-setup.test.ts`), the corpus property round-trips them through the bridge, and
+  openpyxl reads our re-written output warnings-as-errors clean (landscape, fit-to-page, and the header
+  text preserved).
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

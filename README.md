@@ -265,7 +265,7 @@ await writeFile('out.xlsx', await writeXlsx({ ...input, sheets }));
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
 pictures, geometry, structural metadata, defined names, tables, data validation, conditional
-formatting, autofilters, and protection**:
+formatting, autofilters, protection, and print setup**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
@@ -274,6 +274,7 @@ formatting, autofilters, and protection**:
 | fonts, fills, borders, alignment | picture effects (crop, rotation, borders) — a picture carries anchor + bytes + type + name |
 | colors: rgb, indexed, theme + tint (raw) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
 | control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | autofilter **criteria** & sort state — the filter range carries, the per-column filter/sort is dropped |
+| | printer-settings binary (`printerSettings.bin`) & manual page breaks — dropped |
 | custom theme part (carried byte-identical) | |
 | formula text + cached value | |
 | defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | |
@@ -289,6 +290,7 @@ formatting, autofilters, and protection**:
 | conditional formatting (highlights, scales, bars, icon sets) | |
 | autofilter range (filter dropdowns; the paired `_xlnm._FilterDatabase` is managed automatically) | |
 | protection — sheet & workbook locks, per-cell locked/hidden, password hashes carried verbatim | |
+| print setup — margins, orientation, scale, fit-to-page, paper size, print options, header/footer | |
 
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
