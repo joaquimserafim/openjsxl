@@ -14,6 +14,7 @@ import type {
 	BorderEdge,
 	BorderLineStyle,
 	BorderStyle,
+	CellProtection,
 	CellStyle,
 	Color,
 	DxfFill,
@@ -273,6 +274,24 @@ function validateBorder(fail: Fail, raw: unknown): BorderStyle | undefined {
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function validateProtection(fail: Fail, raw: unknown): CellProtection | undefined {
+	if (!isPlainObject(raw)) fail("style.protection must be an object");
+	checkKeys(fail, "style.protection", raw, ["locked", "hidden"]);
+	const out: { locked?: boolean; hidden?: boolean } = {};
+	// Both flags carry their EXACT value (unlike alignment's true-only flags): `locked: false` is
+	// meaningful — an explicitly UNLOCKED cell, editable while the sheet is protected.
+	for (const flag of ["locked", "hidden"] as const) {
+		const value = raw[flag];
+		if (value !== undefined) {
+			if (typeof value !== "boolean") fail(`style.protection.${flag} must be a boolean`);
+			out[flag] = value;
+		}
+	}
+	// A protection object with neither flag carries nothing — treat as no protection so it neither
+	// interns a distinct style nor emits an empty <protection/> (keeps byte-identity).
+	return out.locked !== undefined || out.hidden !== undefined ? out : undefined;
+}
+
 function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
 	if (!isPlainObject(raw)) fail("style.alignment must be an object");
 	checkKeys(fail, "style.alignment", raw, [
@@ -440,6 +459,15 @@ function alignmentXml(alignment: Alignment): string {
 	return `<alignment${attrs}/>`;
 }
 
+// <protection locked hidden> (F10.3). Only explicitly present flags are emitted, so a carried
+// `<protection locked="0"/>` re-writes as-is. Booleans render 1/0 per house style.
+function protectionXml(protection: CellProtection): string {
+	let attrs = "";
+	if (protection.locked !== undefined) attrs += ` locked="${protection.locked ? 1 : 0}"`;
+	if (protection.hidden !== undefined) attrs += ` hidden="${protection.hidden ? 1 : 0}"`;
+	return `<protection${attrs}/>`;
+}
+
 function colorUsesTheme(color: Color | undefined): boolean {
 	return color !== undefined && "theme" in color;
 }
@@ -452,6 +480,7 @@ interface XfRecord {
 	readonly fillId: number;
 	readonly borderId: number;
 	readonly alignment: Alignment | undefined;
+	readonly protection: CellProtection | undefined;
 }
 
 export interface StyleRegistry {
@@ -498,9 +527,16 @@ export function createStyleRegistry(): StyleRegistry {
 	const borderIndex = new Map<string, number>([["", 0]]);
 
 	const xfs: XfRecord[] = [
-		{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, alignment: undefined },
+		{
+			numFmtId: 0,
+			fontId: 0,
+			fillId: 0,
+			borderId: 0,
+			alignment: undefined,
+			protection: undefined,
+		},
 	];
-	const xfIndex = new Map<string, number>([["0/0/0/0/", 0]]);
+	const xfIndex = new Map<string, number>([["0/0/0/0//", 0]]);
 
 	// Custom number formats (F4.3): code → id from 164 up, deduped, in first-encounter order.
 	// Codes exactly matching a built-in reuse its id instead and never appear here.
@@ -652,6 +688,7 @@ export function createStyleRegistry(): StyleRegistry {
 		let fillId = 0;
 		let borderId = 0;
 		let alignment: Alignment | undefined;
+		let protection: CellProtection | undefined;
 		let numFmtCode: string | undefined;
 		if (style !== undefined) {
 			if (!isPlainObject(style)) invalid(ref, "style must be an object");
@@ -662,6 +699,7 @@ export function createStyleRegistry(): StyleRegistry {
 				"border",
 				"alignment",
 				"numberFormat",
+				"protection",
 			]);
 			// Single-read each component (see the validator note above) before validating it.
 			const rawCode = style.numberFormat;
@@ -689,6 +727,8 @@ export function createStyleRegistry(): StyleRegistry {
 			);
 			const align = style.alignment;
 			alignment = align === undefined ? undefined : validateAlignment(fail, align);
+			const prot = style.protection;
+			protection = prot === undefined ? undefined : validateProtection(fail, prot);
 		}
 		// A user code wins even on a Date — the implicit date format (id 14) applies only when the
 		// caller didn't choose one. 'General' reverse-maps to id 0, i.e. no format.
@@ -696,11 +736,11 @@ export function createStyleRegistry(): StyleRegistry {
 		if (numFmtCode !== undefined) numFmtId = numFmtIdFor(numFmtCode);
 		else if (isDate) numFmtId = DATE_NUMFMT_ID;
 
-		const key = `${numFmtId}/${fontId}/${fillId}/${borderId}/${keyOf(alignment)}`;
+		const key = `${numFmtId}/${fontId}/${fillId}/${borderId}/${keyOf(alignment)}/${keyOf(protection)}`;
 		let index = xfIndex.get(key);
 		if (index === undefined) {
 			index = xfs.length;
-			xfs.push({ numFmtId, fontId, fillId, borderId, alignment });
+			xfs.push({ numFmtId, fontId, fillId, borderId, alignment, protection });
 			xfIndex.set(key, index);
 		}
 		return index;
@@ -714,10 +754,14 @@ export function createStyleRegistry(): StyleRegistry {
 		if (xf.fontId !== 0) attrs += ' applyFont="1"';
 		if (xf.fillId >= 2) attrs += ' applyFill="1"';
 		if (xf.borderId !== 0) attrs += ' applyBorder="1"';
-		if (xf.alignment !== undefined) {
-			return `<xf ${attrs} applyAlignment="1">${alignmentXml(xf.alignment)}</xf>`;
-		}
-		return `<xf ${attrs}/>`;
+		if (xf.alignment !== undefined) attrs += ' applyAlignment="1"';
+		if (xf.protection !== undefined) attrs += ' applyProtection="1"';
+		// CT_Xf child order: alignment, then protection (F10.3). A cell using neither keeps the exact
+		// pre-F4.2/F10.3 self-closing `<xf/>` bytes.
+		const children =
+			(xf.alignment !== undefined ? alignmentXml(xf.alignment) : "") +
+			(xf.protection !== undefined ? protectionXml(xf.protection) : "");
+		return children === "" ? `<xf ${attrs}/>` : `<xf ${attrs}>${children}</xf>`;
 	}
 
 	function stylesXml(): string {

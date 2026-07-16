@@ -536,12 +536,71 @@ export interface Alignment {
  * `numberFormat` is always the format CODE string (e.g. `"yyyy-mm-dd"`, `"0.00%"`) — ids are a
  * file-internal detail and never appear in the API.
  */
+/**
+ * A cell's protection flags (F10.3), from the style's `<protection>`. Both default to Excel's own
+ * defaults when absent: a cell is `locked` (only meaningful once the sheet is protected) and not
+ * `hidden` (a hidden cell hides its formula in the formula bar of a protected sheet). Only explicitly
+ * present flags are carried, so an unprotected cell stays byte-identical.
+ */
+export interface CellProtection {
+	readonly locked?: boolean;
+	readonly hidden?: boolean;
+}
+
 export interface CellStyle {
 	readonly numberFormat?: string;
 	readonly font?: FontStyle;
 	readonly fill?: FillStyle;
 	readonly border?: BorderStyle;
 	readonly alignment?: Alignment;
+	/** Cell lock/hide flags — only meaningful when the sheet is protected (F10.3). */
+	readonly protection?: CellProtection;
+}
+
+/**
+ * A sheet's protection (F10.3), from `<sheetProtection>`. `sheet` true turns protection ON; the other
+ * booleans allow (`false`) or block (`true`) specific edits. Password material (`password`, or the
+ * modern `algorithmName`/`hashValue`/`saltValue`/`spinCount`) is carried VERBATIM — openjsxl never
+ * computes, verifies, or strips a password hash. Only explicitly present attributes are modelled, so a
+ * carry is byte-faithful and an unprotected sheet stays byte-identical.
+ */
+export interface SheetProtection {
+	readonly sheet?: boolean;
+	readonly objects?: boolean;
+	readonly scenarios?: boolean;
+	readonly formatCells?: boolean;
+	readonly formatColumns?: boolean;
+	readonly formatRows?: boolean;
+	readonly insertColumns?: boolean;
+	readonly insertRows?: boolean;
+	readonly insertHyperlinks?: boolean;
+	readonly deleteColumns?: boolean;
+	readonly deleteRows?: boolean;
+	readonly selectLockedCells?: boolean;
+	readonly selectUnlockedCells?: boolean;
+	readonly sort?: boolean;
+	readonly autoFilter?: boolean;
+	readonly pivotTables?: boolean;
+	readonly password?: string;
+	readonly algorithmName?: string;
+	readonly hashValue?: string;
+	readonly saltValue?: string;
+	readonly spinCount?: number;
+}
+
+/**
+ * Workbook-level protection (F10.3), from `<workbookProtection>`. `lockStructure` prevents adding,
+ * deleting, hiding, or reordering sheets; `lockWindows` locks the window layout. Password material is
+ * carried VERBATIM (never computed/verified). Only explicitly present attributes are modelled.
+ */
+export interface WorkbookProtection {
+	readonly lockStructure?: boolean;
+	readonly lockWindows?: boolean;
+	readonly workbookPassword?: string;
+	readonly workbookAlgorithmName?: string;
+	readonly workbookHashValue?: string;
+	readonly workbookSaltValue?: string;
+	readonly workbookSpinCount?: number;
 }
 
 /**
@@ -586,6 +645,8 @@ export interface Worksheet {
 	readonly conditionalFormatting: readonly ConditionalFormatting[];
 	/** The sheet's autoFilter range (filter dropdowns), or `undefined` when none (or unsupported). */
 	readonly autoFilter: SheetAutoFilter | undefined;
+	/** The sheet's `<sheetProtection>`, or `undefined` when the sheet declares none (or unsupported). */
+	readonly protection: SheetProtection | undefined;
 	/** Column width/visibility declarations, in document order. Empty when none (or unsupported). */
 	readonly columns: readonly ColumnProps[];
 	/** Per-row height/visibility, keyed by 1-based row index. Empty when none (or unsupported). */

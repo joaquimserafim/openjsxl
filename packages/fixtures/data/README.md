@@ -211,6 +211,14 @@ git-ignored [`../local/`](../local) directory and are never committed.
   The corpus property round-trips the range through the bridge, and openpyxl reads our re-written output
   warnings-as-errors clean — seeing the filter arrows and its own `_FilterDatabase` back.
 
+- **`openpyxl-protection.xlsx`** — authored by **openpyxl 3.1.5** to exercise protection read + bridge
+  carry (F10.3): a `Data` sheet with `<sheetProtection sheet="1" …>` (password `hunter2` → the 16-bit
+  hash `C258`, `formatCells="0"`, `sort="1"`), two cells with an explicit xf `<protection>` (`A2` unlocked,
+  `A3` hidden), and a workbook-level `<workbookProtection lockStructure="1"/>`. The reader surfaces
+  `Worksheet.protection` / `Workbook.protection` / `CellStyle.protection`, carrying the password hash
+  VERBATIM (never computed or verified). The corpus property round-trips it through the bridge, and
+  openpyxl reads our re-written output warnings-as-errors clean (`reader/__tests__/protection.test.ts`).
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a

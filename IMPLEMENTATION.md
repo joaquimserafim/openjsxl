@@ -2768,7 +2768,7 @@ four lenses, fixed before commit):
   child of `<worksheet>` (depth 1). Pinned (`reader/__tests__/autofilter.test.ts` — nested-view ignored;
   depth-1 wins when both present). No other findings survived verification.
 
-### F10.3 — Protection carry: workbook, sheet, and cell locked/hidden ☐
+### F10.3 — Protection carry: workbook, sheet, and cell locked/hidden ☑
 
 **Context.** "Protection is not modelled" (`writer/styles.ts`) — `<sheetProtection>`,
 `<workbookProtection>`, and the xf-level `<protection locked hidden>` are all silently
@@ -2792,19 +2792,28 @@ clamps/drops garbage attr values (decision 3).
 password hashes (decision 5).
 
 **Tasks**
-- [ ] Model + reader (both parts + xf protection) + degrade pins (ods/xlsb/csv).
-- [ ] Styles-registry read/write of locked/hidden + interning tests (styled-blank
-      interaction: a protection-only style must still intern).
-- [ ] Writer emission (sheet + workbook slots) + order pins + byte-identity pin + BOTH
-      writers.
-- [ ] Bridge carry + corpus snapshot + fixture (an openpyxl password-protected sheet — hash
-      attrs carry VERBATIM; owner verifies the rewrite still challenges for the password in
-      real Excel).
-- [ ] Adversarial review + gates + byte-identity recipe.
+- [x] Model (`CellProtection`/`SheetProtection`/`WorkbookProtection` + `CellStyle.protection`) + reader
+      (`parseSheetProtection` depth-scoped, `ooxml/styles.ts` xf `<protection>`, `ooxml/workbook.ts`
+      `<workbookProtection>`) + `Workbook`/`Worksheet.protection` + degrade pins (ods/xlsb/csv `undefined`).
+- [x] Styles-registry read/write of locked/hidden + interning (xf key extended `…/keyOf(protection)`;
+      a protection-only style interns; a styled-BLANK carries it) + CT_Xf child order alignment→protection.
+- [x] Writer emission: `sheetProtectionXml` (slot after `</sheetData>`, before `<autoFilter>`) +
+      `workbookProtectionXml` (after `<workbookPr>`, before `<bookViews>`/`<sheets>`) + order pins +
+      byte-identity (5 canonical incl. styled cell IDENTICAL vs pre-F10.3) + BOTH writers.
+- [x] Bridge carry (sheet + workbook protection; cell protection rides the style pass-through) + corpus
+      snapshot extension + fixture `openpyxl-protection.xlsx` (password `hunter2`→`C258` VERBATIM; owner
+      verifies the rewrite still challenges for the password in real Excel).
+- [x] Adversarial review (4 lenses + refuting verifiers) + gates + byte-identity recipe + openpyxl
+      cross-validation both directions.
 
-**Acceptance.** A protected template round-trips still protected (owner Excel check);
-flags-only protection is authorable; unprotected input is byte-identical; garbage attrs
-degrade named, never bare-throw.
+**Review** (4-lens adversarial workflow + refuting verifiers; ONE defect, found UNANIMOUSLY by all four
+lenses, fixed before commit — byte-identity of the risky style-registry key change was verified CLEAN):
+- **CONFIRMED (MEDIUM) — `spinCount`/`workbookSpinCount` unbounded, fixed.** Neither the reader nor the
+  writer bounded the password-hash spin count. A hostile 21-digit value parsed to a float and re-emitted
+  as `spinCount="1e+21"` — invalid integer XML (Excel repair-prompt), a silent change; 16–20 digits lost
+  precision silently. Fixed with a SHARED bound `MAX_SPIN_COUNT = 0xffffffff` (`ooxml/styles.ts`, the
+  documented shared-bounds home): the reader DROPS an out-of-range count, the writer REJECTS one typed.
+  Pinned (reader drop + writer reject, both sheet & workbook). No other finding survived verification.
 
 ### F10.4 — Print setup: margins, page setup, print options, header/footer ☐
 

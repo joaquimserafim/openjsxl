@@ -3,6 +3,7 @@ import type {
 	BorderEdge,
 	BorderLineStyle,
 	BorderStyle,
+	CellProtection,
 	CellStyle,
 	Color,
 	FillStyle,
@@ -145,6 +146,13 @@ export const HEX_COLOR = /^(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 export const MAX_COLOR_INDEX = 0xffffffff;
 /** Excel's own maximum alignment indent. */
 export const MAX_INDENT = 250;
+/**
+ * xsd:unsignedInt ceiling for a password-hash `spinCount`/`workbookSpinCount` (F10.3). SHARED bound:
+ * the tolerant reader DROPS a spinCount above it (a value Excel could never have written), and the
+ * strict writer REJECTS one typed — so a hostile 21-digit count can't slip through as `1e+21` (invalid
+ * integer XML that would make Excel repair-prompt) or as a silently precision-lost integer.
+ */
+export const MAX_SPIN_COUNT = 0xffffffff;
 
 // A <color> / <fgColor> / <bgColor> element's attributes → the raw Color union. The spec allows
 // exactly one addressing mode per element; if a producer emits several, precedence follows what
@@ -279,6 +287,18 @@ interface XfRecord {
 	readonly fillId: number;
 	readonly borderId: number;
 	readonly alignment: Alignment | undefined;
+	readonly protection: CellProtection | undefined;
+}
+
+// A cellXfs <xf>'s inline <protection locked hidden> (F10.3), or undefined when it has neither flag.
+// Both flags are read only when explicitly present, so what the reader returns re-writes byte-faithfully.
+function parseProtection(attrs: Readonly<Record<string, string>>): CellProtection | undefined {
+	const out: { locked?: boolean; hidden?: boolean } = {};
+	if (attrs.locked === "1" || attrs.locked === "true") out.locked = true;
+	else if (attrs.locked === "0" || attrs.locked === "false") out.locked = false;
+	if (attrs.hidden === "1" || attrs.hidden === "true") out.hidden = true;
+	else if (attrs.hidden === "0" || attrs.hidden === "false") out.hidden = false;
+	return out.locked !== undefined || out.hidden !== undefined ? out : undefined;
 }
 
 export function parseStyles(xml: string): StyleTable {
@@ -445,6 +465,7 @@ export function parseStyles(xml: string): StyleTable {
 					fillId: Number.isInteger(fillId) ? fillId : 0,
 					borderId: Number.isInteger(borderId) ? borderId : 0,
 					alignment: undefined,
+					protection: undefined,
 				});
 				if (!token.selfClosing) inXf = true;
 			} else if (name === "alignment" && inXf) {
@@ -453,6 +474,14 @@ export function parseStyles(xml: string): StyleTable {
 				if (alignment !== undefined && xfs.length > 0) {
 					const last = xfs[xfs.length - 1] as XfRecord;
 					xfs[xfs.length - 1] = { ...last, alignment };
+				}
+			} else if (name === "protection" && inXf) {
+				// Inline <protection locked hidden> belongs to the last-opened cellXfs <xf> (F10.3). The
+				// `inXf` gate scopes it to cellXfs — a <dxf>'s own <protection> never reaches here.
+				const protection = parseProtection(token.attrs);
+				if (protection !== undefined && xfs.length > 0) {
+					const last = xfs[xfs.length - 1] as XfRecord;
+					xfs[xfs.length - 1] = { ...last, protection };
 				}
 			}
 		} else if (token.kind === "close") {
@@ -544,6 +573,7 @@ export function parseStyles(xml: string): StyleTable {
 				fill?: FillStyle;
 				border?: BorderStyle;
 				alignment?: Alignment;
+				protection?: CellProtection;
 			} = {};
 			// numberFormat: "General" is the absence of a format, not a format — whether as id 0
 			// or as an explicitly interned custom code (LibreOffice writes <numFmt numFmtId="164"
@@ -576,6 +606,7 @@ export function parseStyles(xml: string): StyleTable {
 			const borderRecord = borders[xf.borderId];
 			if (borderRecord !== undefined && hasKeys(borderRecord)) style.border = borderRecord;
 			if (xf.alignment !== undefined) style.alignment = xf.alignment;
+			if (xf.protection !== undefined) style.protection = xf.protection;
 			result = hasKeys(style) ? style : undefined;
 		}
 		styleCache.set(index, result);

@@ -62,6 +62,8 @@ async function* buildStreamParts(
 	const carriedTheme = workbook.themeXml;
 	// Read + validate the optional defined names ONCE (F10.1), matching writeXlsx — absent → byte-identical.
 	const definedNames = validateDefinedNames(workbook.definedNames, names.length);
+	// Read the caller's optional workbook protection ONCE (single-read TOCTOU), matching writeXlsx.
+	const protection = workbook.protection;
 	const styles = createStyleRegistry();
 	const media = createMediaRegistry();
 	const tableCtx = createTableContext();
@@ -111,7 +113,7 @@ async function* buildStreamParts(
 	if (needTheme) yield { name: "xl/theme/theme1.xml", data: encode(themeToEmit(carriedTheme)) };
 	yield {
 		name: "xl/workbook.xml",
-		data: encode(workbookXml(names, states, date1904, allDefinedNames)),
+		data: encode(workbookXml(names, states, date1904, allDefinedNames, protection)),
 	};
 	yield {
 		name: "xl/_rels/workbook.xml.rels",

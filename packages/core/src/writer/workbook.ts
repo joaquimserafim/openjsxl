@@ -75,6 +75,9 @@ export async function writeXlsx(
 	// Read the caller's optional defined names ONCE (single-read TOCTOU) and validate into the trusted
 	// array workbook.xml emits (F10.1). Absent → [] → no <definedNames> → byte-identical output.
 	const definedNames = validateDefinedNames(workbook.definedNames, sheets.length);
+	// Read the caller's optional workbook protection ONCE (single-read TOCTOU); validated + emitted by
+	// workbookXml. Absent → no <workbookProtection> → byte-identical output.
+	const protection = workbook.protection;
 
 	// Render every worksheet up front — this is also where invalid cell values and styles surface —
 	// interning every style into one shared registry. What the registry saw decides whether
@@ -131,7 +134,7 @@ export async function writeXlsx(
 		),
 	);
 	add("_rels/.rels", packageRelsXml());
-	add("xl/workbook.xml", workbookXml(names, states, date1904, allDefinedNames));
+	add("xl/workbook.xml", workbookXml(names, states, date1904, allDefinedNames, protection));
 	add("xl/_rels/workbook.xml.rels", workbookRelsXml(sheets.length, needStyles, needTheme));
 	if (needStyles) add("xl/styles.xml", styles.stylesXml());
 	if (needTheme) add("xl/theme/theme1.xml", themeToEmit(carriedTheme));

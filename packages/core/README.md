@@ -95,8 +95,9 @@ non-finite number, invalid `Date`, malformed or overlapping merges) throws `Xlsx
 lone surrogates) store via the `_xHHHH_` escape Excel itself uses, and round-trip. The round
 trip is lossless for values, types, sheet names/order, styles, formulas, comments, pictures,
 custom themes, geometry, merges, hyperlinks, visibility, defined names, tables, data
-validations, conditional formatting, and autofilter ranges; in-cell rich text flattens to
-plain text, and an autofilter's per-column criteria and sort state are not carried.
+validations, conditional formatting, autofilter ranges, and protection (sheet/workbook locks +
+per-cell locked/hidden, password hashes verbatim); in-cell rich text flattens to plain text,
+and an autofilter's per-column criteria and sort state are not carried.
 
 ## Other formats (read-only)
 

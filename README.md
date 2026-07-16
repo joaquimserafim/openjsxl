@@ -265,7 +265,7 @@ await writeFile('out.xlsx', await writeXlsx({ ...input, sheets }));
 
 The round trip is **lossless for values, types, sheet names/order, styles, formulas, comments,
 pictures, geometry, structural metadata, defined names, tables, data validation, conditional
-formatting, and autofilters**:
+formatting, autofilters, and protection**:
 
 | Round-trips losslessly | Not carried (yet) |
 | --- | --- |
@@ -288,6 +288,7 @@ formatting, and autofilters**:
 | data validations (dropdowns & input rules) | |
 | conditional formatting (highlights, scales, bars, icon sets) | |
 | autofilter range (filter dropdowns; the paired `_xlnm._FilterDatabase` is managed automatically) | |
+| protection — sheet & workbook locks, per-cell locked/hidden, password hashes carried verbatim | |
 
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
@@ -415,6 +416,11 @@ read → modify → write carries them across untouched:
 - **AutoFilter** (`Worksheet.autoFilter` ↔ `SheetInput.autoFilter`) — the filter-dropdown range,
   `{ ref: 'A1:C10' }`. On write the paired hidden `_xlnm._FilterDatabase` defined name Excel expects
   is created for you; per-column filter *criteria* and sort state are not carried.
+- **Protection** (`Worksheet.protection` ↔ `SheetInput.protection`, `Workbook.protection` ↔
+  `WorkbookInput.protection`, `CellStyle.protection`) — lock a sheet (`{ sheet: true }`) or the workbook
+  structure (`{ lockStructure: true }`), and mark cells `{ locked, hidden }` (cells are locked by default;
+  set `locked: false` to leave a cell editable in a protected sheet). Any password hash is carried
+  verbatim — openjsxl never computes, verifies, or strips one.
 
 ```ts
 const bytes = await writeXlsx({

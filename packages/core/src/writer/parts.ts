@@ -9,9 +9,10 @@ import {
 	isFilterDatabaseName,
 	MAX_NAME_LEN,
 } from "../ooxml/name";
+import { MAX_SPIN_COUNT } from "../ooxml/styles";
 import type { DefinedName } from "../ooxml/workbook";
 import { encodeXstring } from "../ooxml/xstring";
-import type { SheetState } from "../types";
+import type { SheetState, WorkbookProtection } from "../types";
 import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
 import { escapeAttr, escapeText, isPlainRecord, isXmlSafe } from "./xml";
@@ -194,13 +195,74 @@ export function packageRelsXml(): string {
  * a different name in between validation and emission. `definedNames` are the VALIDATED entries from
  * {@link validateDefinedNames}; they emit in the load-bearing CT_Workbook slot right after `<sheets>`.
  */
+// <workbookProtection> (F10.3) — the workbook-level lock, emitted in the CT_Workbook slot after
+// <workbookPr> and before <bookViews>/<sheets>. Booleans + verbatim password material; attribute order
+// fixed for determinism. Absent/empty emits nothing (an unprotected workbook keeps its pre-F10.3 bytes).
+const WORKBOOK_PROTECTION_BOOL_ATTRS = ["lockStructure", "lockWindows"] as const;
+const WORKBOOK_PROTECTION_STR_ATTRS = [
+	"workbookPassword",
+	"workbookAlgorithmName",
+	"workbookHashValue",
+	"workbookSaltValue",
+] as const;
+
+function protectionInvalid(message: string): never {
+	throw new XlsxError("invalid-input", message);
+}
+
+export function workbookProtectionXml(protection: WorkbookProtection | undefined): string {
+	if (protection === undefined) return "";
+	if (!isPlainRecord(protection)) protectionInvalid("protection must be an object");
+	const allowed = new Set<string>([
+		...WORKBOOK_PROTECTION_BOOL_ATTRS,
+		...WORKBOOK_PROTECTION_STR_ATTRS,
+		"workbookSpinCount",
+	]);
+	for (const key of Object.keys(protection)) {
+		if (!allowed.has(key)) protectionInvalid(`protection has unknown property "${key}"`);
+	}
+	let attrs = "";
+	for (const flag of WORKBOOK_PROTECTION_BOOL_ATTRS) {
+		const v = protection[flag];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean") protectionInvalid(`protection.${flag} must be a boolean`);
+		attrs += ` ${flag}="${v ? 1 : 0}"`;
+	}
+	for (const attr of WORKBOOK_PROTECTION_STR_ATTRS) {
+		const v = protection[attr];
+		if (v === undefined) continue;
+		if (typeof v !== "string") protectionInvalid(`protection.${attr} must be a string`);
+		if (!isXmlSafe(v))
+			protectionInvalid(`protection.${attr} contains a character not allowed in XML`);
+		attrs += ` ${attr}="${escapeAttr(v)}"`;
+	}
+	const spin = protection.workbookSpinCount;
+	if (spin !== undefined) {
+		// Bounded to xsd:unsignedInt (MAX_SPIN_COUNT); above it, `${spin}` emits `1e+21` (invalid XML).
+		if (
+			typeof spin !== "number" ||
+			!Number.isInteger(spin) ||
+			spin < 0 ||
+			spin > MAX_SPIN_COUNT
+		) {
+			protectionInvalid(
+				`protection.workbookSpinCount must be an integer in 0..${MAX_SPIN_COUNT}`,
+			);
+		}
+		attrs += ` workbookSpinCount="${spin}"`;
+	}
+	return attrs === "" ? "" : `<workbookProtection${attrs}/>`;
+}
+
 export function workbookXml(
 	names: readonly string[],
 	states: readonly SheetState[],
 	date1904: boolean,
 	definedNames: readonly DefinedName[] = [],
+	protection?: WorkbookProtection,
 ): string {
 	const workbookPr = date1904 ? '<workbookPr date1904="1"/>' : "";
+	const workbookProtection = workbookProtectionXml(protection);
 	// The active tab defaults to index 0; when the FIRST sheet is hidden that default would point at a
 	// tab the user can't see, so aim it at the first visible sheet instead — exactly what openpyxl
 	// does. All-visible workbooks emit no <bookViews> and keep their pre-F4.6 bytes.
@@ -215,7 +277,7 @@ export function workbookXml(
 			return `<sheet name="${escapeAttr(name)}" sheetId="${i + 1}"${state} r:id="rId${i + 1}"/>`;
 		})
 		.join("");
-	return `${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}${bookViews}<sheets>${sheetsXml}</sheets>${definedNamesXml(definedNames)}</workbook>`;
+	return `${XML_DECL}\n<workbook xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">${workbookPr}${workbookProtection}${bookViews}<sheets>${sheetsXml}</sheets>${definedNamesXml(definedNames)}</workbook>`;
 }
 
 // <definedNames> — one <definedName> per already-validated entry, emitted in the CT_Workbook slot

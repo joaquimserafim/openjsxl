@@ -31,6 +31,7 @@ import {
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
+import { MAX_SPIN_COUNT } from "../ooxml/styles";
 import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
 import { encodeXstring } from "../ooxml/xstring";
 import type {
@@ -457,6 +458,78 @@ function autoFilterXml(
 	}
 	// `ref` is canonical (only A–Z, digits, ':') so it carries no XML-special characters — emitted verbatim.
 	return { xml: `<autoFilter ref="${ref}"/>`, ref };
+}
+
+// <sheetProtection> (F10.3) — the sheet-level lock. Emitted in the CT_Worksheet slot after </sheetData>
+// and BEFORE <autoFilter>. Every present boolean flag and any password material is carried; attribute
+// order is fixed for determinism (XML attribute order is not schema-significant). Password hashes are
+// emitted verbatim (escaped, XML-safety enforced) — never computed. An absent/empty value emits nothing,
+// so an unprotected sheet stays byte-identical.
+const SHEET_PROTECTION_BOOL_ATTRS = [
+	"sheet",
+	"objects",
+	"scenarios",
+	"formatCells",
+	"formatColumns",
+	"formatRows",
+	"insertColumns",
+	"insertRows",
+	"insertHyperlinks",
+	"deleteColumns",
+	"deleteRows",
+	"selectLockedCells",
+	"selectUnlockedCells",
+	"sort",
+	"autoFilter",
+	"pivotTables",
+] as const;
+const SHEET_PROTECTION_STR_ATTRS = ["password", "algorithmName", "hashValue", "saltValue"] as const;
+
+function sheetProtectionXml(sheetName: string, protection: SheetInput["protection"]): string {
+	if (protection === undefined) return "";
+	if (!isPlainRecord(protection)) sheetInvalid(sheetName, "protection must be an object");
+	const allowed = new Set<string>([
+		...SHEET_PROTECTION_BOOL_ATTRS,
+		...SHEET_PROTECTION_STR_ATTRS,
+		"spinCount",
+	]);
+	for (const key of Object.keys(protection)) {
+		if (!allowed.has(key)) sheetInvalid(sheetName, `protection has unknown property "${key}"`);
+	}
+	let attrs = "";
+	for (const flag of SHEET_PROTECTION_BOOL_ATTRS) {
+		const v = protection[flag];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean") sheetInvalid(sheetName, `protection.${flag} must be a boolean`);
+		attrs += ` ${flag}="${v ? 1 : 0}"`;
+	}
+	for (const attr of SHEET_PROTECTION_STR_ATTRS) {
+		const v = protection[attr];
+		if (v === undefined) continue;
+		if (typeof v !== "string") sheetInvalid(sheetName, `protection.${attr} must be a string`);
+		if (!isXmlSafe(v)) {
+			sheetInvalid(sheetName, `protection.${attr} contains a character not allowed in XML`);
+		}
+		attrs += ` ${attr}="${escapeAttr(v)}"`;
+	}
+	const spin = protection.spinCount;
+	if (spin !== undefined) {
+		// Bounded to xsd:unsignedInt (MAX_SPIN_COUNT): above it, `${spin}` would emit `1e+21` (invalid
+		// integer XML). Shared bound with the reader's drop.
+		if (
+			typeof spin !== "number" ||
+			!Number.isInteger(spin) ||
+			spin < 0 ||
+			spin > MAX_SPIN_COUNT
+		) {
+			sheetInvalid(
+				sheetName,
+				`protection.spinCount must be an integer in 0..${MAX_SPIN_COUNT}`,
+			);
+		}
+		attrs += ` spinCount="${spin}"`;
+	}
+	return attrs === "" ? "" : `<sheetProtection${attrs}/>`;
 }
 
 // <mergeCells> — Excel repair-prompts on malformed, single-cell, and overlapping merges, so all
@@ -1868,6 +1941,7 @@ export function worksheetXml(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
+	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -1969,16 +2043,17 @@ export function worksheetXml(
 		tables !== undefined ? tables.map((t) => t.number) : [],
 	);
 
-	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, autoFilter, mergeCells,
-	// conditionalFormatting, dataValidations, hyperlinks, drawing, legacyDrawing, tableParts
-	// (CT_Worksheet sequence — autoFilter sits between sheetData and mergeCells; conditionalFormatting
-	// then dataValidations sit between mergeCells and hyperlinks; tableParts is last). Every optional
-	// block is an empty string when unused, so a sheet using none emits the exact pre-F4.5/…/F10.2 bytes.
+	// Schema order within <worksheet>: dimension, sheetViews, cols, sheetData, sheetProtection,
+	// autoFilter, mergeCells, conditionalFormatting, dataValidations, hyperlinks, drawing, legacyDrawing,
+	// tableParts (CT_Worksheet sequence — sheetProtection then autoFilter sit between sheetData and
+	// mergeCells; conditionalFormatting then dataValidations sit between mergeCells and hyperlinks;
+	// tableParts is last). Every optional block is an empty string when unused, so a sheet using none
+	// emits the exact pre-F4.5/…/F10.3 bytes.
 	const xml = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}><dimension ref="${dimension}"/>${sheetViews}${cols}<sheetData>${rowXmls
 		.map(([, x]) => x)
 		.join(
 			"",
-		)}</sheetData>${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+		)}</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	// Comment/drawing/table side parts are spread only when present so the optional properties stay
 	// truly absent (exactOptionalPropertyTypes).
 	return {
@@ -2102,6 +2177,7 @@ export function streamWorksheet(
 	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
 	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
 	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
+	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
 	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
 	const conditionalFormatting = conditionalFormattingXml(
 		sheet.name,
@@ -2127,7 +2203,7 @@ export function streamWorksheet(
 	);
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
-	const footer = `</sheetData>${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
+	const footer = `</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
 	const chunks = streamRowChunks(
 		sheet.name,
 		sheet.rows,

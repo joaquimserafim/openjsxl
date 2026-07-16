@@ -34,8 +34,10 @@ import type {
 	SheetAutoFilter,
 	SheetImage,
 	SheetInfo,
+	SheetProtection,
 	SheetState,
 	TableInfo,
+	WorkbookProtection,
 	Worksheet,
 } from "../types";
 import { openZip, type ZipArchive } from "../zip";
@@ -51,6 +53,7 @@ import {
 	parseHyperlinks,
 	parseMergedCells,
 	parseRowProperties,
+	parseSheetProtection,
 	type Row,
 	readRows,
 	streamRows,
@@ -189,6 +192,8 @@ export class XlsxWorksheet implements Worksheet {
 	#freezeRead = false;
 	#autoFilter: SheetAutoFilter | undefined;
 	#autoFilterRead = false;
+	#protection: SheetProtection | undefined;
+	#protectionRead = false;
 
 	constructor(
 		info: SheetInfo,
@@ -351,6 +356,18 @@ export class XlsxWorksheet implements Worksheet {
 	}
 
 	/**
+	 * The sheet's `<sheetProtection>` (F10.3), or `undefined` when it declares none. Boolean flags and
+	 * any password material are carried verbatim (never computed/verified). Parsed lazily on first access.
+	 */
+	get protection(): SheetProtection | undefined {
+		if (!this.#protectionRead) {
+			this.#protection = parseSheetProtection(this.#xml);
+			this.#protectionRead = true;
+		}
+		return this.#protection;
+	}
+
+	/**
 	 * The formula text of the cell at an A1 reference, or `undefined` when the cell has none (F5.4).
 	 * The text is the stored form (no leading `=`). Shared-formula dependents return the master's
 	 * text translated to their position; array formulas return the master's text. `Cell.value` still
@@ -451,6 +468,8 @@ export class Workbook {
 	 * resolves the constant and simple-range ones; see {@link DefinedName}.
 	 */
 	readonly definedNames: readonly DefinedName[];
+	/** Workbook-level `<workbookProtection>` (F10.3), or `undefined`. Empty for ods/xlsb/csv. */
+	readonly protection: WorkbookProtection | undefined;
 	readonly #byName: Map<string, Worksheet>;
 	readonly #themeXml: string | undefined;
 	// Note: `Worksheet` here is the public interface (../types), so this same `Workbook` class is
@@ -466,11 +485,13 @@ export class Workbook {
 		byName: Map<string, Worksheet>,
 		themeXml?: string,
 		definedNames: readonly DefinedName[] = [],
+		protection?: WorkbookProtection,
 	) {
 		this.sheets = sheets;
 		this.#byName = byName;
 		this.#themeXml = themeXml;
 		this.definedNames = definedNames;
+		this.protection = protection;
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
@@ -522,6 +543,8 @@ interface LoadedWorkbook {
 	readonly themeXml: string | undefined;
 	/** Defined (named) ranges/constants from `<definedNames>`, in document order. */
 	readonly definedNames: readonly DefinedName[];
+	/** Workbook `<workbookProtection>` (F10.3), or `undefined`. */
+	readonly protection: WorkbookProtection | undefined;
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -549,6 +572,7 @@ async function loadWorkbook(
 		sheets: workbookSheets,
 		date1904,
 		definedNames,
+		protection,
 	} = parseWorkbook(await readText(zip, workbookPath));
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
 
@@ -635,7 +659,7 @@ async function loadWorkbook(
 					return loaded === dn.localSheetId ? [dn] : [{ ...dn, localSheetId: loaded }];
 				});
 
-	return { zip, context, sheets, themeXml, definedNames: reconciledNames };
+	return { zip, context, sheets, themeXml, definedNames: reconciledNames, protection };
 }
 
 /**
@@ -663,7 +687,10 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml, definedNames } = await loadWorkbook(source, options);
+	const { zip, context, sheets, themeXml, definedNames, protection } = await loadWorkbook(
+		source,
+		options,
+	);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = [];
@@ -709,7 +736,7 @@ export async function openXlsx(
 		}
 	}
 
-	return new Workbook(infos, byName, themeXml, definedNames);
+	return new Workbook(infos, byName, themeXml, definedNames, protection);
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 	MAX_FORMULA_LEN,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
+	MAX_SPIN_COUNT,
 	parseCanonicalRange,
 	parseRef,
 	type Relationship,
@@ -24,6 +25,7 @@ import type {
 	Row,
 	RowProps,
 	SheetAutoFilter,
+	SheetProtection,
 } from "../types";
 import { localName, relationshipId } from "../utils";
 import { createXmlStream, tokenize, type XmlToken } from "../xml";
@@ -661,6 +663,76 @@ export function parseAutoFilter(xml: string): SheetAutoFilter | undefined {
 		}
 	}
 	return undefined;
+}
+
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+function bool01(v: string | undefined): boolean | undefined {
+	if (v === "1" || v === "true") return true;
+	if (v === "0" || v === "false") return false;
+	return undefined;
+}
+
+// The boolean attributes of <sheetProtection>, all optional and carried verbatim (F10.3).
+const SHEET_PROTECTION_FLAGS = [
+	"sheet",
+	"objects",
+	"scenarios",
+	"formatCells",
+	"formatColumns",
+	"formatRows",
+	"insertColumns",
+	"insertRows",
+	"insertHyperlinks",
+	"deleteColumns",
+	"deleteRows",
+	"selectLockedCells",
+	"selectUnlockedCells",
+	"sort",
+	"autoFilter",
+	"pivotTables",
+] as const;
+
+/**
+ * The sheet's `<sheetProtection>` (F10.3), or `undefined` when it declares none. Scoped to a DIRECT
+ * child of `<worksheet>` (depth 1) — the same guard as {@link parseAutoFilter}, since `<sheetProtection>`
+ * is worksheet-level and must not be confused with any look-alike deeper in the part. Every present
+ * boolean attribute and any password material (`password`, `algorithmName`/`hashValue`/`saltValue`/
+ * `spinCount`) is kept VERBATIM — openjsxl never computes or verifies a hash; the writer re-emits it.
+ */
+export function parseSheetProtection(xml: string): SheetProtection | undefined {
+	let depth = 0;
+	for (const token of tokenize(xml)) {
+		if (token.kind === "open") {
+			if (depth === 1 && localName(token.name) === "sheetProtection") {
+				return readSheetProtection(token.attrs);
+			}
+			if (!token.selfClosing) depth++;
+		} else if (token.kind === "close") {
+			depth--;
+		}
+	}
+	return undefined;
+}
+
+function readSheetProtection(attrs: Readonly<Record<string, string>>): SheetProtection | undefined {
+	const out: Mutable<SheetProtection> = {};
+	for (const flag of SHEET_PROTECTION_FLAGS) {
+		const b = bool01(attrs[flag]);
+		if (b !== undefined) out[flag] = b;
+	}
+	if (attrs.password !== undefined) out.password = attrs.password;
+	if (attrs.algorithmName !== undefined) out.algorithmName = attrs.algorithmName;
+	if (attrs.hashValue !== undefined) out.hashValue = attrs.hashValue;
+	if (attrs.saltValue !== undefined) out.saltValue = attrs.saltValue;
+	// spinCount is xsd:unsignedInt — DROP an out-of-range value (a 21-digit count would otherwise become
+	// a float that re-emits as `1e+21`, invalid integer XML). Shared bound with the writer's reject.
+	const spin = attrs.spinCount;
+	if (spin !== undefined && /^[0-9]+$/.test(spin)) {
+		const n = Number(spin);
+		if (Number.isInteger(n) && n <= MAX_SPIN_COUNT) out.spinCount = n;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**

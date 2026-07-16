@@ -114,6 +114,10 @@ class OdsWorksheet implements Worksheet {
 		return undefined;
 	}
 
+	get protection(): undefined {
+		return undefined;
+	}
+
 	get columns(): readonly ColumnProps[] {
 		return NO_COLUMNS;
 	}

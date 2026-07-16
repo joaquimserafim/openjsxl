@@ -1,7 +1,8 @@
-import type { SheetState } from "../types";
+import type { SheetState, WorkbookProtection } from "../types";
 import { localName, relationshipId } from "../utils";
 import { tokenize } from "../xml";
 import { definedNameEmittable, isFilterDatabaseName } from "./name";
+import { MAX_SPIN_COUNT } from "./styles";
 import { decodeXstring } from "./xstring";
 
 // xl/workbook.xml lists the workbook's sheets in tab order. Each <sheet> gives a display
@@ -40,12 +41,48 @@ export interface WorkbookMeta {
 	readonly date1904: boolean;
 	/** Defined (named) ranges/constants, in document order. Empty when the workbook declares none. */
 	readonly definedNames: readonly DefinedName[];
+	/** Workbook `<workbookProtection>`, or `undefined` when none (F10.3). */
+	readonly protection: WorkbookProtection | undefined;
+}
+
+// <workbookProtection>'s boolean attributes (F10.3), carried verbatim alongside any password material.
+function readWorkbookProtection(
+	attrs: Readonly<Record<string, string>>,
+): WorkbookProtection | undefined {
+	const bool = (v: string | undefined): boolean | undefined =>
+		v === "1" || v === "true" ? true : v === "0" || v === "false" ? false : undefined;
+	const out: {
+		lockStructure?: boolean;
+		lockWindows?: boolean;
+		workbookPassword?: string;
+		workbookAlgorithmName?: string;
+		workbookHashValue?: string;
+		workbookSaltValue?: string;
+		workbookSpinCount?: number;
+	} = {};
+	const lockStructure = bool(attrs.lockStructure);
+	if (lockStructure !== undefined) out.lockStructure = lockStructure;
+	const lockWindows = bool(attrs.lockWindows);
+	if (lockWindows !== undefined) out.lockWindows = lockWindows;
+	if (attrs.workbookPassword !== undefined) out.workbookPassword = attrs.workbookPassword;
+	if (attrs.workbookAlgorithmName !== undefined)
+		out.workbookAlgorithmName = attrs.workbookAlgorithmName;
+	if (attrs.workbookHashValue !== undefined) out.workbookHashValue = attrs.workbookHashValue;
+	if (attrs.workbookSaltValue !== undefined) out.workbookSaltValue = attrs.workbookSaltValue;
+	// xsd:unsignedInt — DROP an out-of-range count (shared bound with the writer's reject; see MAX_SPIN_COUNT).
+	const spin = attrs.workbookSpinCount;
+	if (spin !== undefined && /^[0-9]+$/.test(spin)) {
+		const n = Number(spin);
+		if (Number.isInteger(n) && n <= MAX_SPIN_COUNT) out.workbookSpinCount = n;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export function parseWorkbook(xml: string): WorkbookMeta {
 	const sheets: WorkbookSheet[] = [];
 	const definedNames: DefinedName[] = [];
 	let date1904 = false;
+	let protection: WorkbookProtection | undefined;
 	// A `<definedName>` carries its refersTo formula as TEXT content, so we accumulate across text
 	// tokens between the open and close (mirroring parseFormulas' `<f>` handling).
 	let dnName: string | undefined;
@@ -58,6 +95,8 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 			if (tag === "workbookPr") {
 				const flag = token.attrs.date1904;
 				if (flag === "1" || flag === "true") date1904 = true;
+			} else if (tag === "workbookProtection") {
+				protection = readWorkbookProtection(token.attrs);
 			} else if (tag === "sheet") {
 				const name = token.attrs.name;
 				const rid = relationshipId(token.attrs);
@@ -108,5 +147,5 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 	const emittable = definedNames.filter(
 		(dn) => !isFilterDatabaseName(dn.name) && definedNameEmittable(dn, sheets.length),
 	);
-	return { sheets, date1904, definedNames: emittable };
+	return { sheets, date1904, definedNames: emittable, protection };
 }

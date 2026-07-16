@@ -66,6 +66,9 @@ async function styleSnapshot(wb: Workbook) {
 			conditionalFormatting: sheet.conditionalFormatting,
 			// autoFilter (F10.2): the filter range round-trips (criteria/sort are a documented drop).
 			autoFilter: sheet.autoFilter,
+			// Sheet protection (F10.3): the <sheetProtection> flags + password material round-trip.
+			// (Cell locked/hidden rides in `style` above; workbook protection is asserted separately.)
+			protection: sheet.protection,
 			// Pictures (F6.4): anchor + mime + name + a content digest (not raw bytes).
 			images: (await sheet.images()).map((img) => ({
 				anchor: img.anchor,

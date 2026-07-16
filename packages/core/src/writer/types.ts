@@ -15,8 +15,10 @@ import type {
 	RowProps,
 	SheetAutoFilter,
 	SheetImage,
+	SheetProtection,
 	SheetState,
 	TableInfo,
+	WorkbookProtection,
 } from "../types";
 
 /**
@@ -130,6 +132,12 @@ export interface SheetInput {
 	 * is rejected (it is managed here). `ref` must be a canonical, in-grid A1 range. Absent emits nothing.
 	 */
 	readonly autoFilter?: SheetAutoFilter;
+	/**
+	 * The sheet's protection (F10.3) — the same record `Worksheet.protection` returns. `sheet: true`
+	 * turns protection on; the other booleans allow/block specific edits; password material is emitted
+	 * verbatim (never computed). Absent emits nothing. Per-cell locked/hidden lives on `CellStyle.protection`.
+	 */
+	readonly protection?: SheetProtection;
 }
 
 export interface WorkbookInput {
@@ -152,6 +160,11 @@ export interface WorkbookInput {
 	 * round-trips its names through {@link workbookToInput}.
 	 */
 	readonly definedNames?: readonly DefinedName[];
+	/**
+	 * Workbook-level protection (F10.3) — the same {@link WorkbookProtection} `Workbook.protection`
+	 * returns. `lockStructure`/`lockWindows` plus password material carried verbatim. Absent emits nothing.
+	 */
+	readonly protection?: WorkbookProtection;
 }
 
 /**
@@ -196,6 +209,8 @@ export interface StreamSheetInput {
 	readonly conditionalFormatting?: readonly ConditionalFormatting[];
 	/** The sheet's autoFilter range (filter dropdowns) — see {@link SheetInput.autoFilter} (F10.2). */
 	readonly autoFilter?: SheetAutoFilter;
+	/** The sheet's protection — see {@link SheetInput.protection} (F10.3). */
+	readonly protection?: SheetProtection;
 }
 
 /** A workbook for {@link streamXlsx}: sheets with streaming rows, plus the optional carried theme. */
@@ -204,6 +219,8 @@ export interface StreamWorkbookInput {
 	readonly themeXml?: string;
 	/** Workbook-level defined names (F10.1) — the same {@link DefinedName} shape as {@link WorkbookInput}. */
 	readonly definedNames?: readonly DefinedName[];
+	/** Workbook-level protection (F10.3) — see {@link WorkbookInput.protection}. */
+	readonly protection?: WorkbookProtection;
 }
 
 export interface WriteOptions {

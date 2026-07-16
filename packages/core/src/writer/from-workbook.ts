@@ -14,6 +14,7 @@ import type {
 	RowProps,
 	SheetAutoFilter,
 	SheetImage,
+	SheetProtection,
 	SheetState,
 	TableInfo,
 	Worksheet,
@@ -227,6 +228,7 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			dataValidations?: readonly DataValidation[];
 			conditionalFormatting?: readonly ConditionalFormatting[];
 			autoFilter?: SheetAutoFilter;
+			protection?: SheetProtection;
 		} = { name: info.name, rows };
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
@@ -267,6 +269,10 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		// the paired _xlnm._FilterDatabase name (which the reader stripped), so the filter round-trips once.
 		const autoFilter = worksheet.autoFilter;
 		if (autoFilter !== undefined) sheet.autoFilter = autoFilter;
+		// Sheet protection (F10.3) — structural pass-through; per-cell locked/hidden rides along on each
+		// cell's carried style. Password material is carried verbatim (never recomputed).
+		const protection = worksheet.protection;
+		if (protection !== undefined) sheet.protection = protection;
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when
@@ -276,10 +282,13 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 	// re-emit); dedupe a foreign file's per-scope duplicate so the save doesn't abort. Attach only when
 	// non-empty, so a names-free workbook yields the exact same WorkbookInput — and bytes — as before.
 	const definedNames = dedupeDefinedNames(workbook.definedNames);
+	// Workbook-level protection (F10.3) — structural pass-through, carried verbatim.
+	const protection = workbook.protection;
 	const out: WorkbookInput = {
 		sheets,
 		...(themeXml !== undefined ? { themeXml } : {}),
 		...(definedNames.length > 0 ? { definedNames } : {}),
+		...(protection !== undefined ? { protection } : {}),
 	};
 	return out;
 }
