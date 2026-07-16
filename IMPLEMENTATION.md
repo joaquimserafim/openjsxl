@@ -2931,6 +2931,35 @@ formula/lexer.ts, ooxml/styles.ts, ooxml/dxf.ts. (5) LOW: stale headers — core
 SYNC while the other three `open*` are async — deliberate (no container to decompress),
 KEEP, but freeze it as documented intent.
 
+**v1-readiness review additions (2026-07-16 — 5-lens adversarial review, one refuting
+verifier per finding; 23 CONFIRMED / 8 refuted / 0 unverified; the refuted 8 were all
+already-scoped F10.7 docs gaps).** (7) HIGH — the item the original sweep MISSED: the eight
+M10 model types (`CellProtection`, `SheetProtection`, `WorkbookProtection`,
+`SheetAutoFilter`, `PageMargins`, `PageSetup`, `PrintOptions`, `HeaderFooter` — `types.ts`)
+appear in exported signatures (`Worksheet` accessors, `CellStyle.protection`,
+`SheetInput`/`WorkbookInput`) but are NOT exported from `index.ts` — confirmed unnameable
+in the built d.ts, so a consumer cannot type the very values the API requires them to
+construct. (8) OWNER DECISION: both exports maps carry only `types`+`import` conditions, so
+`require('openjsxl')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` even on Node ≥ 22 where
+`require(esm)` would otherwise work — and neither the ESM-only stance nor `engines >=24`
+(excludes Node 20/22 LTS; 22 is LTS to 2027-04) is documented anywhere. Add a `"default"`
+condition OR freeze ESM-only and document stance + engines in the READMEs. (9) LOW —
+freeze-hygiene minors, all confirmed in-tree: raw NUL bytes in `formula/eval.ts` template
+literals make grep/git treat the file as binary (silently defeats the grep-based acceptance
+audits below); `CANONICAL_CELL` + canonical-cell parse duplicated verbatim in
+`writer/sheet.ts` vs `ooxml/a1.ts` (predates the F10.2 extraction — single-source it); the
+print-setup uint32 ceiling declared twice (reader/worksheet.ts hardcodes `0xffffffff`,
+writer/sheet.ts has a local `UINT32_MAX`); autoFilter accepts backwards ranges (`C10:A1`
+emitted verbatim) while mergeCells rejects them — asymmetric writer strictness; DEFAULT:
+reject typed like mergeCells ("writer rejects" is the house rule; reader unaffected —
+producers don't emit backwards refs), flag to the owner if implementation argues otherwise;
+the corpus property snapshots per-sheet state only (workbook-level carries —
+definedNames, workbook protection, macroEnabled — are unpinned); an un-awaited
+`expect(…).rejects.toThrow` in `writer/__tests__/data-validation-write.test.ts` warns every
+run; no `"./package.json"` export subpath (breaks `require.resolve` version sniffers);
+`openjsxl/formula` has zero in-repo test consumers (only example 12 exercises it, and
+examples don't run in CI).
+
 **Scope (in).** a1 helpers → `XlsxError("invalid-input")` (XlsxError extends Error, so
 existing `catch (e instanceof Error)` consumers keep working — changelog note); rename the
 formula-side `CellRef` → `CellRefNode` (present the symmetric-suffix alternative to the
@@ -2939,7 +2968,15 @@ docstring fix; `as` policy: REMOVE the writer/sheet.ts escapes if a clean typing
 BLESS the two guarded idioms with a short CLAUDE.md note naming them; header comment
 true-ups; full export audit — every export of `index.ts` AND `formula/index.ts` intentional
 and JSDoc'd, d.ts output reviewed; a stated error contract in README + JSDoc ("every public
-function throws `XlsxError` only"); `openCsv` stays sync, JSDoc'd as deliberate.
+function throws `XlsxError` only"); `openCsv` stays sync, JSDoc'd as deliberate. **Review
+additions:** export the eight M10 model types from `index.ts` + an export-surface test that
+pins the public type inventory (backstop: no exported signature may reference an unexported
+type — this class of gap must not recur); execute the owner's ESM decision (add `"default"`
+condition or document ESM-only + engines) + `"./package.json"` subpath in both exports
+maps; the hygiene minors from finding (9) — NUL escapes, single-sourced canonical-cell +
+uint32 ceiling, autoFilter backwards-range policy (writer-behavior change → byte-identity
+recipe applies), workbook-level corpus-snapshot carries, awaited rejects assert, an
+`openjsxl/formula` test consumer.
 
 **Scope (out).** Any signature or behavior change beyond the listed items; core-side
 renames; new features.
@@ -2950,12 +2987,25 @@ renames; new features.
       surfaces in one file — compile-time proof).
 - [ ] Writer-zip typed errors + docstring + tests.
 - [ ] `as` sweep: fix writer/sheet.ts if clean; CLAUDE.md blessed-idiom note for the rest.
+- [ ] Export the eight M10 model types from `index.ts` + export-surface pin test
+      (no exported signature references an unexported type — audited against the built
+      d.ts).
+- [ ] ESM stance (OWNER decides first): `"default"` condition OR ESM-only documented +
+      engines note in READMEs; `"./package.json"` subpath in both exports maps either way.
+- [ ] Freeze hygiene: `formula/eval.ts` NUL bytes → `\u0000` escapes; single-source
+      `CANONICAL_CELL`/canonical parse and the print-setup uint32 ceiling; autoFilter
+      backwards-range policy + pin (byte-identity recipe — writer behavior); corpus
+      snapshot gains workbook-level carries (definedNames, workbook protection,
+      macroEnabled); await the `rejects.toThrow` in data-validation-write.test.ts; add an
+      `openjsxl/formula` import test.
 - [ ] Export audit (both entry points, d.ts reviewed) + header true-ups + error-contract
       docs + gates.
 
 **Acceptance.** Zero bare-`Error` paths reachable from the public API (grep + tests prove
-it); the two entry points' export names are collision-free; every export is documented;
-gates green.
+it — and `formula/eval.ts` greps as text again); the two entry points' export names are
+collision-free; every type referenced by a public signature is importable; every export is
+documented; both packages resolve per the decided module stance; gates green + byte-identity
+recipe (autoFilter policy touches the writer).
 
 ### F10.7 — README as the canonical documentation ☐
 
@@ -2975,8 +3025,9 @@ reference (`parseFormula`, `evaluateWorkbook`/`evaluateCell`, `EvaluateOptions` 
 and the injected clock/RNG, `FormulaError`, value types); every section cross-linked to its
 runnable example in `examples/`. `packages/openjsxl/README.md` mirrors the full reference
 (it is the npm landing page); `packages/core/README.md` stays engine-focused and points at
-the facade. New examples for the M10 carries (names, autoFilter, protection, print — extend
-07/13 or add `14-print-and-protection.mjs`; keep `examples/README.md`'s index current).
+the facade. The M10-carries example already exists
+(`examples/14-names-autofilter-protection-print.mjs`, shipped with F10.5) — cross-link it
+from the new reference sections and keep `examples/README.md`'s index current.
 ROADMAP 1.0 row + PUBLISHING versioning entry true-up. **Consistency rule:** every
 documented signature is verified against the built `.d.ts` — no drift; every example runs.
 
