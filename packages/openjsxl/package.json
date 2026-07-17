@@ -20,12 +20,15 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
 		},
 		"./formula": {
 			"types": "./dist/formula.d.ts",
-			"import": "./dist/formula.js"
-		}
+			"import": "./dist/formula.js",
+			"default": "./dist/formula.js"
+		},
+		"./package.json": "./package.json"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

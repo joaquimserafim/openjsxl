@@ -337,8 +337,8 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 		throw new XlsxError("invalid-input", "definedNames must be an array");
 	}
 	const out: DefinedName[] = [];
-	// Duplicate detection per scope: key = `${scopeKey} ${NAME_UPPERCASE}`. scopeKey is "*" (global) or
-	// the sheet index; a legal name has no whitespace (nameProblem rejects it), so the single-space
+	// Duplicate detection per scope: key = `${scopeKey}\u0000${NAME_UPPERCASE}`. scopeKey is "*" (global) or
+	// the sheet index; a legal name is XML-safe so contains no NUL (nameProblem rejects it), so the NUL
 	// separator can never merge two distinct scope/name pairs.
 	const seen = new Set<string>();
 	for (let i = 0; i < raw.length; i++) {
@@ -432,7 +432,7 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 				`definedNames[${i}] ("${name}"): hidden must be a boolean`,
 			);
 		}
-		const dupKey = `${scopeKey} ${name.toUpperCase()}`;
+		const dupKey = `${scopeKey}\u0000${name.toUpperCase()}`;
 		if (seen.has(dupKey)) {
 			throw new XlsxError(
 				"invalid-input",

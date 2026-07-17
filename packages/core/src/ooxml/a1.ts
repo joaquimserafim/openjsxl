@@ -1,5 +1,11 @@
 // A1 reference helpers. Excel columns use bijective base-26 (A=1 … Z=26, AA=27),
 // which is not ordinary base-26 because there is no zero digit.
+//
+// These four helpers are public API, so they honour the package-wide error contract: a bad ref
+// raises `XlsxError("invalid-input")`, never a bare Error. Tolerant callers that catch and fall
+// back (the reader's safeColumn, the table/range shields) are unaffected — XlsxError extends Error.
+
+import { XlsxError } from "../errors";
 
 export interface CellRef {
 	/** 1-based column index (A = 1). */
@@ -26,14 +32,14 @@ const CODE_LOWER_A = 97;
 const CODE_LOWER_Z = 122;
 
 export function columnToIndex(letters: string): number {
-	if (letters.length === 0) throw new Error("empty column reference");
+	if (letters.length === 0) throw new XlsxError("invalid-input", "empty column reference");
 	let index = 0;
 	for (let i = 0; i < letters.length; i++) {
 		const code = letters.charCodeAt(i);
 		let value = 0;
 		if (code >= CODE_UPPER_A && code <= CODE_UPPER_Z) value = code - CODE_UPPER_A + 1;
 		else if (code >= CODE_LOWER_A && code <= CODE_LOWER_Z) value = code - CODE_LOWER_A + 1;
-		else throw new Error(`invalid column reference: ${letters}`);
+		else throw new XlsxError("invalid-input", `invalid column reference: ${letters}`);
 		index = index * 26 + value;
 		// An absurdly long ref (far beyond Excel's XFD/16384 limit) overflows past exact
 		// integer precision — bail before it silently becomes a lossy float or Infinity, which
@@ -41,13 +47,14 @@ export function columnToIndex(letters: string): number {
 		// on a megabyte-long attacker-supplied ref. Callers that tolerate bad refs (the reader's
 		// safeColumn) catch this and fall back to positional addressing.
 		if (index > Number.MAX_SAFE_INTEGER)
-			throw new Error(`column reference too large: ${letters}`);
+			throw new XlsxError("invalid-input", `column reference too large: ${letters}`);
 	}
 	return index;
 }
 
 export function indexToColumn(index: number): string {
-	if (!Number.isInteger(index) || index < 1) throw new Error(`invalid column index: ${index}`);
+	if (!Number.isInteger(index) || index < 1)
+		throw new XlsxError("invalid-input", `invalid column index: ${index}`);
 	let remaining = index;
 	let letters = "";
 	while (remaining > 0) {
@@ -62,7 +69,7 @@ const A1_PATTERN = /^([A-Za-z]+)([1-9][0-9]*)$/;
 
 export function parseRef(ref: string): CellRef {
 	const match = A1_PATTERN.exec(ref);
-	if (match === null) throw new Error(`invalid A1 reference: ${ref}`);
+	if (match === null) throw new XlsxError("invalid-input", `invalid A1 reference: ${ref}`);
 	return {
 		col: columnToIndex(match[1] as string),
 		row: Number.parseInt(match[2] as string, 10),
@@ -70,8 +77,13 @@ export function parseRef(ref: string): CellRef {
 }
 
 export function formatRef(ref: CellRef): string {
-	if (!Number.isInteger(ref.row) || ref.row < 1) throw new Error(`invalid row index: ${ref.row}`);
-	return `${indexToColumn(ref.col)}${ref.row}`;
+	// Read each side of the caller's ref once: a getter must not be able to return one row to the
+	// bounds check and another to the emitted string.
+	const col = ref.col;
+	const row = ref.row;
+	if (!Number.isInteger(row) || row < 1)
+		throw new XlsxError("invalid-input", `invalid row index: ${row}`);
+	return `${indexToColumn(col)}${row}`;
 }
 
 // Strictly canonical A1: uppercase letters, no leading zeros — the form every real producer writes and
@@ -100,4 +112,14 @@ export function parseCanonicalRange(ref: string): { from: CellRef; to: CellRef }
 	const to = colon === -1 ? from : parseCanonicalCell(ref.slice(colon + 1));
 	if (from === undefined || to === undefined) return undefined;
 	return { from, to };
+}
+
+/**
+ * True when a parsed range runs top-left → bottom-right — the only orientation Excel writes and the
+ * only one the writer accepts. Single-sources that bound so the tolerant reader DROPS a backwards
+ * range and the strict writer REJECTS one by the SAME rule (`parseCanonicalRange` returns corners as
+ * written, so orientation is checked separately).
+ */
+export function rangeRunsForward(range: { from: CellRef; to: CellRef }): boolean {
+	return range.to.col >= range.from.col && range.to.row >= range.from.row;
 }

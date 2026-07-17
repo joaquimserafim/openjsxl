@@ -46,8 +46,12 @@ export interface ArrayLiteral {
 /** An element inside an array constant: a literal, optionally negated/plussed. */
 export type ArrayElement = NumberLiteral | StringLiteral | BooleanLiteral | ErrorLiteral | UnaryOp;
 
-/** A single cell reference such as `A1`, `$A$1`, `Sheet1!B2` — `ref` keeps the `$` markers. */
-export interface CellRef {
+/**
+ * A single cell reference such as `A1`, `$A$1`, `Sheet1!B2` — `ref` keeps the `$` markers.
+ * Named `CellRefNode` (not `CellRef`) so the `openjsxl/formula` surface never collides with the
+ * `CellRef` (`{col,row}`) that `openjsxl` exports — a consumer can import both entry points at once.
+ */
+export interface CellRefNode {
 	readonly type: "cell";
 	readonly ref: string;
 	readonly sheet?: SheetSpec;
@@ -132,7 +136,7 @@ export type FormulaAst =
 	| BooleanLiteral
 	| ErrorLiteral
 	| ArrayLiteral
-	| CellRef
+	| CellRefNode
 	| NameRef
 	| RangeRef
 	| UnionRef

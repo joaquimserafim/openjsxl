@@ -6,7 +6,7 @@ import type {
 } from "../types";
 import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
-import { MAX_COL, MAX_ROW, parseRef } from "./a1";
+import { parseCanonicalCell } from "./a1";
 
 // Data-validation parser (F9.2). Reads the worksheet's MAIN-part `<dataValidations>` block into the
 // shared {@link DataValidation} model. TOLERANT — and every degrade brings the value into exactly the
@@ -85,19 +85,12 @@ export function isDataValidationErrorStyle(v: unknown): v is DataValidationError
 // A sqref range token is a canonical uppercase A1 cell ("C1") or top-left→bottom-right range
 // ("A1:B2") within Excel's grid — the SAME shape the writer emits. This is the single shared bound
 // for sqref: the reader DROPS a token that fails it, the writer REJECTS one, so neither side can hand
-// the other a token it refuses. `parseRef` is safe here (the regex already gated the input, and three
-// letters cap the column at ZZZ, so columnToIndex can't overflow).
-const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/;
-function canonicalCell(ref: string): { readonly col: number; readonly row: number } | undefined {
-	if (!CANONICAL_CELL.test(ref)) return undefined;
-	const { col, row } = parseRef(ref);
-	return col <= MAX_COL && row <= MAX_ROW ? { col, row } : undefined;
-}
+// the other a token it refuses. `parseCanonicalCell` (ooxml/a1) is the single-sourced "valid cell" test.
 /** True when `token` is a canonical A1 cell or top-left→bottom-right range within Excel's grid. */
 export function isCanonicalSqrefToken(token: string): boolean {
 	const colon = token.indexOf(":");
-	const from = canonicalCell(colon === -1 ? token : token.slice(0, colon));
-	const to = colon === -1 ? from : canonicalCell(token.slice(colon + 1));
+	const from = parseCanonicalCell(colon === -1 ? token : token.slice(0, colon));
+	const to = colon === -1 ? from : parseCanonicalCell(token.slice(colon + 1));
 	if (from === undefined || to === undefined) return false;
 	return to.col >= from.col && to.row >= from.row;
 }

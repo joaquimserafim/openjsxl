@@ -7,7 +7,7 @@ export type {
 	ArrayLiteral,
 	BinaryOp,
 	BooleanLiteral,
-	CellRef,
+	CellRefNode,
 	EmptyArg,
 	ErrorLiteral,
 	ExternalRef,

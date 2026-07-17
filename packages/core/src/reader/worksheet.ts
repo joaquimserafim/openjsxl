@@ -10,6 +10,7 @@ import {
 	MAX_FORMULA_LEN,
 	MAX_PAGE_MARGIN,
 	MAX_PAGE_SCALE,
+	MAX_PAGE_SETUP_UINT,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
 	MAX_SPIN_COUNT,
@@ -17,6 +18,7 @@ import {
 	parseCanonicalRange,
 	parseRef,
 	type Relationship,
+	rangeRunsForward,
 	translateFormula,
 } from "../ooxml";
 import type {
@@ -660,9 +662,12 @@ export function parseAutoFilter(xml: string): SheetAutoFilter | undefined {
 			// customSheetView's nested <autoFilter> sits at depth 3 and is skipped.
 			if (depth === 1 && localName(token.name) === "autoFilter") {
 				const ref = token.attrs.ref;
-				return ref !== undefined && parseCanonicalRange(ref) !== undefined
-					? { ref }
-					: undefined;
+				if (ref === undefined) return undefined;
+				const range = parseCanonicalRange(ref);
+				// Drop a non-canonical, out-of-grid, OR backwards (bottom-right before top-left) ref: the
+				// strict writer rejects a backwards range, so dropping it keeps "what the reader returns
+				// is always writable" true — the shared bound with the writer (rangeRunsForward).
+				return range !== undefined && rangeRunsForward(range) ? { ref } : undefined;
 			}
 			if (!token.selfClosing) depth++;
 		} else if (token.kind === "close") {
@@ -765,7 +770,7 @@ function clampedDouble(v: string | undefined, max: number): number | undefined {
 function uintAttr(v: string | undefined): number | undefined {
 	if (v === undefined || !/^[0-9]+$/.test(v)) return undefined;
 	const n = Number(v);
-	return Number.isInteger(n) && n <= 0xffffffff ? n : undefined;
+	return Number.isInteger(n) && n <= MAX_PAGE_SETUP_UINT ? n : undefined;
 }
 
 // An enum attribute restricted to a fixed set; undefined when absent/unrecognized (falls to spec default).

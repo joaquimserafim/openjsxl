@@ -17,6 +17,10 @@ only if you want the engine without the facade.
 npm install @openjsxl/core
 ```
 
+**ESM-only** (no CommonJS build) and, on Node, **Node ≥ 24** — the platform Web APIs above ship
+unflagged from 24 on. `import` is the entry point; `require('@openjsxl/core')` also resolves on
+Node ≥ 24 via `require(esm)`.
+
 ## Usage
 
 ```ts
@@ -47,7 +51,11 @@ for await (const row of streamSheetRows(await readFile('huge.xlsx'))) {
 
 Malformed input throws a typed `XlsxError` with a discriminating `.code`
 (`'not-a-zip' | 'not-xlsx' | 'missing-part' | 'corrupt-zip' | 'part-too-large' | …`), never a
-bare `TypeError` from a corrupt file. Reads are guarded against decompression bombs **by default** —
+bare `TypeError` from a corrupt file. This is a uniform contract: **every public function reports
+failure by throwing `XlsxError`** — the readers, the writer (`'invalid-input'`), and even the
+addressing helpers (`parseRef`, `columnToIndex`, …). Branch on `.code`, never on message text.
+`XlsxError extends Error`, so an existing `catch (e) { if (e instanceof Error) … }` keeps working.
+Reads are guarded against decompression bombs **by default** —
 a 2 GiB per-part output ceiling plus a 300× compression-ratio cap (over an 8 MiB floor); raise or
 disable either via `ReadOptions.maxPartBytes` / `maxCompressionRatio` (`Number.POSITIVE_INFINITY`
 to turn one off).

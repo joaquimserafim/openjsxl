@@ -1,13 +1,13 @@
 import { XlsxError } from "../errors";
 import {
-	type CellRef,
 	formatRef,
 	MAX_COL,
 	MAX_COL_WIDTH,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
+	parseCanonicalCell,
 	parseCanonicalRange,
-	parseRef,
+	rangeRunsForward,
 } from "../ooxml/a1";
 import {
 	colorScaleCountsOk,
@@ -31,7 +31,13 @@ import {
 import { dateToSerial } from "../ooxml/dates";
 import { MAX_EMU, MEDIA_MIME_TO_EXT } from "../ooxml/drawing";
 import { MAX_FORMULA_LEN } from "../ooxml/formula";
-import { MAX_PAGE_MARGIN, MAX_PAGE_SCALE, MAX_SPIN_COUNT, MIN_PAGE_SCALE } from "../ooxml/styles";
+import {
+	MAX_PAGE_MARGIN,
+	MAX_PAGE_SCALE,
+	MAX_PAGE_SETUP_UINT,
+	MAX_SPIN_COUNT,
+	MIN_PAGE_SCALE,
+} from "../ooxml/styles";
 import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
 import { encodeXstring } from "../ooxml/xstring";
 import type {
@@ -97,8 +103,10 @@ function splitInput(
 	if (Array.isArray(input)) {
 		throw new XlsxError("invalid-input", `cell ${ref}: an array is not a cell value`);
 	}
-	const record = input as unknown as Record<string, unknown>;
-	for (const key of Object.keys(record)) {
+	// `input` is a StyledCell here — every other CellInput shape returned above — so read it directly,
+	// no cast. Its properties are still caller-controlled: read each once (TOCTOU) and re-validate,
+	// since a JS caller can pass anything past the types.
+	for (const key of Object.keys(input)) {
 		if (key !== "value" && key !== "style" && key !== "formula") {
 			throw new XlsxError(
 				"invalid-input",
@@ -106,16 +114,17 @@ function splitInput(
 			);
 		}
 	}
-	const hasFormula = "formula" in record;
-	if (!hasFormula && !("value" in record)) {
+	const hasFormula = "formula" in input;
+	if (!hasFormula && !("value" in input)) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: an object cell must be { value, style? } or carry a formula`,
 		);
 	}
-	const value = record.value;
-	// The inner value must be a plain CellValue — a nested { value } or any other object (except
-	// Date) has no meaning and would silently mis-serialize.
+	const value = input.value;
+	// The inner value must be a plain CellValue — a nested { value } or any other object (except Date)
+	// has no meaning and would silently mis-serialize. This guard is RUNTIME-only: a JS caller can pass
+	// a non-Date object even though the type forbids it, so keep it even though TS sees it as dead.
 	if (
 		value !== null &&
 		value !== undefined &&
@@ -125,9 +134,9 @@ function splitInput(
 		throw new XlsxError("invalid-input", `cell ${ref}: a cell's value cannot be an object`);
 	}
 	return {
-		value: value as CellValue,
-		styled: input as StyledCell,
-		formula: hasFormula ? record.formula : undefined,
+		value,
+		styled: input,
+		formula: hasFormula ? input.formula : undefined,
 	};
 }
 
@@ -412,17 +421,6 @@ function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): strin
 // Both blocks live AFTER </sheetData> (schema order: … sheetData, mergeCells, …, hyperlinks, …).
 // Like geometry, unused blocks are empty strings, so a metadata-free sheet keeps its exact bytes.
 
-// Strictly canonical A1: uppercase letters, no leading zeros — the form every real producer
-// writes and the only form we emit (parseRef itself would tolerate lowercase). Three letters cap
-// the column at ZZZ (18,278), so columnToIndex can't overflow; the grid bound is checked after.
-const CANONICAL_CELL = /^[A-Z]{1,3}[1-9][0-9]*$/;
-
-function parseCanonicalRef(ref: string): CellRef | undefined {
-	if (!CANONICAL_CELL.test(ref)) return undefined;
-	const parsed = parseRef(ref);
-	return parsed.col <= MAX_COL && parsed.row <= MAX_ROW ? parsed : undefined;
-}
-
 const shortened = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s);
 
 interface MergeRect {
@@ -450,10 +448,20 @@ function autoFilterXml(
 	}
 	const ref = autoFilter.ref;
 	if (typeof ref !== "string") sheetInvalid(sheetName, "autoFilter.ref must be a string");
-	if (parseCanonicalRange(ref) === undefined) {
+	const range = parseCanonicalRange(ref);
+	if (range === undefined) {
 		sheetInvalid(
 			sheetName,
 			`autoFilter.ref "${shortened(ref)}" is not a canonical A1 range like "A1:C10" within Excel's grid`,
+		);
+	}
+	// Reject a backwards range (bottom-right before top-left), the SAME bound the reader drops on
+	// (rangeRunsForward) — so a filter the reader surfaces always re-writes, and a filter it drops is
+	// one the writer would refuse. `parseCanonicalRange` returns corners as written, order checked here.
+	if (!rangeRunsForward(range)) {
+		sheetInvalid(
+			sheetName,
+			`autoFilter.ref "${shortened(ref)}" must run top-left to bottom-right`,
 		);
 	}
 	// `ref` is canonical (only A–Z, digits, ':') so it carries no XML-special characters — emitted verbatim.
@@ -540,8 +548,6 @@ function sheetProtectionXml(sheetName: string, protection: SheetInput["protectio
 // (the spinCount trap); page margins are xsd:double, where exponential IS valid, so only finiteness and
 // the shared [0, MAX_PAGE_MARGIN] range are enforced.
 
-const UINT32_MAX = 0xffffffff;
-
 const PRINT_OPTIONS_FLAGS = [
 	"horizontalCentered",
 	"verticalCentered",
@@ -616,8 +622,11 @@ function pageSetupXml(sheetName: string, ps: SheetInput["pageSetup"]): string {
 		}
 	}
 	const uint = (name: string, v: unknown): number => {
-		if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > UINT32_MAX) {
-			sheetInvalid(sheetName, `pageSetup.${name} must be an integer in 0..${UINT32_MAX}`);
+		if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_PAGE_SETUP_UINT) {
+			sheetInvalid(
+				sheetName,
+				`pageSetup.${name} must be an integer in 0..${MAX_PAGE_SETUP_UINT}`,
+			);
 		}
 		return v;
 	};
@@ -758,8 +767,8 @@ function mergeCellsXml(sheetName: string, merges: readonly string[] | undefined)
 		const what = `merges[${i}]`;
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what} must be a string`);
 		const colon = ref.indexOf(":");
-		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon));
-		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1));
+		const from = colon === -1 ? undefined : parseCanonicalCell(ref.slice(0, colon));
+		const to = colon === -1 ? undefined : parseCanonicalCell(ref.slice(colon + 1));
 		if (from === undefined || to === undefined) {
 			sheetInvalid(
 				sheetName,
@@ -823,8 +832,8 @@ function hyperlinksXml(
 		const ref = raw.ref;
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
 		const colon = ref.indexOf(":");
-		const from = parseCanonicalRef(colon === -1 ? ref : ref.slice(0, colon));
-		const to = colon === -1 ? from : parseCanonicalRef(ref.slice(colon + 1));
+		const from = parseCanonicalCell(colon === -1 ? ref : ref.slice(0, colon));
+		const to = colon === -1 ? from : parseCanonicalCell(ref.slice(colon + 1));
 		if (from === undefined || to === undefined) {
 			sheetInvalid(
 				sheetName,
@@ -1467,7 +1476,7 @@ function commentsParts(
 		// A comment anchors to ONE cell — a range has no meaning (Excel writes a single-cell ref).
 		const ref = raw.ref;
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
-		const cell = parseCanonicalRef(ref);
+		const cell = parseCanonicalCell(ref);
 		if (cell === undefined) {
 			sheetInvalid(
 				sheetName,
@@ -1653,8 +1662,8 @@ export function buildTables(
 		const ref = raw.ref;
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
 		const colon = ref.indexOf(":");
-		const from = colon === -1 ? undefined : parseCanonicalRef(ref.slice(0, colon));
-		const to = colon === -1 ? undefined : parseCanonicalRef(ref.slice(colon + 1));
+		const from = colon === -1 ? undefined : parseCanonicalCell(ref.slice(0, colon));
+		const to = colon === -1 ? undefined : parseCanonicalCell(ref.slice(colon + 1));
 		if (from === undefined || to === undefined || to.col < from.col || to.row < from.row) {
 			sheetInvalid(
 				sheetName,

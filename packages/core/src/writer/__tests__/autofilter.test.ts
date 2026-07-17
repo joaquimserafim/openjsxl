@@ -165,6 +165,16 @@ describe("writeXlsx — validation rejects (typed invalid-input)", () => {
 		);
 	});
 
+	it("rejects a backwards range (bottom-right before top-left), like <mergeCells>", async () => {
+		const err = await writeErr(filtered({ ref: "B2:A1" }));
+		expect(err.code).toBe("invalid-input");
+		expect(err.message).toContain("must run top-left to bottom-right");
+		// A single reversed axis is enough to reject.
+		expect((await writeErr(filtered({ ref: "C10:A1" }))).message).toContain(
+			"must run top-left to bottom-right",
+		);
+	});
+
 	it("rejects a caller-supplied _xlnm._FilterDatabase in definedNames (managed by autoFilter)", async () => {
 		const err = await writeErr({
 			sheets: [{ name: "Data", rows: [["a"]] }],

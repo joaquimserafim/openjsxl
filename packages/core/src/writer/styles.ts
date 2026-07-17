@@ -693,7 +693,7 @@ export function createStyleRegistry(): StyleRegistry {
 		if (style !== undefined) {
 			if (!isPlainObject(style)) invalid(ref, "style must be an object");
 			const fail: Fail = (message) => invalid(ref, message);
-			checkKeys(fail, "style", style as Record<string, unknown>, [
+			checkKeys(fail, "style", style, [
 				"font",
 				"fill",
 				"border",

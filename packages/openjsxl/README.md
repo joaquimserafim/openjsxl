@@ -18,6 +18,13 @@ ExcelJS's 34 MB / 96 packages and SheetJS's 14 MB / 8)
 npm install openjsxl
 ```
 
+### Requirements
+
+**ESM-only** (there is no CommonJS build) and, on Node, **Node ≥ 24** — openjsxl relies only on
+platform Web APIs (`DecompressionStream`/`CompressionStream`, `TextEncoder`/`TextDecoder`) that Node
+ships unflagged from 24 on. `import` is the entry point; `require('openjsxl')` also resolves on
+Node ≥ 24 via `require(esm)`. Deno, Bun, browsers, and edge runtimes need no special setup.
+
 ```ts
 import { openXlsx } from 'openjsxl';
 import { readFile } from 'node:fs/promises';

@@ -119,7 +119,7 @@ async function* deflateChunks(
  * buffer or a (possibly async) stream of chunks — the latter is how a worksheet's rows flow through
  * without materializing the sheet. The archive reads back through {@link openZip} identically to a
  * buffered one. Throws {@link XlsxError} `unsupported` at the classic-ZIP field ceilings (~4 GB /
- * 65 534 entries) and a plain `Error` on a duplicate or directory-placeholder name.
+ * 65 534 entries) and {@link XlsxError} `invalid-input` on a duplicate or directory-placeholder name.
  */
 export async function* streamZip(parts: AsyncIterable<StreamPart>): AsyncGenerator<Uint8Array> {
 	const seen = new Set<string>();
@@ -129,9 +129,13 @@ export async function* streamZip(parts: AsyncIterable<StreamPart>): AsyncGenerat
 
 	for await (const part of parts) {
 		if (part.name.endsWith("/")) {
-			throw new Error(`invalid zip entry name (directory placeholder): ${part.name}`);
+			throw new XlsxError(
+				"invalid-input",
+				`invalid zip entry name (directory placeholder): ${part.name}`,
+			);
 		}
-		if (seen.has(part.name)) throw new Error(`duplicate zip entry name: ${part.name}`);
+		if (seen.has(part.name))
+			throw new XlsxError("invalid-input", `duplicate zip entry name: ${part.name}`);
 		seen.add(part.name);
 		if (count >= MAX_ENTRIES) {
 			throw new XlsxError(

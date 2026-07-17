@@ -1,5 +1,4 @@
-// Small, pure character predicates shared across the parsing layers. Kept inside core
-// for now; may graduate to a standalone @openjsxl/utils package later.
+// Small, pure character predicates shared across the parsing and writing layers. Internal to core.
 
 /** True for the four characters XML treats as whitespace: space, tab, CR, LF. */
 export function isWhitespace(ch: string | undefined): boolean {

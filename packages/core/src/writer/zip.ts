@@ -76,9 +76,10 @@ export interface ZipInput {
  *
  * Throws {@link XlsxError} with code `unsupported` when the archive would exceed a classic-ZIP
  * field limit — too many entries, a part too large, or a name longer than the u16 name-length
- * field (all of which would otherwise require ZIP64, which the reader rejects). Throws a plain
- * `Error` on a caller contract violation the reader would silently mishandle: a duplicate name, or
- * a name ending in `/` (which the reader treats as a directory placeholder and drops).
+ * field (all of which would otherwise require ZIP64, which the reader rejects). Throws
+ * {@link XlsxError} `invalid-input` on a caller contract violation the reader would silently
+ * mishandle: a duplicate name, or a name ending in `/` (which the reader treats as a directory
+ * placeholder and drops).
  */
 export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array> {
 	if (entries.length > MAX_ENTRIES) {
@@ -98,9 +99,13 @@ export async function writeZip(entries: readonly ZipInput[]): Promise<Uint8Array
 		// central-directory.ts) so it never enters the entries map. Writing a real part under such
 		// a name would emit bytes that vanish on read — refuse it rather than break the round-trip.
 		if (entry.name.endsWith("/")) {
-			throw new Error(`invalid zip entry name (directory placeholder): ${entry.name}`);
+			throw new XlsxError(
+				"invalid-input",
+				`invalid zip entry name (directory placeholder): ${entry.name}`,
+			);
 		}
-		if (seen.has(entry.name)) throw new Error(`duplicate zip entry name: ${entry.name}`);
+		if (seen.has(entry.name))
+			throw new XlsxError("invalid-input", `duplicate zip entry name: ${entry.name}`);
 		seen.add(entry.name);
 
 		const name = encoder.encode(entry.name);

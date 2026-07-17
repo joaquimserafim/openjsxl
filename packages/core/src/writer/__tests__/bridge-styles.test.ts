@@ -86,6 +86,14 @@ async function styleSnapshot(wb: Workbook) {
 	return out;
 }
 
+// Workbook-level carries (F10.1/F10.3) that styleSnapshot's per-sheet walk never sees: defined names
+// and workbook protection cross the bridge (from-workbook.ts), so they must survive a round-trip.
+// `macroEnabled` is deliberately NOT here — a rewrite is always a plain `.xlsx` without the VBA
+// project, a documented drop; asserting its equality would turn that drop into a false failure.
+function workbookCarries(wb: Workbook) {
+	return { definedNames: wb.definedNames, protection: wb.protection };
+}
+
 async function rewrite(wb: Workbook): Promise<Uint8Array> {
 	return writeXlsx(await workbookToInput(wb));
 }
@@ -244,6 +252,7 @@ describe("bridge — corpus property", () => {
 			}
 			const after = await openXlsx(bytes);
 			expect(await styleSnapshot(after), file).toEqual(await styleSnapshot(before));
+			expect(workbookCarries(after), file).toEqual(workbookCarries(before));
 			lossless++;
 		}
 		expect(lossless).toBeGreaterThan(5);

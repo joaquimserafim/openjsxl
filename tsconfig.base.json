@@ -22,7 +22,8 @@
 		"paths": {
 			"@openjsxl/core": ["./packages/core/src/index.ts"],
 			"@openjsxl/core/formula": ["./packages/core/src/formula/index.ts"],
-			"openjsxl": ["./packages/openjsxl/src/index.ts"]
+			"openjsxl": ["./packages/openjsxl/src/index.ts"],
+			"openjsxl/formula": ["./packages/openjsxl/src/formula.ts"]
 		}
 	}
 }

@@ -229,7 +229,7 @@ describe("streamXlsx — data validation lands on the streaming writer too", () 
 	});
 
 	it("rejects malformed validations on the streaming writer with the same typed error", async () => {
-		expect(
+		await expect(
 			drain(
 				streamXlsx({
 					// biome-ignore lint/suspicious/noExplicitAny: hostile input past the types

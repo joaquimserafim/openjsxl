@@ -39,6 +39,14 @@ describe("parseAutoFilter", () => {
 		expect(parseAutoFilter(sheet('<autoFilter ref=""/>'))).toBeUndefined(); // empty ref
 	});
 
+	it("DROPS a backwards range (bottom-right before top-left) — the writer rejects it, so the shared bound holds", () => {
+		// Canonical + in-grid but reversed. Before this drop the reader surfaced it and the strict
+		// writer then rejected the very value the reader returned, breaking read → bridge → write.
+		expect(parseAutoFilter(sheet('<autoFilter ref="B2:A1"/>'))).toBeUndefined();
+		expect(parseAutoFilter(sheet('<autoFilter ref="C10:A1"/>'))).toBeUndefined(); // both axes reversed
+		expect(parseAutoFilter(sheet('<autoFilter ref="A2:A1"/>'))).toBeUndefined(); // only the row reversed
+	});
+
 	// Adversarial-review regression (F10.2): <autoFilter> is ALSO a legal child of <customSheetView>, so a
 	// flat scan would fabricate a sheet-level filter a saved custom view merely retained. Only a DIRECT
 	// child of <worksheet> counts.

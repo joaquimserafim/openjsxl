@@ -154,6 +154,13 @@ export const MAX_INDENT = 250;
  */
 export const MAX_SPIN_COUNT = 0xffffffff;
 /**
+ * xsd:unsignedInt ceiling for `<pageSetup>` integer fields — paperSize, fitToWidth, fitToHeight,
+ * firstPageNumber (F10.4). SHARED bound: the tolerant reader DROPS an attribute above it (a value
+ * Excel could never have written, and one that would coerce to a lossy float), and the strict writer
+ * REJECTS one typed — so neither side can hand the other a page-setup integer it refuses.
+ */
+export const MAX_PAGE_SETUP_UINT = 0xffffffff;
+/**
  * Page-margin ceiling in inches (F10.4). Excel's own maximum is 49"; larger values (or non-finite ones)
  * are hostile. SHARED bound: the reader clamps a finite margin into `[0, MAX_PAGE_MARGIN]` (and drops the
  * whole `<pageMargins>` if a value is non-numeric/non-finite), the writer rejects one outside the range.

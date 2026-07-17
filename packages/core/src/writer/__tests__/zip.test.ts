@@ -84,7 +84,13 @@ describe("writeZip — guards", () => {
 			{ name: "dup", data: bytes("one") },
 			{ name: "dup", data: bytes("two") },
 		];
-		await expect(writeZip(parts)).rejects.toThrow(/duplicate zip entry name/);
+		const err = await writeZip(parts).then(
+			() => undefined,
+			(e) => e,
+		);
+		expect(err).toBeInstanceOf(XlsxError);
+		expect((err as XlsxError).code).toBe("invalid-input");
+		expect((err as XlsxError).message).toMatch(/duplicate zip entry name/);
 	});
 
 	it("refuses an entry count that would require ZIP64", async () => {
@@ -110,8 +116,12 @@ describe("writeZip — guards", () => {
 	});
 
 	it('rejects a name ending in "/" (the reader drops directory placeholders)', async () => {
-		await expect(writeZip([{ name: "xl/", data: bytes("hello") }])).rejects.toThrow(
-			/directory placeholder/,
+		const err = await writeZip([{ name: "xl/", data: bytes("hello") }]).then(
+			() => undefined,
+			(e) => e,
 		);
+		expect(err).toBeInstanceOf(XlsxError);
+		expect((err as XlsxError).code).toBe("invalid-input");
+		expect((err as XlsxError).message).toMatch(/directory placeholder/);
 	});
 });

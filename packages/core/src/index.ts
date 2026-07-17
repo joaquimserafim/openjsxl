@@ -1,5 +1,8 @@
-// Public API surface of @openjsxl/core. Re-exports grow as features land
-// (see IMPLEMENTATION.md). For now this is the cell/sheet data model.
+// Public API surface of @openjsxl/core: the reader + shared Workbook/Worksheet model, the writer and
+// its bridge, the style/geometry/metadata types, and the addressing/date/detection helpers. This is
+// the frozen 1.0 surface (see IMPLEMENTATION.md) — everything exported here is public and documented;
+// nothing else in the package is API. Every public function reports failure by throwing `XlsxError`
+// (branch on its `code`), never a bare `Error`.
 
 export { XlsxError, type XlsxErrorCode } from "./errors";
 // Addressing + date helpers (F0.3 / F0.4).
@@ -31,6 +34,7 @@ export type {
 	BorderLineStyle,
 	BorderStyle,
 	Cell,
+	CellProtection,
 	CellStyle,
 	CellType,
 	CfColorScaleRule,
@@ -53,20 +57,27 @@ export type {
 	FillStyle,
 	FontStyle,
 	FreezePane,
+	HeaderFooter,
 	HorizontalAlignment,
 	Hyperlink,
 	ImageAnchor,
+	PageMargins,
+	PageSetup,
 	PatternType,
+	PrintOptions,
 	Row,
 	RowProps,
+	SheetAutoFilter,
 	SheetImage,
 	SheetInfo,
+	SheetProtection,
 	SheetState,
 	TableColumn,
 	TableInfo,
 	TableStyleInfo,
 	UnderlineStyle,
 	VerticalAlignment,
+	WorkbookProtection,
 	Worksheet,
 } from "./types";
 // Writer API (F3.2) — serialize a workbook described as plain data to .xlsx bytes; styled cells

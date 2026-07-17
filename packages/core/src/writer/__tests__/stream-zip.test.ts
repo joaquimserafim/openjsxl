@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { XlsxError } from "../../errors";
 import { openZip } from "../../zip";
 import { MAX_ENTRIES as STREAM_MAX_ENTRIES, type StreamPart, streamZip } from "../stream-zip";
 import { MAX_ENTRIES as BUFFERED_MAX_ENTRIES } from "../zip";
@@ -61,20 +62,31 @@ describe("streamZip", () => {
 		expect(dec.decode(await zip.read("empty.txt"))).toBe("");
 	});
 
-	it("rejects a duplicate name and a directory-placeholder name", async () => {
-		await expect(
-			collect(
-				streamZip(
-					parts([
-						{ name: "x", data: enc.encode("a") },
-						{ name: "x", data: enc.encode("b") },
-					]),
-				),
+	it("rejects a duplicate name and a directory-placeholder name with a typed XlsxError", async () => {
+		const dupErr = await collect(
+			streamZip(
+				parts([
+					{ name: "x", data: enc.encode("a") },
+					{ name: "x", data: enc.encode("b") },
+				]),
 			),
-		).rejects.toThrow(/duplicate/);
-		await expect(
-			collect(streamZip(parts([{ name: "dir/", data: enc.encode("a") }]))),
-		).rejects.toThrow(/directory placeholder/);
+		).then(
+			() => undefined,
+			(e) => e,
+		);
+		expect(dupErr).toBeInstanceOf(XlsxError);
+		expect((dupErr as XlsxError).code).toBe("invalid-input");
+		expect((dupErr as XlsxError).message).toMatch(/duplicate/);
+
+		const dirErr = await collect(
+			streamZip(parts([{ name: "dir/", data: enc.encode("a") }])),
+		).then(
+			() => undefined,
+			(e) => e,
+		);
+		expect(dirErr).toBeInstanceOf(XlsxError);
+		expect((dirErr as XlsxError).code).toBe("invalid-input");
+		expect((dirErr as XlsxError).message).toMatch(/directory placeholder/);
 	});
 
 	it("propagates an error from an async data source instead of hanging", async () => {

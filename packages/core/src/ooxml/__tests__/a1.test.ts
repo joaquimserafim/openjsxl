@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { XlsxError } from "../../errors";
 import {
 	columnToIndex,
 	formatRef,
@@ -7,6 +8,20 @@ import {
 	parseCanonicalRange,
 	parseRef,
 } from "../a1";
+
+// These four helpers are exported from the package index, so their thrown type freezes at 1.0:
+// every rejection must be the typed XlsxError("invalid-input") the public error contract promises.
+// A bare `toThrow()` would keep passing if one regressed to `new Error`, so assert the CODE. Sync
+// analogue of the writer suite's async `writeErr` (writer/__tests__/protection.test.ts).
+function refErr(fn: () => unknown): XlsxError {
+	try {
+		fn();
+	} catch (e) {
+		if (e instanceof XlsxError) return e;
+		throw e;
+	}
+	throw new Error("expected a throw");
+}
 
 describe("columnToIndex", () => {
 	it("maps the bijective base-26 boundaries", () => {
@@ -22,18 +37,18 @@ describe("columnToIndex", () => {
 		expect(columnToIndex("aa")).toBe(27);
 	});
 
-	it("rejects invalid input", () => {
-		expect(() => columnToIndex("")).toThrow();
-		expect(() => columnToIndex("A1")).toThrow();
-		expect(() => columnToIndex("-")).toThrow();
+	it("rejects invalid input with a typed XlsxError", () => {
+		expect(refErr(() => columnToIndex("")).code).toBe("invalid-input");
+		expect(refErr(() => columnToIndex("A1")).code).toBe("invalid-input");
+		expect(refErr(() => columnToIndex("-")).code).toBe("invalid-input");
 	});
 
 	it("rejects an overflowing ref instead of returning a non-integer", () => {
 		// A ref far past XFD used to overflow silently to a lossy float / Infinity, poisoning
 		// downstream column arithmetic. It must throw so callers can reject or fall back.
-		expect(() => columnToIndex("A".repeat(300))).toThrow();
+		expect(refErr(() => columnToIndex("A".repeat(300))).code).toBe("invalid-input");
 		// 13 'A's is the first length that crosses MAX_SAFE_INTEGER in bijective base-26.
-		expect(() => columnToIndex("A".repeat(13))).toThrow();
+		expect(refErr(() => columnToIndex("A".repeat(13))).code).toBe("invalid-input");
 		// A ref that still maps within safe-integer range is accepted (returns a finite integer).
 		expect(Number.isSafeInteger(columnToIndex("A".repeat(9)))).toBe(true);
 	});
@@ -46,8 +61,10 @@ describe("indexToColumn", () => {
 		}
 	});
 
-	it("rejects non-positive indices", () => {
-		expect(() => indexToColumn(0)).toThrow();
+	it("rejects non-positive indices with a typed XlsxError", () => {
+		expect(refErr(() => indexToColumn(0)).code).toBe("invalid-input");
+		expect(refErr(() => indexToColumn(-1)).code).toBe("invalid-input");
+		expect(refErr(() => indexToColumn(1.5)).code).toBe("invalid-input");
 	});
 });
 
@@ -62,6 +79,14 @@ describe("parseRef / formatRef", () => {
 		for (const ref of ["A1", "B2", "AA10", "XFD1048576"]) {
 			expect(formatRef(parseRef(ref))).toBe(ref);
 		}
+	});
+
+	it("rejects a non-A1 token / bad row with a typed XlsxError", () => {
+		expect(refErr(() => parseRef("ZZ")).code).toBe("invalid-input"); // no row
+		expect(refErr(() => parseRef("A0")).code).toBe("invalid-input"); // row 0 is not A1
+		expect(refErr(() => parseRef("1A")).code).toBe("invalid-input"); // reversed
+		expect(refErr(() => formatRef({ col: 1, row: 0 })).code).toBe("invalid-input");
+		expect(refErr(() => formatRef({ col: 1, row: 1.5 })).code).toBe("invalid-input");
 	});
 });
 
