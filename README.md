@@ -697,7 +697,7 @@ runtime dependency on disk:
 | | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
 | --- | --- | --- | --- |
 | runtime deps | **0 third-party** (1 pkg — its own core) | 96 packages | 8 packages |
-| installed | **~0.45 MB** | 34 MB | 14 MB |
+| installed | **~0.52 MB** | 34 MB | 14 MB |
 
 The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write), the four-format
 read lanes, the library-size table, the methodology, and out-of-band **openpyxl** /

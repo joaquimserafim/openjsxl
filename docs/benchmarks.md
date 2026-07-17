@@ -24,7 +24,7 @@ Node 24.18.0. **Deps** counts the runtime packages the library pulls in
 
 | Library | Version | Deps | Own size | Installed |
 | --- | --- | --- | --- | --- |
-| **openjsxl** | `0.9.1` | 1 | 8 KB | 0.45 MB |
+| **openjsxl** | `1.0.0` | 1 | 25 KB | 0.52 MB |
 | **ExcelJS** | `4.4.0` | 96 | 20.8 MB | 34.4 MB |
 | **SheetJS** | `0.18.5` | 8 | 7.2 MB | 14.0 MB |
 
