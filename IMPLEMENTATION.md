@@ -2910,7 +2910,7 @@ caller can warn before a rewrite discards macros. openjsxl still writes `.xlsx` 
 explicit (`Workbook.macroEnabled`), tested, and documented; every documented drop has a pin proving
 "reads clean, drops named, never bare-throws".
 
-### F10.6 — API freeze pass ☐
+### F10.6 — API freeze pass ☑
 
 **Context.** Pre-1.0 sweep findings (2026-07-14, all verified in-tree). (1) HIGH: the a1
 helpers exported from the package index (`columnToIndex`/`indexToColumn`/`parseRef`/
@@ -2982,23 +2982,23 @@ recipe applies), workbook-level corpus-snapshot carries, awaited rejects assert,
 renames; new features.
 
 **Tasks**
-- [ ] a1 typed errors + tests asserting the code path (`invalid-input`) + changelog note.
-- [ ] `CellRefNode` rename (formula entry only) + collision test (import both entry points'
+- [x] a1 typed errors + tests asserting the code path (`invalid-input`) + changelog note.
+- [x] `CellRefNode` rename (formula entry only) + collision test (import both entry points'
       surfaces in one file — compile-time proof).
-- [ ] Writer-zip typed errors + docstring + tests.
-- [ ] `as` sweep: fix writer/sheet.ts if clean; CLAUDE.md blessed-idiom note for the rest.
-- [ ] Export the eight M10 model types from `index.ts` + export-surface pin test
+- [x] Writer-zip typed errors + docstring + tests.
+- [x] `as` sweep: fix writer/sheet.ts if clean; CLAUDE.md blessed-idiom note for the rest.
+- [x] Export the eight M10 model types from `index.ts` + export-surface pin test
       (no exported signature references an unexported type — audited against the built
       d.ts).
-- [ ] ESM stance (OWNER decides first): `"default"` condition OR ESM-only documented +
+- [x] ESM stance (OWNER decides first): `"default"` condition OR ESM-only documented +
       engines note in READMEs; `"./package.json"` subpath in both exports maps either way.
-- [ ] Freeze hygiene: `formula/eval.ts` NUL bytes → `\u0000` escapes; single-source
+- [x] Freeze hygiene: `formula/eval.ts` NUL bytes → `\u0000` escapes; single-source
       `CANONICAL_CELL`/canonical parse and the print-setup uint32 ceiling; autoFilter
       backwards-range policy + pin (byte-identity recipe — writer behavior); corpus
       snapshot gains workbook-level carries (definedNames, workbook protection,
       macroEnabled); await the `rejects.toThrow` in data-validation-write.test.ts; add an
       `openjsxl/formula` import test.
-- [ ] Export audit (both entry points, d.ts reviewed) + header true-ups + error-contract
+- [x] Export audit (both entry points, d.ts reviewed) + header true-ups + error-contract
       docs + gates.
 
 **Acceptance.** Zero bare-`Error` paths reachable from the public API (grep + tests prove
