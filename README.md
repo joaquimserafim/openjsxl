@@ -679,15 +679,15 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
 | --- | --- | --- | --- |
-| **read** | **0.72 s · 204 MB** | 1.6 s · 806 MB | 2.2 s · 537 MB |
-| **write** | **0.72 s · 396 MB** | 3.2 s · 1.4 GB | 2.5 s · 565 MB |
+| **read** | **0.70 s · 203 MB** | 1.6 s · 806 MB | 2.2 s · 543 MB |
+| **write** | **0.75 s · 393 MB** | 3.2 s · 1.4 GB | 1.9 s · 564 MB |
 
-Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~95 MB)** no matter
+Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~100 MB)** no matter
 the row count (flat in *rows* — embedded images, when present, stay resident until the stream ends).
 
 **Reads more than `.xlsx`.** The same million cells as `.xlsb`, `.ods`, and `.csv`, each parsed and
-materialized cell-by-cell — openjsxl leads every format (e.g. `.xlsb` in **0.20 s** vs SheetJS's
-1.66 s; ExcelJS reads neither `.xlsb` nor `.ods`).
+materialized cell-by-cell — openjsxl leads every format (e.g. `.xlsb` in **0.19 s** vs SheetJS's
+1.63 s; ExcelJS reads neither `.xlsb` nor `.ods`).
 
 **And it stays small** — a clean production install (`npm install --omit=dev`), the library plus every
 runtime dependency on disk:
@@ -700,7 +700,7 @@ runtime dependency on disk:
 The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write), the four-format
 read lanes, the library-size table, the methodology, and out-of-band **openpyxl** /
 **python-calamine** reference numbers are in [`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce
-it end-to-end with `pnpm bench`. _(Measured 2026-07-14; every "fast" in these docs traces back here.)_
+it end-to-end with `pnpm bench`. _(Measured 2026-07-17; every "fast" in these docs traces back here.)_
 
 ## Approach
 
