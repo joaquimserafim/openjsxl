@@ -161,7 +161,19 @@ git push -f origin v<version>
   compression-ratio cap, tunable/disable-able via `ReadOptions.maxPartBytes` / `maxCompressionRatio`);
   a part or cell value that would exceed the runtime's max string length fails typed (`part-too-large`),
   never a bare crash. `.xlsx` output for existing input stays byte-identical.
-- **`1.0.0`** — bump once the API is settled. Follow semver.
+- **`1.0.0`** — the stable API. Milestone M10 completes the workbook-level fidelity carry —
+  **defined names**, sheet **autoFilter**, **protection** (sheet / workbook / per-cell locked+hidden),
+  and **print setup** (margins, page setup, print options, header/footer) all read AND write and
+  round-trip through `workbookToInput`; `Workbook.macroEnabled` flags an `.xlsm` whose VBA a rewrite
+  drops. Then an **API freeze**: every public function reports failure with a typed `XlsxError` — the
+  a1 helpers (`parseRef`, `columnToIndex`, …) included, so no bare `Error` reaches the public surface;
+  the two entry points are collision-free (`openjsxl`'s `CellRef` vs `openjsxl/formula`'s `CellRefNode`),
+  so a consumer can import both at once; every type named by a public signature is exported (guarded by
+  an export-surface pin test); and `require()` resolves on Node ≥ 24 via a `"default"` export condition
+  plus a `"./package.json"` subpath, with the ESM-only / Node ≥ 24 stance documented in the READMEs. The
+  README becomes the **canonical documentation** — a full API reference for both entry points, verified
+  against the built `.d.ts`. `.xlsx` output for existing input stays byte-identical (the freeze is
+  additive / hygiene only). Bump at the owner's request when ready; follow semver thereafter.
 
 ## Notes
 

@@ -444,6 +444,223 @@ Consistent with the whole library, the tolerant reader normalizes a foreign prod
 table (an odd name, a mismatched column count, a totals row with nowhere to go) into something the
 strict writer accepts, so a table file from another tool re-saves instead of aborting.
 
+## Defined names, protection & print setup (1.0)
+
+The workbook-fidelity features that complete a faithful round trip — all read AND write, each the
+same record on both sides:
+
+- **Defined names** (`Workbook.definedNames` ↔ `WorkbookInput.definedNames`) — named ranges and
+  constants, workbook-global or sheet-scoped (`localSheetId`); `refersTo` is stored form (no leading `=`).
+- **Protection** (`Worksheet.protection` ↔ `SheetInput.protection`, `Workbook.protection` ↔
+  `WorkbookInput.protection`, `CellStyle.protection`) — lock a sheet (`{ sheet: true }`) or the workbook
+  structure (`{ lockStructure: true }`); cells are locked by default, so `{ locked: false }` leaves a cell
+  editable under protection. Any password hash is carried **verbatim** — openjsxl never computes, verifies,
+  or strips one.
+- **Print setup** (`Worksheet.pageMargins`/`pageSetup`/`printOptions`/`headerFooter` ↔ the same
+  `SheetInput` keys) — margins (inches), orientation / scale / fit-to-page / paper size, gridline &
+  heading printing, and `&`-code headers/footers.
+
+```ts
+const bytes = await writeXlsx({
+	definedNames: [{ name: 'RevenueRange', refersTo: 'Q3!$B$2:$B$4' }],
+	protection: { lockStructure: true }, // lock workbook structure
+	sheets: [{
+		name: 'Q3',
+		rows: [['Region', 'Rep', 'Revenue'], ['EMEA', 'Ada', 4200]],
+		autoFilter: { ref: 'A1:C2' },
+		protection: { sheet: true }, // protect the sheet (cells are locked by default)
+		pageSetup: { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0 },
+		headerFooter: { oddHeader: '&CQ3 Revenue', oddFooter: '&RPage &P of &N' },
+	}],
+});
+```
+
+An `.xlsm` opens and reads, but rewriting through the bridge writes a plain `.xlsx` and drops the VBA
+project — check `Workbook.macroEnabled` to warn a user before a rewrite discards their macros. See
+[`examples/14`](./examples/14-names-autofilter-protection-print.mjs) for the full round trip.
+
+## API reference
+
+The complete public surface, verified against the built type declarations. openjsxl has two
+entry points: **`openjsxl`** (reading, writing, addressing) and the opt-in **`openjsxl/formula`**
+(a formula parser + evaluator that the core bundle never loads unless you import it). Every
+function reports failure by throwing a typed [`XlsxError`](#errors) — branch on `.code`, never on
+message text. Each section links to a runnable script in [`examples/`](./examples).
+
+### `openjsxl` — functions
+
+**Reading** — every reader returns the same [`Workbook`](#workbook); a format's unsupported
+features degrade (empty/`undefined`) rather than throwing.
+([01](./examples/01-read-cells.mjs)–[04](./examples/04-metadata.mjs),
+[11](./examples/11-other-formats.mjs))
+
+| Function | Signature | Notes |
+| --- | --- | --- |
+| `openXlsx` | `(source: Uint8Array \| ArrayBuffer, options?: ReadOptions) => Promise<Workbook>` | Open `.xlsx`/`.xlsm`/`.xltx`/`.xltm`. Random-access `cell()`. |
+| `streamSheetRows` | `(source, sheetName?: string, options?: ReadOptions) => AsyncGenerator<Row>` | Constant-memory row stream; `sheetName` defaults to the first sheet. |
+| `openXlsb` | `(source, options?: ReadOptions) => Promise<Workbook>` | Excel Binary Workbook (`.xlsb`). |
+| `openOds` | `(source, options?: ReadOptions) => Promise<Workbook>` | OpenDocument spreadsheet (`.ods`). |
+| `openCsv` | `(source: Uint8Array \| ArrayBuffer \| string, options?: CsvReadOptions) => Workbook` | Delimited text. **Synchronous** — CSV has no container to decompress. |
+| `detectSpreadsheetFormat` | `(source, options?: ReadOptions) => Promise<SpreadsheetFormat \| undefined>` | Sniff bytes → `'xlsx' \| 'xlsb' \| 'ods' \| 'csv'`, or `undefined`. |
+
+**Writing** — describe a workbook as plain data; cell types are inferred from the JS values.
+([06](./examples/06-write.mjs)–[10](./examples/10-images.mjs),
+[13](./examples/13-tables-validation-formatting.mjs),
+[14](./examples/14-names-autofilter-protection-print.mjs))
+
+| Function | Signature | Notes |
+| --- | --- | --- |
+| `writeXlsx` | `(workbook: WorkbookInput, options?: WriteOptions) => Promise<Uint8Array>` | `.xlsx` bytes. Throws `invalid-input` for anything unrepresentable. |
+| `streamXlsx` | `(workbook: StreamWorkbookInput, options?: WriteOptions) => ReadableStream<Uint8Array>` | Constant-memory mirror of `writeXlsx`; invalid input surfaces on the stream. |
+| `workbookToInput` | `(workbook: Workbook) => Promise<WorkbookInput>` | Turn an open workbook back into writer input (read → modify → write). |
+
+**Addressing & dates** — pure helpers. The four A1 helpers throw `XlsxError('invalid-input')` on
+a malformed reference (a uniform contract, since 1.0).
+
+| Function | Signature | Notes |
+| --- | --- | --- |
+| `columnToIndex` | `(letters: string) => number` | `"A"` → `1`, `"AA"` → `27`. Throws on a non-letter or overflowing ref. |
+| `indexToColumn` | `(index: number) => string` | `1` → `"A"`. Throws on a non-integer or `< 1`. |
+| `parseRef` | `(ref: string) => CellRef` | `"B3"` → `{ col: 2, row: 3 }`. Throws on a non-A1 string. |
+| `formatRef` | `(ref: CellRef) => string` | `{ col: 2, row: 3 }` → `"B3"`. Throws on a non-integer/`< 1` row. |
+| `serialToDate` | `(serial: number, date1904?: boolean) => Date` | Excel serial → `Date`. |
+| `dateToSerial` | `(date: Date, date1904?: boolean) => number` | `Date` → Excel serial. |
+
+### `Workbook`
+
+Returned by every reader. ([01](./examples/01-read-cells.mjs),
+[09](./examples/09-comments-formulas-theme.mjs),
+[14](./examples/14-names-autofilter-protection-print.mjs))
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `sheets` | `readonly SheetInfo[]` | Sheets in tab order. |
+| `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
+| `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
+| `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
+| `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
+| `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
+| `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |
+
+### `Worksheet`
+
+A sheet's cells, style/format accessors, and metadata.
+([01](./examples/01-read-cells.mjs), [04](./examples/04-metadata.mjs))
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `name` / `path` | `string` | Tab name / part locator. |
+| `visible` / `state` | `boolean` / `SheetState` | Visibility (`state` is the source; `visible === (state === "visible")`). |
+| `mergedCells` | `readonly string[]` | Merged ranges in A1, document order. |
+| `hyperlinks` | `readonly Hyperlink[]` | Hyperlinks, document order. |
+| `dimension` | `string \| undefined` | Declared used range in A1. |
+| `comments` | `readonly Comment[]` | Cell comments. |
+| `tables` | `readonly TableInfo[]` | Defined tables. |
+| `dataValidations` | `readonly DataValidation[]` | Validation rules. |
+| `conditionalFormatting` | `readonly ConditionalFormatting[]` | CF blocks. |
+| `autoFilter` | `SheetAutoFilter \| undefined` | Filter-dropdown range. |
+| `protection` | `SheetProtection \| undefined` | `<sheetProtection>`. |
+| `pageMargins` / `pageSetup` / `printOptions` / `headerFooter` | `… \| undefined` | Print setup. |
+| `columns` | `readonly ColumnProps[]` | Column width/visibility. |
+| `rowProperties` | `ReadonlyMap<number, RowProps>` | Per-row height/visibility. |
+| `freeze` | `FreezePane \| undefined` | Frozen pane. |
+| `numberFormat(ref)` | `(ref: string) => string \| undefined` | Format code at a cell. |
+| `style(ref)` | `(ref: string) => CellStyle \| undefined` | Resolved style at a cell. |
+| `formula(ref)` | `(ref: string) => string \| undefined` | Formula text at a cell. |
+| `images()` | `() => Promise<readonly SheetImage[]>` | Anchored pictures (lazy). |
+| `cell(ref)` | `(ref: string) => Cell` | Cell at A1; absent cells read as `empty`. |
+| `rows()` | `() => AsyncGenerator<Row>` | Stream populated rows (sparse). |
+
+### `Cell` & `Row`
+
+`Cell` is a discriminated union — narrow on `type` to type `value`. `Row` is `{ index: number;
+cells: readonly Cell[] }` (sparse — absent rows/cells are omitted).
+
+| `cell.type` | `cell.value` | | `cell.type` | `cell.value` |
+| --- | --- | --- | --- | --- |
+| `"empty"` | `null` | | `"boolean"` | `boolean` |
+| `"string"` | `string` | | `"date"` | `Date` |
+| `"number"` | `number` | | `"error"` | `string` |
+
+### Style & geometry types
+
+The style model `style(ref)` returns and `{ value, style }` accepts. ([07](./examples/07-styles-and-layout.mjs))
+
+- **`CellStyle`** — `{ numberFormat?, font?: FontStyle, fill?: FillStyle, border?: BorderStyle, alignment?: Alignment, protection?: CellProtection }`. Every component optional; the workbook default resolves to `undefined`.
+- **`FontStyle`** — `{ name?, size?, bold?, italic?, underline?: UnderlineStyle, strike?, color?: Color }`.
+- **`FillStyle`** — `{ patternType: PatternType, fgColor?: Color, bgColor?: Color }` (solid uses `fgColor`).
+- **`BorderStyle`** / **`BorderEdge`** — per-edge `{ top?, right?, bottom?, left?: BorderEdge }`, each `{ style: BorderLineStyle, color?: Color }`.
+- **`Alignment`** — `{ horizontal?, vertical?, wrapText?, shrinkToFit?, indent?, textRotation? }`.
+- **`Color`** — raw, never resolved: `{ rgb }` | `{ theme, tint? }` | `{ indexed }` | `{ auto: true }`.
+- **Enums** — `CellType`, `PatternType`, `BorderLineStyle`, `UnderlineStyle` (`"single"`/`"double"`), `HorizontalAlignment`, `VerticalAlignment`.
+- **Geometry** — `ColumnProps` `{ min, max, width?, hidden? }`, `RowProps` `{ height?, hidden? }`, `FreezePane` `{ rows?, cols? }`, `SheetImage` `{ anchor: ImageAnchor, bytes, mime, name? }`, `ImageAnchor` `{ from: AnchorPoint, to?, ext?, editAs? }`, `AnchorPoint` `{ col, row, colOff?, rowOff? }`.
+- **Metadata** — `SheetInfo` `{ name, path, visible, state }`, `SheetState`, `Comment` `{ ref, author?, text }`, `Hyperlink` `{ ref, target?, location?, tooltip?, display? }`.
+
+### Tables, validation & conditional formatting types
+
+([13](./examples/13-tables-validation-formatting.mjs))
+
+- **`TableInfo`** `{ name, ref, columns: TableColumn[], headerRow, totalsRow, style?: TableStyleInfo, headerRowStyle?, dataStyle?, totalsRowStyle? }`; **`TableColumn`**, **`TableStyleInfo`**.
+- **`DataValidation`** `{ sqref: string[], type: DataValidationType, operator?, formula1?, formula2?, allowBlank?, showDropDown?, showInputMessage?, showErrorMessage?, errorStyle?, promptTitle?, prompt?, errorTitle?, error? }`; enums `DataValidationType`, `DataValidationOperator`, `DataValidationErrorStyle`. `showDropDown` is intuitive (`true` = arrow shown).
+- **`ConditionalFormatting`** `{ sqref: string[], rules: ConditionalFormattingRule[] }`; `ConditionalFormattingRule` = `CfHighlightRule` | `CfColorScaleRule` | `CfDataBarRule` | `CfIconSetRule` (discriminated by `type`); `CfHighlightType`, `Cfvo`.
+- **`DxfStyle`** `{ numberFormat?, font?, fill?: DxfFill, border?, alignment? }` — a differential highlight; `DxfFill` is kept raw (visible color is `bgColor`).
+
+### Writer input types
+
+What `writeXlsx` / `streamXlsx` accept — mirrors of the reader's model, so read → modify → write
+is a pass-through. ([06](./examples/06-write.mjs), [08](./examples/08-streaming-write.mjs))
+
+- **`WorkbookInput`** `{ sheets: SheetInput[], themeXml?, definedNames?: DefinedName[], protection?: WorkbookProtection }`.
+- **`SheetInput`** `{ name, rows: (CellInput[] | undefined)[], columns?, rowProperties?, freeze?, merges?, hyperlinks?, state?, comments?, images?, tables?, dataValidations?, conditionalFormatting?, autoFilter?, protection?, pageMargins?, pageSetup?, printOptions?, headerFooter? }`.
+- **`CellInput`** = `CellValue | StyledCell`. **`CellValue`** = `string | number | boolean | Date | null | undefined`. **`StyledCell`** `{ value?, style?: CellStyle, formula? }`.
+- **`WriteOptions`** `{ date1904? }`.
+- **Streaming** — **`StreamWorkbookInput`** `{ sheets: StreamSheetInput[], themeXml?, definedNames?, protection? }`; **`StreamSheetInput`** (as `SheetInput` but `rows: StreamRows`); **`StreamRows`** = `Iterable | AsyncIterable` of `CellInput[] | undefined`.
+
+### Names, protection & print setup types
+
+The 1.0 fidelity types — each is the same record on the reader and the writer.
+([14](./examples/14-names-autofilter-protection-print.mjs))
+
+- **`DefinedName`** `{ name, refersTo, localSheetId?, hidden? }` — a named range/constant (`refersTo` is stored form, no leading `=`).
+- **`SheetAutoFilter`** `{ ref }` — the filter range; the paired `_xlnm._FilterDatabase` is managed for you.
+- **`SheetProtection`** — `{ sheet?, objects?, scenarios?, formatCells?, …, password?, algorithmName?, hashValue?, saltValue?, spinCount? }`. Password material carried verbatim (never computed).
+- **`WorkbookProtection`** — `{ lockStructure?, lockWindows?, workbookPassword?, workbookAlgorithmName?, workbookHashValue?, workbookSaltValue?, workbookSpinCount? }`.
+- **`CellProtection`** `{ locked?, hidden? }` — on `CellStyle.protection`; only meaningful under sheet protection.
+- **`PageMargins`** `{ left, right, top, bottom, header, footer }` (inches; all six required).
+- **`PageSetup`** `{ paperSize?, orientation?, scale?, fitToWidth?, fitToHeight?, firstPageNumber?, useFirstPageNumber?, blackAndWhite?, draft?, cellComments?, pageOrder? }`.
+- **`PrintOptions`** `{ gridLines?, headings?, horizontalCentered?, verticalCentered? }`.
+- **`HeaderFooter`** `{ oddHeader?, oddFooter?, evenHeader?, evenFooter?, firstHeader?, firstFooter?, differentOddEven?, differentFirst?, scaleWithDoc?, alignWithMargins? }` (Excel `&`-codes, verbatim).
+
+### Errors
+
+([05](./examples/05-error-handling.mjs))
+
+- **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
+- **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio? }` — zip-bomb guards, on by default (2 GiB per-part ceiling; 300× ratio cap). `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+
+### `openjsxl/formula`
+
+The opt-in evaluator — a separate import that never changes the core bundle.
+([12](./examples/12-formulas.mjs))
+
+| Function | Signature | Notes |
+| --- | --- | --- |
+| `parseFormula` | `(text: string) => FormulaAst` | Stored-form text → typed AST. Throws `FormulaError`. |
+| `evaluateWorkbook` | `(workbook: Workbook, options?: EvaluateOptions) => Promise<WorkbookEvalResult>` | Recompute every formula cell (read-only). |
+| `evaluateCell` | `(workbook: Workbook, sheet: string, ref: string, options?: EvaluateOptions) => Promise<ScalarValue>` | One cell + its dependencies. |
+| `errorValue` | `(code: ErrorCode) => FormulaErrorValue` | The interned error value for a code. |
+| `isErrorValue` | `(v: unknown) => v is FormulaErrorValue` | Narrowing guard. |
+| `isRangeView` | `(v: unknown) => v is RangeView` | Narrowing guard. |
+
+- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations.
+- **Results** — `WorkbookEvalResult` `{ cells: readonly CellResult[]; get(sheet, ref): ScalarValue | undefined }`; `CellResult` `{ sheet, ref, value }`.
+- **Values** — `ScalarValue` = `number | string | boolean | null | FormulaErrorValue`; `EvalValue` = `ScalarValue | RangeView`; `FormulaErrorValue` `{ kind: "error", code: ErrorCode }`; `ErrorCode` (the eight `ST_CellErrorType` values + `#CYCLE!`).
+- **`RangeView`** — a lazy window over a reference's used cells: `sheet`, `startCol/startRow/endCol/endRow`, `width`/`height`/`cellCount` (getters), `entries()`, `values()`, `populatedCount()`, `single()`, `topLeft()`, `cellAt(rowOffset, colOffset)`; `RangeEntry` `{ col, row, value }`.
+- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both extending `FunctionSpecBase` `{ minArgs, maxArgs, volatile? }`; `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number }` and (lazy) `ArgThunk` = `() => EvalValue`.
+- **AST** — `FormulaAst` is the union of `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `ErrorLiteral`, `ArrayLiteral` (`ArrayElement`), `CellRefNode`, `NameRef`, `RangeRef`, `UnionRef`, `FunctionCall`, `EmptyArg`, `UnaryOp`, `PostfixOp`, `BinaryOp`, `Group`, `StructuredRef`, `ExternalRef`; a qualifying sheet is `SheetSpec`. The single-cell node is **`CellRefNode`** (named so it never collides with `openjsxl`'s `CellRef`, letting you import both entry points at once).
+- **Errors** — `FormulaError extends Error` `{ code: FormulaErrorCode, position? }`; `FormulaErrorCode` = `"parse-error"` | `"depth-exceeded"` | `"too-many-args"` | `"budget-exceeded"` | `"volatile-unconfigured"` | `"unsupported"`.
+
 ## Why
 
 JavaScript has no Excel library that is, all at once, maintained, permissively licensed,

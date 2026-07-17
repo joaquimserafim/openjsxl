@@ -137,6 +137,8 @@ Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `write
   `TableStyleInfo`, `DataValidation` (+ `DataValidationType`/`DataValidationOperator`/
   `DataValidationErrorStyle`), `ConditionalFormatting`, `ConditionalFormattingRule`, `DxfStyle`,
   `DxfFill`, `Cfvo`
+- **Names, protection & print setup (1.0):** `DefinedName`, `SheetAutoFilter`, `SheetProtection`,
+  `WorkbookProtection`, `CellProtection`, `PageMargins`, `PageSetup`, `PrintOptions`, `HeaderFooter`
 - **A1 & dates:** `columnToIndex`, `indexToColumn`, `parseRef`, `formatRef`, `serialToDate`,
   `dateToSerial`
 - **Formulas (opt-in, `@openjsxl/core/formula`):** `parseFormula`, `evaluateWorkbook`,
@@ -146,7 +148,8 @@ Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `write
   AST node types. A separate entry point — importing it never changes the core `"."` bundle. ~90
   built-in functions; register your own through `options.functions`.
 
-Full guide, design notes, and roadmap: <https://github.com/joaquimserafim/openjsxl>
+Full guide, the complete **API reference**, design notes, and roadmap:
+<https://github.com/joaquimserafim/openjsxl>
 
 ## License
 

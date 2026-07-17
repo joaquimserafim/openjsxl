@@ -3007,7 +3007,7 @@ collision-free; every type referenced by a public signature is importable; every
 documented; both packages resolve per the decided module stance; gates green + byte-identity
 recipe (autoFilter policy touches the writer).
 
-### F10.7 — README as the canonical documentation ☐
+### F10.7 — README as the canonical documentation ☑
 
 **Context.** Owner decision (2026-07-14): the README is THE doc for 1.0 — "all the info
 regarding the interface and methods and examples" — and a docs site is for another day. npm
@@ -3035,13 +3035,14 @@ documented signature is verified against the built `.d.ts` — no drift; every e
 auto-generation (1.0 reference is hand-curated against the d.ts).
 
 **Tasks**
-- [ ] API inventory from the built d.ts (both entry points) — the reference's checklist.
-- [ ] Root README reference sections (functions, interfaces, types, formula entry).
-- [ ] Facade README full mirror + core README pointer + examples for M10 features +
-      examples/README index.
-- [ ] ROADMAP / PUBLISHING true-up.
-- [ ] Docs-accuracy review lens (signature drift against d.ts; every example executed) +
-      gates.
+- [x] API inventory from the built d.ts (both entry points) — the reference's checklist.
+- [x] Root README reference sections (functions, interfaces, types, formula entry) + a short
+      "Defined names, protection & print setup (1.0)" guide section.
+- [x] Facade README full mirror (content-identical, absolute example links) + core README pointer +
+      M10 types added to core exports; examples/README index already current (ex-14 tagged 1.0).
+- [x] PUBLISHING 1.0.0 entry fleshed out (ROADMAP 1.0 row already accurate — left as-is).
+- [x] Docs-accuracy review lens (6-agent d.ts-diff workflow: CLEAN, one imprecise finding fixed;
+      every example executed, exit 0) + gates (biome 0 / tsc 0 / vitest 1049 pass).
 
 **Acceptance.** A user can operate every public API from the README alone; signatures match
 the d.ts exactly; all examples run; npm and GitHub landing pages both carry the full
