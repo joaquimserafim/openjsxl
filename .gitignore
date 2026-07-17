@@ -11,6 +11,10 @@ coverage/
 # Local working status notes (not tracked)
 progress.md
 
+# Planning docs kept local (not published to the remote)
+ROADMAP.md
+IMPLEMENTATION.md
+
 # Local operating contract for agents/humans (kept local, not published to the remote)
 CLAUDE.md
 

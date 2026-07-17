@@ -30,7 +30,7 @@ import { tokenize } from "../xml";
 //                   the spec (14–22, 45–47) plus the locale date/time block (27–36, 50–58).
 //   numFmtId ≥ 164  custom, defined in <numFmts> with a formatCode we sniff for date tokens.
 //
-// Deliberate simplifications (openpyxl-compatible, documented in IMPLEMENTATION.md M4): the
+// Deliberate simplifications (openpyxl-compatible): the
 // `apply*` flags and `cellStyleXfs`/`xfId` named-style inheritance are ignored — the component
 // ids on the cellXf itself are taken as effective, which is what every mainstream producer
 // writes anyway. Gradient fills, diagonal borders, accounting underlines, and the legacy

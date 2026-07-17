@@ -1,6 +1,6 @@
 // Public API surface of @openjsxl/core: the reader + shared Workbook/Worksheet model, the writer and
 // its bridge, the style/geometry/metadata types, and the addressing/date/detection helpers. This is
-// the frozen 1.0 surface (see IMPLEMENTATION.md) — everything exported here is public and documented;
+// the frozen 1.0 surface — everything exported here is public and documented;
 // nothing else in the package is API. Every public function reports failure by throwing `XlsxError`
 // (branch on its `code`), never a bare `Error`.
 

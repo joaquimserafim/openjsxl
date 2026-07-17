@@ -9,7 +9,7 @@
 A fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) library for JavaScript
 runtimes — Node, Deno, Bun, the browser, and edge.
 
-> Status: **reader + writer — pre-1.0.** Read typed cells, styles, number formats, formulas,
+> Status: **reader + writer — 1.0 (stable).** Read typed cells, styles, number formats, formulas,
 > merged ranges, hyperlinks, comments, and pictures; stream large sheets in roughly constant
 > memory; get typed errors on malformed input. Write `.xlsx` from plain data with `writeXlsx`,
 > and read → modify → write with `workbookToInput`. **New in 0.6:** anchored pictures — read
@@ -23,8 +23,10 @@ runtimes — Node, Deno, Bun, the browser, and edge.
 > data bars, icon sets) — plus hardening: string content survives XML-illegal characters via
 > ST_Xstring escaping, and every read is guarded against decompression bombs by default (a 2 GiB
 > per-part ceiling + a 300× compression-ratio cap, both tunable).
-> Published on npm. Built in the open, plan-first — see the [roadmap](./ROADMAP.md) and
-> [implementation plan](./IMPLEMENTATION.md).
+> **New in 1.0:** full workbook fidelity — defined **names**, sheet **autofilters**, **protection**
+> (sheet / workbook / per-cell), and **print setup** (margins, orientation, scale, header/footer) all
+> read AND write — on a frozen, fully documented API.
+> Published on npm — see the [API reference](#api-reference) and [how it's built](./ARCHITECTURE.md).
 
 ## Quick start
 

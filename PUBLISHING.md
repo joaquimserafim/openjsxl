@@ -37,7 +37,7 @@ pnpm test
 
 ### 2. Set the version
 
-For the current release the version is `0.9.1` (already set) — skip this step. For a later
+For the current release the version is `1.0.0` (already set) — skip this step. For a later
 release, set the **same** version in both public packages by editing the `"version"` field in:
 
 - `packages/core/package.json`
@@ -173,7 +173,7 @@ git push -f origin v<version>
   plus a `"./package.json"` subpath, with the ESM-only / Node ≥ 24 stance documented in the READMEs. The
   README becomes the **canonical documentation** — a full API reference for both entry points, verified
   against the built `.d.ts`. `.xlsx` output for existing input stays byte-identical (the freeze is
-  additive / hygiene only). Bump at the owner's request when ready; follow semver thereafter.
+  additive / hygiene only). Follow semver from here.
 
 ## Notes
 
