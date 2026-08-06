@@ -2,6 +2,7 @@ import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { XlsxError } from "../../errors";
 import { openXlsx } from "../../reader/workbook";
+import { openZip } from "../../zip";
 import { workbookToInput } from "../from-workbook";
 import { writeXlsx } from "../workbook";
 
@@ -13,6 +14,10 @@ const one = (cell: unknown) => ({
 	// biome-ignore lint/suspicious/noExplicitAny: exercising the cell input union directly
 	sheets: [{ name: "S", rows: [[cell as any]] }],
 });
+
+const decoder = new TextDecoder();
+const sheetXmlOf = async (bytes: Uint8Array): Promise<string> =>
+	decoder.decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
 
 async function roundtrip(cell: unknown) {
 	const wb = await openXlsx(await writeXlsx(one(cell)));
@@ -51,6 +56,15 @@ describe("writeXlsx — formula cells", () => {
 	it("escapes XML metacharacters in the formula text", async () => {
 		const s = await roundtrip({ formula: "A1<B1", value: true });
 		expect(s.formula("A1")).toBe("A1<B1"); // round-trips through &lt;
+	});
+
+	it("preserves CR, CRLF, and lone LF in formula element text", async () => {
+		const formula = 'CONCAT("a\rb","c\r\nd","e\nf")';
+		const bytes = await writeXlsx(one({ formula, value: "abcdef" }));
+		const xml = await sheetXmlOf(bytes);
+		expect(xml).toContain('<f>CONCAT("a&#13;b","c&#13;\nd","e\nf")</f>');
+		expect(xml).not.toContain("\r");
+		expect((await openXlsx(bytes)).sheet("S").formula("A1")).toBe(formula);
 	});
 });
 

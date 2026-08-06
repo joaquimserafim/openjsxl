@@ -130,6 +130,20 @@ describe("writeXlsx — data validation round-trip", () => {
 		expect(dv?.formula1).toBe("ISBLANK(A1)");
 	});
 
+	it("preserves CR, CRLF, and lone LF in formula1/formula2 element text", async () => {
+		const dv: DataValidation = {
+			sqref: ["A1"],
+			type: "whole",
+			operator: "between",
+			formula1: '"a\rb"',
+			formula2: '"c\r\nd\ne"',
+		};
+		const xml = await sheetXml({ name: "S", rows: [[1]], dataValidations: [dv] });
+		expect(xml).toContain('<formula1>"a&#13;b"</formula1><formula2>"c&#13;\nd\ne"</formula2>');
+		expect(xml).not.toContain("\r");
+		expect(await roundTrip([dv])).toEqual([dv]);
+	});
+
 	it("does not emit <dataValidations> when the sheet has none (byte-identity path)", async () => {
 		expect(await sheetXml({ name: "S", rows: [["a", 1]] })).not.toContain("dataValidation");
 		// An explicitly empty array is also invisible.

@@ -83,6 +83,20 @@ describe("writeXlsx — <definedNames> emission", () => {
 		expect(xml).toContain('<definedName name="Greeting">"a&lt;b&amp;c"</definedName>');
 	});
 
+	it("preserves CR, CRLF, and lone LF in refersTo element text", async () => {
+		const refersTo = 'CONCAT("a\rb","c\r\nd","e\nf")';
+		const bytes = await writeXlsx({
+			sheets: [{ name: "Sheet1", rows: [["a"]] }],
+			definedNames: [{ name: "Breaks", refersTo }],
+		});
+		const xml = await workbookXmlOf(bytes);
+		expect(xml).toContain(
+			'<definedName name="Breaks">CONCAT("a&#13;b","c&#13;\nd","e\nf")</definedName>',
+		);
+		expect(xml).not.toContain("\r");
+		expect((await openXlsx(bytes)).definedNames).toEqual([{ name: "Breaks", refersTo }]);
+	});
+
 	it("emits nothing for hidden:false (default) — no hidden attribute", async () => {
 		const bytes = await writeXlsx({
 			sheets: [{ name: "Sheet1", rows: [["a"]] }],

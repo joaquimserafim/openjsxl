@@ -90,6 +90,40 @@ describe("writeXlsx — tables round-trip", () => {
 		expect(t?.style).toEqual({ name: "TableStyleMedium2", showRowStripes: true });
 	});
 
+	it("preserves CR, CRLF, and lone LF in table formula element text", async () => {
+		const totalsRowFormula = "SUBTOTAL(109,[Amount])\r+0";
+		const calculatedColumnFormula = '[Item]&"\r\nx\n"';
+		const sheet: SheetInput = {
+			name: "S",
+			rows: [
+				["Item", "Amount"],
+				["A", 1],
+				["Total", 1],
+			],
+			tables: [
+				{
+					name: "T",
+					ref: "A1:B3",
+					columns: [
+						{ name: "Item" },
+						{ name: "Amount", totalsRowFormula, calculatedColumnFormula },
+					],
+					headerRow: true,
+					totalsRow: true,
+				},
+			],
+		};
+		const xml = await tablePart(sheet);
+		expect(xml).toContain("<totalsRowFormula>SUBTOTAL(109,[Amount])&#13;+0</totalsRowFormula>");
+		expect(xml).toContain(
+			'<calculatedColumnFormula>[Item]&amp;"&#13;\nx\n"</calculatedColumnFormula>',
+		);
+		expect(xml).not.toContain("\r");
+		const column = (await roundTrip(sheet)).tables[0]?.columns[1];
+		expect(column?.totalsRowFormula).toBe(totalsRowFormula);
+		expect(column?.calculatedColumnFormula).toBe(calculatedColumnFormula);
+	});
+
 	it("assigns workbook-global ids across sheets and rejects a duplicate name", async () => {
 		// Two tables on two sheets get table1.xml / table2.xml; the reader is agnostic to the id, so we
 		// just check both survive.

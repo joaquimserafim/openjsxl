@@ -103,6 +103,25 @@ describe("writeXlsx — comments part (xl/commentsN.xml)", () => {
 		expect(xml).toContain("<text><t>a &amp; b &lt;c&gt;</t></text>");
 		expect(xml).toContain('<text><t xml:space="preserve">  padded  </t></text>');
 	});
+
+	it("preserves CR, CRLF, and lone LF in comment-author element text", async () => {
+		const author = "Jo\rhn\r\nDoe\nX";
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "S",
+					rows: [["v"]],
+					comments: [{ ref: "A1", author, text: "note" }],
+				},
+			],
+		});
+		const xml = await part(bytes, "xl/comments1.xml");
+		expect(xml).toContain("<author>Jo&#13;hn&#13;\nDoe\nX</author>");
+		expect(xml).not.toContain("\r");
+		expect((await openXlsx(bytes)).sheet("S").comments).toEqual([
+			{ ref: "A1", author, text: "note" },
+		]);
+	});
 });
 
 describe("writeXlsx — VML legacy drawing", () => {

@@ -86,6 +86,30 @@ describe("writeXlsx — conditional formatting round-trip", () => {
 		expect(await roundTrip(cf)).toEqual(cf);
 	});
 
+	it("preserves CR, CRLF, and lone LF in formula element text", async () => {
+		const cf: ConditionalFormatting[] = [
+			{
+				sqref: ["A1"],
+				rules: [
+					{
+						type: "expression",
+						priority: 1,
+						formulas: ['A1="a\rb"', 'A1="c\r\nd\ne"'],
+					},
+				],
+			},
+		];
+		const bytes = await writeXlsx({
+			sheets: [{ name: "S", rows: [[1]], conditionalFormatting: cf }],
+		});
+		const xml = await partText(bytes, "xl/worksheets/sheet1.xml");
+		expect(xml).toContain(
+			'<formula>A1="a&#13;b"</formula><formula>A1="c&#13;\nd\ne"</formula>',
+		);
+		expect(xml).not.toContain("\r");
+		expect(await roundTrip(cf)).toEqual(cf);
+	});
+
 	it("interns two rules sharing an identical dxf into ONE <dxfs> slot (dedup)", async () => {
 		const bytes = await writeXlsx({
 			sheets: [

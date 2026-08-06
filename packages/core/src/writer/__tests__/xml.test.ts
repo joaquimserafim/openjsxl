@@ -10,6 +10,11 @@ describe("escapeText", () => {
 		expect(escapeText("<&>")).toBe("&lt;&amp;&gt;");
 	});
 
+	it("preserves CR as a character reference without changing CRLF's LF or a lone LF", () => {
+		expect(escapeText("a\rb\r\nc\nd")).toBe("a&#13;b&#13;\nc\nd");
+		expect(escapeText("literal &#13; then \r")).toBe("literal &amp;#13; then &#13;");
+	});
+
 	it("leaves quotes untouched (text context)", () => {
 		expect(escapeText('say "hi"')).toBe('say "hi"');
 	});
@@ -18,6 +23,10 @@ describe("escapeText", () => {
 describe("escapeAttr", () => {
 	it("also escapes double quotes", () => {
 		expect(escapeAttr('a "b" & <c>')).toBe("a &quot;b&quot; &amp; &lt;c&gt;");
+	});
+
+	it("preserves attribute whitespace with character references", () => {
+		expect(escapeAttr("a\tb\nc\rd")).toBe("a&#9;b&#10;c&#13;d");
 	});
 });
 

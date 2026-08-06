@@ -1,12 +1,15 @@
 // XML text serialization for the writer — the encode side of the reader's entity decoding.
 //
-// OOXML content is UTF-8, so the only characters that MUST be escaped are the ones that would
-// otherwise be read as markup: `&`, `<`, `>` in text, plus `"` inside a double-quoted attribute.
-// `&` is replaced first so the `&` we introduce for the others isn't re-escaped. We do not emit
-// numeric character references for anything else — the bytes go out as UTF-8.
+// OOXML content is UTF-8. Markup characters must be escaped, and XML 1.0 §2.11 normalizes literal
+// CR/CRLF in element text before parsing, so a data CR must be emitted as a character reference.
+// `&` is replaced first so the `&` introduced by later replacements is not re-escaped.
 
 export function escapeText(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/\r/g, "&#13;");
 }
 
 export function escapeAttr(s: string): string {
@@ -14,12 +17,8 @@ export function escapeAttr(s: string): string {
 	// by conforming parsers (XML 1.0 §3.3.3 attribute-value normalization) — the same bytes would
 	// mean a different string to Excel than to our non-normalizing reader. Character references
 	// are exempt from normalization, so emitting &#9;/&#10;/&#13; keeps the value verbatim for
-	// every consumer. Element TEXT is not normalized, so escapeText stays as-is.
-	return escapeText(s)
-		.replace(/"/g, "&quot;")
-		.replace(/\t/g, "&#9;")
-		.replace(/\n/g, "&#10;")
-		.replace(/\r/g, "&#13;");
+	// every consumer. Element-text CR uses the separate §2.11 handling in escapeText.
+	return escapeText(s).replace(/"/g, "&quot;").replace(/\t/g, "&#9;").replace(/\n/g, "&#10;");
 }
 
 // XML safety lives in utils (shared with the reader's style model, which degrades unsafe
