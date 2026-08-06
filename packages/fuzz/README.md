@@ -53,12 +53,12 @@ FUZZ_MS=120000 FUZZ_SEED=7 pnpm --filter @openjsxl/fuzz fuzz
 
 ## CI posture
 
-The smoke suites are ordinary vitest files under [`src/__tests__/`](src/__tests__), so the root gate
-(`pnpm vitest run`) covers them with **zero new plumbing** — a fixed-seed fast-check pass (`numRuns`
-≈ 60) plus a few hundred fixed-seed mutants, in well under a second, with **no wall-clock assertions**
-(CI machines vary). The smoke also asserts the mutation engine actually *bites* (a nonzero typed-reject
-tally), so a no-op fuzzer can't pass silently. The budgeted long run is gated behind `FUZZ_LONG=1` and
-never runs in CI.
+The smoke suites are ordinary vitest files under [`src/__tests__/`](src/__tests__), so the guarded root
+gate (`pnpm test`) covers them in the same run — a fixed-seed fast-check pass (`numRuns` ≈ 60) plus a
+few hundred fixed-seed mutants, in well under a second, with **no wall-clock assertions** (CI machines
+vary). The smoke also asserts the mutation engine actually *bites* (a nonzero typed-reject tally), so
+a no-op fuzzer can't pass silently. The budgeted long run is gated behind `FUZZ_LONG=1` and never runs
+in CI.
 
 ## Triage → promote
 
