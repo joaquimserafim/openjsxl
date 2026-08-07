@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors";
+import { MAX_CLASSIC_ZIP_ENTRIES } from "./constants";
 import { inflateRaw, inflateRawStream } from "./inflate";
 
 // Minimal reader for the ZIP (OPC) container that wraps every .xlsx. We locate the
@@ -10,8 +11,9 @@ import { inflateRaw, inflateRawStream } from "./inflate";
 // local header's size fields), so the data-descriptor layout (general-purpose bit 3) that
 // Excel and LibreOffice emit reads correctly.
 //
-// Not supported (the reader detects and rejects these rather than misreading): ZIP64
-// (> 4 GB or > 65535 entries), encryption, and multi-disk archives.
+// ZIP64 metadata and multi-disk archives are rejected while opening. Encryption is not explicitly
+// detected: AES method 99 is unsupported when read, while traditional encryption may surface as
+// ciphertext (stored entries) or as an inflate/corrupt error (deflated entries).
 //
 // Entry policy: directory placeholders (`name/`) are skipped; duplicate part names are refused
 // (OPC forbids them, and an ambiguous package is a zip-confusion vector).
@@ -35,9 +37,11 @@ export interface ZipArchive {
 }
 
 const SIG_EOCD = 0x06054b50;
+const SIG_ZIP64_LOCATOR = 0x07064b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
 const EOCD_MIN_SIZE = 22;
+const ZIP64_LOCATOR_SIZE = 20;
 const MAX_COMMENT = 0xffff;
 const ZIP64_SENTINEL = 0xffffffff;
 
@@ -86,14 +90,40 @@ export function openZip(
 		);
 	}
 
+	const diskNumber = view.getUint16(eocd + 4, true);
+	const centralDirectoryDisk = view.getUint16(eocd + 6, true);
+	const entriesThisDisk = view.getUint16(eocd + 8, true);
 	const entryCount = view.getUint16(eocd + 10, true);
+	const cdSize = view.getUint32(eocd + 12, true);
 	const cdOffset = view.getUint32(eocd + 16, true);
-	if (cdOffset === ZIP64_SENTINEL)
+	if (
+		entriesThisDisk > MAX_CLASSIC_ZIP_ENTRIES ||
+		entryCount > MAX_CLASSIC_ZIP_ENTRIES ||
+		cdSize === ZIP64_SENTINEL ||
+		cdOffset === ZIP64_SENTINEL
+	) {
 		throw new XlsxError("unsupported", "ZIP64 archives are not supported");
-	if (cdOffset > len) {
+	}
+	if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesThisDisk !== entryCount) {
+		throw new XlsxError("unsupported", "multi-disk ZIP archives are not supported");
+	}
+	if (cdOffset > eocd || cdSize > eocd - cdOffset) {
 		throw new XlsxError(
 			"corrupt-zip",
-			"corrupt zip: central directory offset past end of file",
+			"corrupt zip: central directory overlaps the end-of-central-directory record",
+		);
+	}
+	const cdEnd = cdOffset + cdSize;
+	if (cdEnd !== eocd) {
+		if (
+			eocd >= ZIP64_LOCATOR_SIZE &&
+			view.getUint32(eocd - ZIP64_LOCATOR_SIZE, true) === SIG_ZIP64_LOCATOR
+		) {
+			throw new XlsxError("unsupported", "ZIP64 archives are not supported");
+		}
+		throw new XlsxError(
+			"corrupt-zip",
+			"corrupt zip: undeclared data between the central directory and end-of-central-directory record",
 		);
 	}
 
@@ -101,7 +131,7 @@ export function openZip(
 	const entries = new Map<string, ZipEntry>();
 	let pos = cdOffset;
 	for (let i = 0; i < entryCount; i++) {
-		if (pos + 46 > len || view.getUint32(pos, true) !== SIG_CENTRAL) {
+		if (pos > cdEnd || 46 > cdEnd - pos || view.getUint32(pos, true) !== SIG_CENTRAL) {
 			throw new XlsxError(
 				"corrupt-zip",
 				`corrupt zip: bad central directory header at offset ${pos}`,
@@ -113,6 +143,7 @@ export function openZip(
 		const nameLen = view.getUint16(pos + 28, true);
 		const extraLen = view.getUint16(pos + 30, true);
 		const commentLen = view.getUint16(pos + 32, true);
+		const diskStart = view.getUint16(pos + 34, true);
 		const localHeaderOffset = view.getUint32(pos + 42, true);
 		if (
 			compressedSize === ZIP64_SENTINEL ||
@@ -121,8 +152,18 @@ export function openZip(
 		) {
 			throw new XlsxError("unsupported", "ZIP64 archives are not supported");
 		}
+		if (diskStart !== 0) {
+			throw new XlsxError("unsupported", "multi-disk ZIP archives are not supported");
+		}
+		const recordSize = 46 + nameLen + extraLen + commentLen;
+		if (recordSize > cdEnd - pos) {
+			throw new XlsxError(
+				"corrupt-zip",
+				`corrupt zip: central directory entry at offset ${pos} exceeds the declared directory size`,
+			);
+		}
 		const name = decoder.decode(bytes.subarray(pos + 46, pos + 46 + nameLen));
-		pos += 46 + nameLen + extraLen + commentLen;
+		pos += recordSize;
 		// Directory entries (`name/`) are placeholders, not parts — skip them.
 		if (name.endsWith("/")) continue;
 		// OPC forbids duplicate part names; a duplicate makes the package ambiguous (a
@@ -131,6 +172,12 @@ export function openZip(
 			throw new XlsxError("corrupt-zip", `corrupt zip: duplicate entry name ${name}`);
 		}
 		entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset });
+	}
+	if (pos !== cdEnd) {
+		throw new XlsxError(
+			"corrupt-zip",
+			"corrupt zip: central directory size does not match its entry records",
+		);
 	}
 
 	// Find an entry's raw (still-compressed) payload. The local header repeats name/extra

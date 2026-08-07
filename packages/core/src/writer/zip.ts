@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors";
+import { MAX_CLASSIC_ZIP_ENTRIES } from "../zip/constants";
 import { crc32 } from "./crc32";
 import { deflateRaw } from "./deflate";
 
@@ -41,7 +42,7 @@ const VERSION = 20;
 // WRITABLE count: 0xffff itself is the sentinel — an EOCD carrying it sends conforming readers
 // hunting for a ZIP64 record that doesn't exist.
 const U32_CEILING = 0xffffffff;
-export const MAX_ENTRIES = 0xfffe;
+export const MAX_ENTRIES = MAX_CLASSIC_ZIP_ENTRIES;
 
 // Fixed DOS date (1980-01-01) and time (00:00) for deterministic output — mirrors the fixtures
 // builder so both produce reproducible archives.

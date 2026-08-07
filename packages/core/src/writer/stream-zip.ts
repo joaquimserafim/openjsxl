@@ -1,4 +1,5 @@
 import { XlsxError } from "../errors";
+import { MAX_CLASSIC_ZIP_ENTRIES } from "../zip/constants";
 import { CRC32_INIT, crc32Final, crc32Update } from "./crc32";
 
 // Streaming ZIP/OPC writer (F5.1) — the constant-memory sibling of writeZip. Where writeZip buffers
@@ -26,7 +27,7 @@ const FLAG_DATA_DESCRIPTOR = 0x0008;
 const U32_CEILING = 0xffffffff;
 // Largest WRITABLE entry count — 0xffff itself is the ZIP64 sentinel in the u16 EOCD field
 // (readers would go looking for a ZIP64 record we never write). Same cap as the buffered writer.
-export const MAX_ENTRIES = 0xfffe;
+export const MAX_ENTRIES = MAX_CLASSIC_ZIP_ENTRIES;
 const DOS_TIME = 0;
 const DOS_DATE = 0x0021;
 

@@ -1,7 +1,8 @@
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
-import { XlsxError } from "../../errors";
+import { XlsxError, type XlsxErrorCode } from "../../errors";
 import { openZip } from "../central-directory";
+import { MAX_CLASSIC_ZIP_ENTRIES } from "../constants";
 
 const PARTS = [
 	"[Content_Types].xml",
@@ -102,6 +103,8 @@ interface ZipOptions {
 	localExtra?: number;
 	/** bytes of (zeroed) extra field in the central header */
 	centralExtra?: number;
+	/** bytes of (zeroed) comment in the central header */
+	centralComment?: number;
 	centralCompressedSize?: number;
 	centralUncompressedSize?: number;
 	centralLocalOffset?: number;
@@ -119,6 +122,7 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 	const crc = crc32(raw);
 	const localExtra = new Uint8Array(o.localExtra ?? 0);
 	const centralExtra = new Uint8Array(o.centralExtra ?? 0);
+	const centralComment = new Uint8Array(o.centralComment ?? 0);
 	const dd = o.dataDescriptor === true;
 	const flags = dd ? 0x08 : 0;
 
@@ -160,13 +164,14 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 		u32(o.centralUncompressedSize ?? raw.length),
 		u16(nameBytes.length),
 		u16(centralExtra.length),
-		u16(0),
+		u16(centralComment.length),
 		u16(0),
 		u16(0),
 		u32(0),
 		u32(o.centralLocalOffset ?? 0),
 		nameBytes,
 		centralExtra,
+		centralComment,
 	]);
 	const eocd = concat([
 		u32(0x06054b50),
@@ -179,6 +184,169 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 		u16(0),
 	]);
 	return concat([localBlock, central, eocd]);
+}
+
+// Bytes in the fixed EOCD record; an optional ZIP comment follows these 22 bytes.
+const EOCD_FIXED_SIZE = 22;
+
+function patchEocdU16(bytes: Uint8Array, fieldOffset: number, value: number): Uint8Array {
+	const copy = bytes.slice();
+	const eocd = copy.length - EOCD_FIXED_SIZE;
+	new DataView(copy.buffer, copy.byteOffset, copy.byteLength).setUint16(
+		eocd + fieldOffset,
+		value,
+		true,
+	);
+	return copy;
+}
+
+function patchEocdU32(bytes: Uint8Array, fieldOffset: number, value: number): Uint8Array {
+	const copy = bytes.slice();
+	const eocd = copy.length - EOCD_FIXED_SIZE;
+	new DataView(copy.buffer, copy.byteOffset, copy.byteLength).setUint32(
+		eocd + fieldOffset,
+		value,
+		true,
+	);
+	return copy;
+}
+
+function readEocdU32(bytes: Uint8Array, fieldOffset: number): number {
+	const eocd = bytes.length - EOCD_FIXED_SIZE;
+	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
+		eocd + fieldOffset,
+		true,
+	);
+}
+
+function patchCentralDiskStart(bytes: Uint8Array, value: number): Uint8Array {
+	const copy = bytes.slice();
+	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+	const eocd = copy.length - EOCD_FIXED_SIZE;
+	const centralOffset = view.getUint32(eocd + 16, true);
+	view.setUint16(centralOffset + 34, value, true);
+	return copy;
+}
+
+function addDeclaredCentralTrailingByte(bytes: Uint8Array): Uint8Array {
+	const oldEocd = bytes.length - EOCD_FIXED_SIZE;
+	const oldSize = readEocdU32(bytes, 12);
+	const copy = new Uint8Array(bytes.length + 1);
+	copy.set(bytes.subarray(0, oldEocd));
+	copy[oldEocd] = 0;
+	copy.set(bytes.subarray(oldEocd), oldEocd + 1);
+	const newEocd = oldEocd + 1;
+	new DataView(copy.buffer).setUint32(newEocd + 12, oldSize + 1, true);
+	return copy;
+}
+
+function declareOnlyFirstCentralEntry(bytes: Uint8Array): Uint8Array {
+	const copy = bytes.slice();
+	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+	const eocd = copy.length - EOCD_FIXED_SIZE;
+	const centralOffset = view.getUint32(eocd + 16, true);
+	const nameLength = view.getUint16(centralOffset + 28, true);
+	const extraLength = view.getUint16(centralOffset + 30, true);
+	const commentLength = view.getUint16(centralOffset + 32, true);
+	const firstRecordSize = 46 + nameLength + extraLength + commentLength;
+	view.setUint16(eocd + 8, 1, true);
+	view.setUint16(eocd + 10, 1, true);
+	view.setUint32(eocd + 12, firstRecordSize, true);
+	return copy;
+}
+
+function appendFakeEmptyEocdAsComment(bytes: Uint8Array): Uint8Array {
+	const oldEocd = bytes.length - EOCD_FIXED_SIZE;
+	const fakeEocd = concat([
+		u32(0x06054b50),
+		u16(0),
+		u16(0),
+		u16(0),
+		u16(0),
+		u32(0),
+		u32(0),
+		u16(0),
+	]);
+	const copy = concat([bytes, fakeEocd]);
+	new DataView(copy.buffer).setUint16(oldEocd + 20, fakeEocd.length, true);
+	return copy;
+}
+
+function expectOpenZipError(bytes: Uint8Array, code: XlsxErrorCode, message?: RegExp): void {
+	try {
+		openZip(bytes);
+	} catch (error) {
+		if (!(error instanceof XlsxError)) throw error;
+		expect(error.code).toBe(code);
+		if (message !== undefined) expect(error.message).toMatch(message);
+		return;
+	}
+	throw new Error(`expected openZip to throw ${code}`);
+}
+
+function setU64(view: DataView, offset: number, value: number): void {
+	view.setUint32(offset, value, true);
+	view.setUint32(offset + 4, 0, true);
+}
+
+// A structurally genuine ZIP64 archive with more entries than classic ZIP can represent. Building
+// directly into one buffer keeps this regression fast and avoids tens of thousands of allocations.
+function buildOversizedZip64(): Uint8Array {
+	const entryCount = MAX_CLASSIC_ZIP_ENTRIES + 2;
+	const nameLength = 5;
+	const localRecordSize = 30 + nameLength;
+	const centralRecordSize = 46 + nameLength;
+	const cdOffset = entryCount * localRecordSize;
+	const cdSize = entryCount * centralRecordSize;
+	const zip64EocdSize = 56;
+	const zip64LocatorSize = 20;
+	const zip64EocdOffset = cdOffset + cdSize;
+	const locatorOffset = zip64EocdOffset + zip64EocdSize;
+	const eocdOffset = locatorOffset + zip64LocatorSize;
+	const bytes = new Uint8Array(eocdOffset + EOCD_FIXED_SIZE);
+	const view = new DataView(bytes.buffer);
+
+	for (let i = 0; i < entryCount; i++) {
+		const localOffset = i * localRecordSize;
+		view.setUint32(localOffset, 0x04034b50, true);
+		view.setUint16(localOffset + 4, 20, true);
+		view.setUint16(localOffset + 12, 0x21, true);
+		view.setUint16(localOffset + 26, nameLength, true);
+
+		const name = `e${i.toString(36).padStart(4, "0")}`;
+		for (let j = 0; j < nameLength; j++) {
+			bytes[localOffset + 30 + j] = name.charCodeAt(j);
+		}
+
+		const centralOffset = cdOffset + i * centralRecordSize;
+		view.setUint32(centralOffset, 0x02014b50, true);
+		view.setUint16(centralOffset + 4, 20, true);
+		view.setUint16(centralOffset + 6, 20, true);
+		view.setUint16(centralOffset + 14, 0x21, true);
+		view.setUint16(centralOffset + 28, nameLength, true);
+		view.setUint32(centralOffset + 42, localOffset, true);
+		bytes.set(bytes.subarray(localOffset + 30, localOffset + 35), centralOffset + 46);
+	}
+
+	view.setUint32(zip64EocdOffset, 0x06064b50, true);
+	setU64(view, zip64EocdOffset + 4, 44);
+	view.setUint16(zip64EocdOffset + 12, 45, true);
+	view.setUint16(zip64EocdOffset + 14, 45, true);
+	setU64(view, zip64EocdOffset + 24, entryCount);
+	setU64(view, zip64EocdOffset + 32, entryCount);
+	setU64(view, zip64EocdOffset + 40, cdSize);
+	setU64(view, zip64EocdOffset + 48, cdOffset);
+
+	view.setUint32(locatorOffset, 0x07064b50, true);
+	setU64(view, locatorOffset + 8, zip64EocdOffset);
+	view.setUint32(locatorOffset + 16, 1, true);
+
+	view.setUint32(eocdOffset, 0x06054b50, true);
+	view.setUint16(eocdOffset + 8, 0xffff, true);
+	view.setUint16(eocdOffset + 10, 0xffff, true);
+	view.setUint32(eocdOffset + 12, cdSize, true);
+	view.setUint32(eocdOffset + 16, cdOffset, true);
+	return bytes;
 }
 
 describe("openZip — deflate and real-world layouts", () => {
@@ -249,13 +417,7 @@ describe("openZip — deflate and real-world layouts", () => {
 
 	it("rejects ZIP64 archives with an explicit error", async () => {
 		const zip = await buildZip({ name: "p.xml", content: "x", centralLocalOffset: 0xffffffff });
-		expect(() => openZip(zip)).toThrow(/ZIP64/);
-		expect(() => openZip(zip)).toThrow(XlsxError);
-		try {
-			openZip(zip);
-		} catch (e) {
-			expect((e as XlsxError).code).toBe("unsupported");
-		}
+		expectOpenZipError(zip, "unsupported", /ZIP64/);
 	});
 
 	it("rejects a part whose declared size exceeds maxPartBytes", async () => {
@@ -266,6 +428,129 @@ describe("openZip — deflate and real-world layouts", () => {
 		});
 		const zip = openZip(bytes, { maxPartBytes: 100 });
 		await expect(zip.read("big.xml")).rejects.toMatchObject({ code: "part-too-large" });
+	});
+});
+
+describe("openZip — central-directory validation (F11.2)", () => {
+	// ZIP64 uses all-ones sentinel values in classic EOCD fields. These are recognized extension
+	// markers, so they must fail as `unsupported` before any entry walk or count comparison.
+	it.each([
+		["entries on this disk", 8],
+		["total entries", 10],
+	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(patchEocdU16(valid, offset, 0xffff), "unsupported", /ZIP64/);
+	});
+
+	it.each([
+		["central-directory size", 12],
+		["central-directory offset", 16],
+	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(patchEocdU32(valid, offset, 0xffffffff), "unsupported", /ZIP64/);
+	});
+
+	// Any disk metadata means the package is split across files. Returning its local subset would
+	// look like a valid but incomplete workbook, so every split marker is rejected at open time.
+	it.each([
+		["current disk", 4],
+		["central-directory start disk", 6],
+	])("rejects a nonzero EOCD %s field", async (_field, offset) => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(patchEocdU16(valid, offset, 1), "unsupported", /multi-disk/);
+	});
+
+	it("rejects unequal per-disk and total EOCD entry counts", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(patchEocdU16(valid, 8, 0), "unsupported", /multi-disk/);
+	});
+
+	it("rejects a central-directory entry stored on another disk", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(patchCentralDiskStart(valid, 1), "unsupported", /multi-disk/);
+	});
+
+	// The EOCD size/offset pair defines the only bytes the entry walker may consume. These mutations
+	// cover a short span, an EOCD overlap, undeclared trailing data, and a shifted starting boundary.
+	it("rejects an under-declared central-directory span", async () => {
+		const valid = await buildZip({
+			name: "p.xml",
+			content: "x",
+			method: 0,
+			centralExtra: 2,
+			centralComment: 2,
+		});
+		const realSize = readEocdU32(valid, 12);
+		expectOpenZipError(patchEocdU32(valid, 12, realSize - 1), "corrupt-zip");
+	});
+
+	it("rejects a declared central-directory span that overlaps the EOCD", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		const realSize = readEocdU32(valid, 12);
+		expectOpenZipError(patchEocdU32(valid, 12, realSize + 1), "corrupt-zip");
+	});
+
+	it("rejects trailing bytes inside the declared central-directory span", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(addDeclaredCentralTrailingByte(valid), "corrupt-zip");
+	});
+
+	it("rejects a shifted central-directory offset even when the declared end is unchanged", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		const realOffset = readEocdU32(valid, 16);
+		const realSize = readEocdU32(valid, 12);
+		const shifted = patchEocdU32(patchEocdU32(valid, 16, realOffset - 1), 12, realSize + 1);
+		expectOpenZipError(shifted, "corrupt-zip");
+	});
+
+	// Entry counts must agree with the physical directory. The second mutation shrinks count and
+	// size together; it must not return a believable map that silently omits later entries.
+	it("rejects a zero entry count that would silently discard a declared directory", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		const zeroCounts = patchEocdU16(patchEocdU16(valid, 8, 0), 10, 0);
+		expectOpenZipError(zeroCounts, "corrupt-zip");
+	});
+
+	it("rejects consistent forged metadata that hides later central-directory entries", async () => {
+		const valid = await loadFixture("basic.xlsx");
+		expect(openZip(valid).entries.size).toBeGreaterThan(1);
+		expectOpenZipError(declareOnlyFirstCentralEntry(valid), "corrupt-zip");
+	});
+
+	// Both the real and fake EOCD signatures land at valid comment boundaries. Choosing the fake one
+	// must fail closed because its empty directory does not immediately precede that record.
+	it("fails closed when an EOCD-shaped comment suffix would hide every entry", async () => {
+		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
+		expectOpenZipError(appendFakeEmptyEocdAsComment(valid), "corrupt-zip");
+	});
+
+	it("accepts a valid empty classic ZIP", () => {
+		const emptyZip = concat([
+			u32(0x06054b50),
+			u16(0),
+			u16(0),
+			u16(0),
+			u16(0),
+			u32(0),
+			u32(0),
+			u16(0),
+		]);
+		expect(openZip(emptyZip).entries.size).toBe(0);
+	});
+
+	// This is a real 65,536-entry ZIP64 layout, not only a forged EOCD field. It proves the reader
+	// rejects the writer's shared classic-ZIP boundary before silently dropping the final entry.
+	it("rejects a genuine archive above the shared classic-ZIP entry ceiling", () => {
+		const zip64 = buildOversizedZip64();
+		const eocd = zip64.length - EOCD_FIXED_SIZE;
+		const view = new DataView(zip64.buffer);
+		const zip64Eocd = eocd - 20 - 56;
+		expect(view.getUint32(zip64Eocd, true)).toBe(0x06064b50);
+		expect(view.getUint32(zip64Eocd + 32, true)).toBe(MAX_CLASSIC_ZIP_ENTRIES + 2);
+		expect(view.getUint32(zip64Eocd + 36, true)).toBe(0);
+		expect(view.getUint32(eocd - 20, true)).toBe(0x07064b50);
+		expect(view.getUint16(eocd + 10, true)).toBe(0xffff);
+		expectOpenZipError(zip64, "unsupported", /ZIP64/);
 	});
 });
 
