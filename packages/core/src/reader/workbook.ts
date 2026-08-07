@@ -724,8 +724,7 @@ async function loadWorkbook(
 }
 
 /**
- * Reader options — two zip-bomb guards, applied by DEFAULT so a hostile archive is safe without
- * opt-in (F9.7). Pass a larger number to raise a guard, or `Number.POSITIVE_INFINITY` to disable it.
+ * Reader options — two zip-bomb guards plus optional ZIP checksum verification.
  *
  * - `maxPartBytes`: absolute ceiling on any one part's decompressed output (default 2 GiB). A part
  *   that declares — or, while inflating, actually produces — more fails typed (`part-too-large`).
@@ -733,6 +732,9 @@ async function loadWorkbook(
  *   (default 300), above an 8 MiB floor. Catches a decompression bomb (deflate reaches ~1000:1)
  *   early, while real spreadsheet XML (measured ~10–33:1, even for the most repetitive sheets) and
  *   small high-ratio parts pass untouched.
+ * - `verifyChecksums`: verify each fully consumed ZIP entry against its central-directory CRC-32
+ *   (default false). CRC-32 detects accidental corruption; it is not authentication or tamper
+ *   resistance. A cancelled stream makes no checksum claim for its partially consumed entry.
  *
  * Both guards apply to the constant-memory streaming path (`streamSheetRows`) too, so a *single*
  * legitimately huge worksheet whose decompressed XML exceeds `maxPartBytes` (2 GiB) is rejected by
@@ -742,6 +744,7 @@ async function loadWorkbook(
 export interface ReadOptions {
 	readonly maxPartBytes?: number;
 	readonly maxCompressionRatio?: number;
+	readonly verifyChecksums?: boolean;
 }
 
 export async function openXlsx(

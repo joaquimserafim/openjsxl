@@ -85,15 +85,23 @@ row defaults, so a date column reads as dates even when its cells carry no style
 Malformed input throws a typed `XlsxError` with a discriminating `code`, never a bare
 `TypeError` from a corrupt file.
 
+Every fully read ZIP part must produce exactly its declared uncompressed size. CRC-32 verification
+is opt-in in 1.0.1: pass `{ verifyChecksums: true }` to detect accidental payload corruption in
+fully consumed entries. A cancelled stream makes no checksum claim for its partial entry, and
+CRC-32 is an integrity check—not authentication or tamper resistance.
+
 ```ts
 import { openXlsx, XlsxError } from 'openjsxl';
 import { readFile } from 'node:fs/promises';
 
 let wb;
 try {
-	// Zip-bomb guards are ON by default (a 2 GiB per-part ceiling + a 300× compression-ratio
-	// cap); tighten or disable them per read — here, a stricter 50 MB ceiling.
-	wb = await openXlsx(await readFile('report.xlsx'), { maxPartBytes: 50_000_000 });
+	// Zip-bomb guards are ON by default; here we tighten the part ceiling and opt into CRC-32
+	// verification for every ZIP entry this read fully consumes.
+	wb = await openXlsx(await readFile('report.xlsx'), {
+		maxPartBytes: 50_000_000,
+		verifyChecksums: true,
+	});
 } catch (err) {
 	if (err instanceof XlsxError) {
 		// code: 'not-a-zip' | 'not-xlsx' | 'missing-part' | 'corrupt-zip' | 'part-too-large' | …
@@ -639,7 +647,7 @@ The 1.0 fidelity types — each is the same record on the reader and the writer.
 
 - **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
 - **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
-- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio? }` — zip-bomb guards, on by default (2 GiB per-part ceiling; 300× ratio cap). `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); CRC-32 verification defaults to `false`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
 
 ### `openjsxl/formula`
 

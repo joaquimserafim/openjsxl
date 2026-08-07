@@ -52,6 +52,10 @@ For very large sheets use `streamSheetRows` (constant memory); a worksheet also 
 with `resolveColor`; and the reader throws a typed `XlsxError` (with a discriminating `code`)
 on malformed input — including hostile input: every read is guarded against decompression bombs
 by default (a 2 GiB per-part ceiling + a 300× compression-ratio cap, tunable via `ReadOptions`).
+Every fully consumed ZIP entry must match its declared size. Set
+`ReadOptions.verifyChecksums: true` to opt into CRC-32 verification (off by default); cancelled
+streams make no claim for partially read entries. CRC-32 detects accidental corruption, not
+intentional tampering.
 
 **Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
 inferred from the JS values. Cells can carry styles (`{ value, style }` — the same shape
@@ -276,7 +280,7 @@ The 1.0 fidelity types — each is the same record on the reader and the writer.
 
 - **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
 - **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
-- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio? }` — zip-bomb guards, on by default (2 GiB per-part ceiling; 300× ratio cap). `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); CRC-32 verification defaults to `false`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
 
 ### `openjsxl/formula`
 

@@ -2,6 +2,33 @@ import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { openXlsx, streamSheetRows } from "../workbook";
 
+function corruptCentralCrc(bytes: Uint8Array, target: string): Uint8Array {
+	const copy = bytes.slice();
+	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+	const eocd = copy.byteLength - 22; // committed fixtures carry no ZIP comment
+	const entryCount = view.getUint16(eocd + 10, true);
+	let pos = view.getUint32(eocd + 16, true);
+	const decoder = new TextDecoder();
+	for (let i = 0; i < entryCount; i++) {
+		const nameLength = view.getUint16(pos + 28, true);
+		const extraLength = view.getUint16(pos + 30, true);
+		const commentLength = view.getUint16(pos + 32, true);
+		const name = decoder.decode(copy.subarray(pos + 46, pos + 46 + nameLength));
+		if (name === target) {
+			view.setUint32(pos + 16, view.getUint32(pos + 16, true) ^ 1, true);
+			return copy;
+		}
+		pos += 46 + nameLength + extraLength + commentLength;
+	}
+	throw new Error(`fixture has no central-directory entry named ${target}`);
+}
+
+async function consume(iterable: AsyncIterable<unknown>): Promise<void> {
+	for await (const _value of iterable) {
+		// Reaching natural EOF is what completes streaming size/CRC verification.
+	}
+}
+
 // Missing optional parts must degrade gracefully, never throw (F2.4b). minimal.xlsx is a
 // generated workbook with numbers and a boolean only, so it carries neither sharedStrings.xml
 // nor styles.xml.
@@ -52,5 +79,24 @@ describe("reader — maxPartBytes (zip-bomb guard)", () => {
 		await expect(
 			streamSheetRows(bytes, undefined, { maxPartBytes: 1 }).next(),
 		).rejects.toMatchObject({ code: "part-too-large" });
+	});
+});
+
+describe("reader — optional ZIP checksum verification", () => {
+	it("threads verifyChecksums through eager and streaming reads", async () => {
+		const damaged = corruptCentralCrc(
+			await loadFixture("basic.xlsx"),
+			"xl/worksheets/sheet1.xml",
+		);
+
+		// The 1.0.1 default remains tolerant, while opting in rejects the same worksheet through
+		// both the eager zip.read() path and streamSheetRows' actual zip.readStream() path.
+		expect((await openXlsx(damaged)).sheet("Sheet1").cell("A1").value).toBe("hello");
+		await expect(openXlsx(damaged, { verifyChecksums: true })).rejects.toMatchObject({
+			code: "corrupt-zip",
+		});
+		await expect(
+			consume(streamSheetRows(damaged, undefined, { verifyChecksums: true })),
+		).rejects.toMatchObject({ code: "corrupt-zip" });
 	});
 });

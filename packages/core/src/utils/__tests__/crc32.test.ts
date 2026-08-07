@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { crc32 } from "../crc32";
+import { CRC32_INIT, crc32, crc32Final, crc32Update } from "../crc32";
 
 // CRC-32 (IEEE) has well-known check values; if our table or accumulation is off, these fail.
-// The `"123456789"` vector (0xCBF43926) is the canonical CRC-32 check constant.
+// The `123456789` vector (0xCBF43926) is the canonical CRC-32 check constant.
 
 const enc = new TextEncoder();
 
@@ -13,6 +13,14 @@ describe("crc32", () => {
 
 	it("matches the canonical check vector", () => {
 		expect(crc32(enc.encode("123456789"))).toBe(0xcbf43926);
+	});
+
+	it("produces the same result when accumulated across chunks", () => {
+		let running = CRC32_INIT;
+		for (const chunk of ["123", "456", "789"]) {
+			running = crc32Update(running, enc.encode(chunk));
+		}
+		expect(crc32Final(running)).toBe(0xcbf43926);
 	});
 
 	it("matches known text vectors", () => {

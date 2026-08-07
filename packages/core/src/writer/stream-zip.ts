@@ -1,6 +1,6 @@
 import { XlsxError } from "../errors";
+import { CRC32_INIT, crc32Final, crc32Update } from "../utils/crc32";
 import { MAX_CLASSIC_ZIP_ENTRIES } from "../zip/constants";
-import { CRC32_INIT, crc32Final, crc32Update } from "./crc32";
 
 // Streaming ZIP/OPC writer (F5.1) — the constant-memory sibling of writeZip. Where writeZip buffers
 // each part to learn its CRC and sizes before the local header, this emits an entry as it flows: a

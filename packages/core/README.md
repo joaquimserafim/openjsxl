@@ -59,6 +59,10 @@ Reads are guarded against decompression bombs **by default** —
 a 2 GiB per-part output ceiling plus a 300× compression-ratio cap (over an 8 MiB floor); raise or
 disable either via `ReadOptions.maxPartBytes` / `maxCompressionRatio` (`Number.POSITIVE_INFINITY`
 to turn one off).
+Every fully consumed ZIP entry must also match its declared uncompressed size. CRC-32 verification
+defaults off; set `ReadOptions.verifyChecksums: true` to detect accidental corruption in fully read
+entries. A cancelled stream makes no checksum claim for its partial entry. CRC-32 is not
+authentication or tamper resistance.
 
 ## Writing
 

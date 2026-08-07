@@ -1,5 +1,6 @@
 import { XlsxError } from "../errors";
 import { MAX_CLASSIC_ZIP_ENTRIES } from "./constants";
+import { createEntryIntegrityVerifier, verifyEntryOutput } from "./entry-integrity";
 import { inflateRaw, inflateRawStream } from "./inflate";
 
 // Minimal reader for the ZIP (OPC) container that wraps every .xlsx. We locate the
@@ -22,6 +23,8 @@ export interface ZipEntry {
 	readonly name: string;
 	/** 0 = stored, 8 = raw deflate */
 	readonly method: number;
+	/** CRC-32 of the uncompressed entry bytes, from the central directory. */
+	readonly crc32: number;
 	readonly compressedSize: number;
 	readonly uncompressedSize: number;
 	/** absolute offset of the local file header within the archive */
@@ -73,7 +76,11 @@ function findEocd(view: DataView, len: number): number {
 
 export function openZip(
 	bytes: Uint8Array,
-	options?: { maxPartBytes?: number; maxCompressionRatio?: number },
+	options?: {
+		maxPartBytes?: number;
+		maxCompressionRatio?: number;
+		verifyChecksums?: boolean;
+	},
 ): ZipArchive {
 	const len = bytes.byteLength;
 	const view = new DataView(bytes.buffer, bytes.byteOffset, len);
@@ -81,6 +88,7 @@ export function openZip(
 	// Pass a larger number to raise, or Number.POSITIVE_INFINITY to disable either guard.
 	const maxPartBytes = options?.maxPartBytes ?? DEFAULT_MAX_PART_BYTES;
 	const maxRatio = options?.maxCompressionRatio ?? DEFAULT_MAX_COMPRESSION_RATIO;
+	const verifyChecksums = options?.verifyChecksums ?? false;
 
 	const eocd = findEocd(view, len);
 	if (eocd === -1) {
@@ -138,6 +146,7 @@ export function openZip(
 			);
 		}
 		const method = view.getUint16(pos + 10, true);
+		const entryCrc32 = view.getUint32(pos + 16, true);
 		const compressedSize = view.getUint32(pos + 20, true);
 		const uncompressedSize = view.getUint32(pos + 24, true);
 		const nameLen = view.getUint16(pos + 28, true);
@@ -171,7 +180,14 @@ export function openZip(
 		if (entries.has(name)) {
 			throw new XlsxError("corrupt-zip", `corrupt zip: duplicate entry name ${name}`);
 		}
-		entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset });
+		entries.set(name, {
+			name,
+			method,
+			crc32: entryCrc32,
+			compressedSize,
+			uncompressedSize,
+			localHeaderOffset,
+		});
 	}
 	if (pos !== cdEnd) {
 		throw new XlsxError(
@@ -222,23 +238,19 @@ export function openZip(
 		return Math.min(entry.uncompressedSize, maxPartBytes, ratioLimit);
 	}
 
-	// A `part-too-large` abort from the inflate is a real size/bomb rejection — surface it as-is;
-	// any other inflate failure is a corrupt deflate stream.
-	function inflateError(name: string, cause: unknown): XlsxError {
-		if (cause instanceof XlsxError) return cause;
-		return new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${name}`, { cause });
-	}
-
 	async function read(name: string): Promise<Uint8Array> {
 		const { entry, payload } = locate(name);
-		if (entry.method === 0) return payload;
+		if (entry.method === 0) {
+			verifyEntryOutput(entry, payload, verifyChecksums);
+			return payload;
+		}
 		if (entry.method === 8) {
-			if (entry.compressedSize === 0) return new Uint8Array(0);
-			try {
-				return await inflateRaw(payload, inflateCap(entry));
-			} catch (cause) {
-				throw inflateError(name, cause);
-			}
+			const output =
+				entry.compressedSize === 0
+					? new Uint8Array(0)
+					: await inflateRaw(payload, inflateCap(entry), name);
+			verifyEntryOutput(entry, output, verifyChecksums);
+			return output;
 		}
 		throw new XlsxError(
 			"unsupported",
@@ -246,21 +258,27 @@ export function openZip(
 		);
 	}
 
-	// Read an entry as a stream of chunks, never materializing the whole part. Stored entries
-	// yield their (already in-memory) payload as one chunk; deflate entries stream the inflate.
+	// Read an entry as a stream of chunks, never materializing the whole part. Size/CRC checks run
+	// only after natural EOF, so a caller that cancels early makes no whole-entry integrity claim.
 	async function* readStream(name: string): AsyncGenerator<Uint8Array> {
 		const { entry, payload } = locate(name);
+		const integrity = createEntryIntegrityVerifier(entry, verifyChecksums);
 		if (entry.method === 0) {
-			if (payload.byteLength > 0) yield payload;
+			if (payload.byteLength > 0) {
+				integrity.update(payload);
+				yield payload;
+			}
+			integrity.finish();
 			return;
 		}
 		if (entry.method === 8) {
-			if (entry.compressedSize === 0) return;
-			try {
-				yield* inflateRawStream(payload, inflateCap(entry));
-			} catch (cause) {
-				throw inflateError(name, cause);
+			if (entry.compressedSize > 0) {
+				for await (const chunk of inflateRawStream(payload, inflateCap(entry), name)) {
+					integrity.update(chunk);
+					yield chunk;
+				}
 			}
+			integrity.finish();
 			return;
 		}
 		throw new XlsxError(

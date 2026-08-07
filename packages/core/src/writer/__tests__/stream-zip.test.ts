@@ -5,8 +5,8 @@ import { MAX_ENTRIES as STREAM_MAX_ENTRIES, type StreamPart, streamZip } from ".
 import { MAX_ENTRIES as BUFFERED_MAX_ENTRIES } from "../zip";
 
 // F5.1 — the streaming zip layer. Its data-descriptor archive must read back through openZip exactly
-// like a buffered one; CRC correctness (which openZip trusts rather than verifies) is checked out of
-// band by `unzip -t` and by openpyxl reading a streamed .xlsx.
+// like a buffered one; CRC correctness is checked by strict external readers and, from F11.3,
+// directly by openZip when checksum verification is enabled.
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

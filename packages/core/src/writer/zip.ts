@@ -1,6 +1,6 @@
 import { XlsxError } from "../errors";
+import { crc32 } from "../utils/crc32";
 import { MAX_CLASSIC_ZIP_ENTRIES } from "../zip/constants";
-import { crc32 } from "./crc32";
 import { deflateRaw } from "./deflate";
 
 // Write the OPC/ZIP container that wraps every .xlsx — the mirror image of zip/central-directory.ts.

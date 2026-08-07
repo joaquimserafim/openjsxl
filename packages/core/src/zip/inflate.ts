@@ -9,8 +9,7 @@ import { XlsxError } from "../errors";
 // decompression bomb never fully materializes. The caller (openZip) passes the tightest of the
 // declared size, the absolute per-part ceiling, and the compression-ratio limit (F9.7).
 
-// A distinct XlsxError so openZip can tell a legitimate bomb/size abort (surface as-is) from a
-// genuinely corrupt deflate stream (wrap as corrupt-zip).
+// A distinct XlsxError keeps a legitimate bomb/size abort separate from a corrupt deflate stream.
 function tooLarge(maxBytes: number): XlsxError {
 	return new XlsxError(
 		"part-too-large",
@@ -18,9 +17,25 @@ function tooLarge(maxBytes: number): XlsxError {
 	);
 }
 
+function inflateFailure(entryName: string | undefined, cause: unknown): XlsxError {
+	if (cause instanceof XlsxError) return cause;
+	const target = entryName === undefined ? "entry" : entryName;
+	return new XlsxError("corrupt-zip", `corrupt zip: failed to inflate ${target}`, { cause });
+}
+
+async function readInflatedChunk(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	entryName: string | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+	return reader.read().catch((cause: unknown) => {
+		throw inflateFailure(entryName, cause);
+	});
+}
+
 export async function inflateRaw(
 	data: Uint8Array,
 	maxBytes = Number.POSITIVE_INFINITY,
+	entryName?: string,
 ): Promise<Uint8Array> {
 	// The Blob accepts our bytes at runtime; the cast sidesteps a TS lib / @types/node
 	// disagreement over whether the backing buffer is an ArrayBuffer or SharedArrayBuffer.
@@ -30,11 +45,12 @@ export async function inflateRaw(
 	const chunks: Uint8Array[] = [];
 	let total = 0;
 	for (;;) {
-		const { done, value } = await reader.read();
+		const { done, value } = await readInflatedChunk(reader, entryName);
 		if (done) break;
 		total += value.byteLength;
 		if (total > maxBytes) {
-			await reader.cancel();
+			// Cleanup failure must not replace the deterministic size-limit error already observed.
+			await reader.cancel().catch(() => {});
 			throw tooLarge(maxBytes);
 		}
 		chunks.push(value);
@@ -55,6 +71,7 @@ export async function inflateRaw(
 export async function* inflateRawStream(
 	data: Uint8Array,
 	maxBytes = Number.POSITIVE_INFINITY,
+	entryName?: string,
 ): AsyncGenerator<Uint8Array> {
 	const blob = new Blob([data as BlobPart]);
 	const reader = blob.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
@@ -62,7 +79,7 @@ export async function* inflateRawStream(
 	let total = 0;
 	try {
 		for (;;) {
-			const { done, value } = await reader.read();
+			const { done, value } = await readInflatedChunk(reader, entryName);
 			if (done) break;
 			total += value.byteLength;
 			if (total > maxBytes) {

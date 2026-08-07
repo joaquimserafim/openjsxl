@@ -4,6 +4,7 @@ import { XlsxError, type XlsxErrorCode } from "../../errors";
 import { openZip } from "../central-directory";
 import { MAX_CLASSIC_ZIP_ENTRIES } from "../constants";
 
+// The known parts in basic.xlsx; the same list also drives buffered-versus-streamed comparisons.
 const PARTS = [
 	"[Content_Types].xml",
 	"_rels/.rels",
@@ -14,6 +15,7 @@ const PARTS = [
 	"xl/worksheets/sheet1.xml",
 ];
 
+// Decode ZIP part bytes so XML content can be asserted as readable text.
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 describe("openZip — real fixture (stored entries)", () => {
@@ -52,6 +54,8 @@ describe("openZip — real fixture (stored entries)", () => {
 
 // --- a configurable single-entry zip builder for the deflate / edge-case tests ---
 
+// Keep test ZIP checksums independent from the production CRC utility so the tests cannot
+// accidentally validate an implementation against itself.
 const CRC_TABLE = (() => {
 	const table = new Uint32Array(256);
 	for (let n = 0; n < 256; n++) {
@@ -62,6 +66,7 @@ const CRC_TABLE = (() => {
 	return table;
 })();
 
+// Compute the independent CRC-32 written into synthetic ZIP headers and used in expectations.
 function crc32(bytes: Uint8Array): number {
 	let crc = 0xffffffff;
 	for (let i = 0; i < bytes.length; i++) {
@@ -70,10 +75,12 @@ function crc32(bytes: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0;
 }
 
+// Encode the little-endian integers used by ZIP headers and directory records.
 const u16 = (n: number): Uint8Array => Uint8Array.from([n & 0xff, (n >>> 8) & 0xff]);
 const u32 = (n: number): Uint8Array =>
 	Uint8Array.from([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]);
 
+// Join binary record fragments into headers, descriptors, directories, or a complete archive.
 function concat(parts: Uint8Array[]): Uint8Array {
 	const total = parts.reduce((sum, p) => sum + p.length, 0);
 	const out = new Uint8Array(total);
@@ -85,6 +92,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 	return out;
 }
 
+// Produce a genuine raw-DEFLATE payload for ZIP compression method 8 without a test dependency.
 async function deflateRaw(data: Uint8Array): Promise<Uint8Array> {
 	const stream = new Blob([data as unknown as BlobPart])
 		.stream()
@@ -107,16 +115,20 @@ interface ZipOptions {
 	centralComment?: number;
 	centralCompressedSize?: number;
 	centralUncompressedSize?: number;
+	centralCrc32?: number;
 	centralLocalOffset?: number;
+	/** replace the encoded payload while retaining metadata derived from `content` */
+	payloadOverride?: Uint8Array;
 	/** replace the payload with non-deflate garbage */
 	corruptPayload?: boolean;
 }
 
+// Build a minimal single-entry ZIP whose individual fields can be overridden for hostile cases.
 async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 	const enc = new TextEncoder();
 	const raw = enc.encode(o.content);
 	const method = o.method ?? 8;
-	let payload = method === 8 ? await deflateRaw(raw) : raw;
+	let payload = o.payloadOverride ?? (method === 8 ? await deflateRaw(raw) : raw);
 	if (o.corruptPayload) payload = Uint8Array.from([0xff, 0xff, 0xff, 0xff]);
 	const nameBytes = enc.encode(o.name);
 	const crc = crc32(raw);
@@ -159,7 +171,7 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 		u16(method),
 		u16(0),
 		u16(0x21),
-		u32(crc),
+		u32(o.centralCrc32 ?? crc),
 		u32(o.centralCompressedSize ?? payload.length),
 		u32(o.centralUncompressedSize ?? raw.length),
 		u16(nameBytes.length),
@@ -189,6 +201,7 @@ async function buildZip(o: ZipOptions): Promise<Uint8Array> {
 // Bytes in the fixed EOCD record; an optional ZIP comment follows these 22 bytes.
 const EOCD_FIXED_SIZE = 22;
 
+// Clone an archive and alter one 16-bit EOCD field for disk, count, and sentinel tests.
 function patchEocdU16(bytes: Uint8Array, fieldOffset: number, value: number): Uint8Array {
 	const copy = bytes.slice();
 	const eocd = copy.length - EOCD_FIXED_SIZE;
@@ -200,6 +213,7 @@ function patchEocdU16(bytes: Uint8Array, fieldOffset: number, value: number): Ui
 	return copy;
 }
 
+// Clone an archive and alter one 32-bit EOCD field for size, offset, and sentinel tests.
 function patchEocdU32(bytes: Uint8Array, fieldOffset: number, value: number): Uint8Array {
 	const copy = bytes.slice();
 	const eocd = copy.length - EOCD_FIXED_SIZE;
@@ -211,6 +225,7 @@ function patchEocdU32(bytes: Uint8Array, fieldOffset: number, value: number): Ui
 	return copy;
 }
 
+// Read a valid 32-bit EOCD value so a corruption can be derived without hard-coded values.
 function readEocdU32(bytes: Uint8Array, fieldOffset: number): number {
 	const eocd = bytes.length - EOCD_FIXED_SIZE;
 	return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
@@ -219,6 +234,7 @@ function readEocdU32(bytes: Uint8Array, fieldOffset: number): number {
 	);
 }
 
+// Mark the central entry as belonging to another disk to exercise multi-disk rejection.
 function patchCentralDiskStart(bytes: Uint8Array, value: number): Uint8Array {
 	const copy = bytes.slice();
 	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
@@ -228,6 +244,7 @@ function patchCentralDiskStart(bytes: Uint8Array, value: number): Uint8Array {
 	return copy;
 }
 
+// Insert a declared central-directory byte that is not a valid entry record.
 function addDeclaredCentralTrailingByte(bytes: Uint8Array): Uint8Array {
 	const oldEocd = bytes.length - EOCD_FIXED_SIZE;
 	const oldSize = readEocdU32(bytes, 12);
@@ -240,6 +257,7 @@ function addDeclaredCentralTrailingByte(bytes: Uint8Array): Uint8Array {
 	return copy;
 }
 
+// Forge internally consistent counts and size that hide all but the first physical entry.
 function declareOnlyFirstCentralEntry(bytes: Uint8Array): Uint8Array {
 	const copy = bytes.slice();
 	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
@@ -255,6 +273,7 @@ function declareOnlyFirstCentralEntry(bytes: Uint8Array): Uint8Array {
 	return copy;
 }
 
+// Add an EOCD-shaped ZIP comment to ensure the backward scan does not accept the fake record.
 function appendFakeEmptyEocdAsComment(bytes: Uint8Array): Uint8Array {
 	const oldEocd = bytes.length - EOCD_FIXED_SIZE;
 	const fakeEocd = concat([
@@ -272,18 +291,78 @@ function appendFakeEmptyEocdAsComment(bytes: Uint8Array): Uint8Array {
 	return copy;
 }
 
-function expectOpenZipError(bytes: Uint8Array, code: XlsxErrorCode, message?: RegExp): void {
-	try {
-		openZip(bytes);
-	} catch (error) {
-		if (!(error instanceof XlsxError)) throw error;
-		expect(error.code).toBe(code);
-		if (message !== undefined) expect(error.message).toMatch(message);
-		return;
-	}
-	throw new Error(`expected openZip to throw ${code}`);
+// Assert that archive opening fails through the public typed-error contract, with no manual catch.
+async function expectOpenZipError(
+	bytes: Uint8Array,
+	code: XlsxErrorCode,
+	message?: RegExp,
+): Promise<void> {
+	const opening = Promise.resolve().then(() => openZip(bytes));
+	await expect(opening).rejects.toBeInstanceOf(XlsxError);
+	await expect(opening).rejects.toMatchObject({
+		code,
+		...(message === undefined ? {} : { message: expect.stringMatching(message) }),
+	});
 }
 
+// Drain and join streamed chunks; reaching natural EOF also triggers final size and CRC checks.
+async function collectChunks(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+	const parts: Uint8Array[] = [];
+	let total = 0;
+	for await (const chunk of chunks) {
+		parts.push(chunk);
+		total += chunk.byteLength;
+	}
+	const out = new Uint8Array(total);
+	let offset = 0;
+	for (const part of parts) {
+		out.set(part, offset);
+		offset += part.byteLength;
+	}
+	return out;
+}
+
+// Reuse the real openZip option type so test helpers stay aligned with the production API.
+type OpenZipOptions = Parameters<typeof openZip>[1];
+
+// Require buffered and fully consumed streaming reads to reject the same malformed entry.
+async function expectReadAndStreamError(
+	bytes: Uint8Array,
+	name: string,
+	options: OpenZipOptions,
+	code: XlsxErrorCode,
+): Promise<void> {
+	await expect(openZip(bytes, options).read(name)).rejects.toMatchObject({ code });
+	await expect(collectChunks(openZip(bytes, options).readStream(name))).rejects.toMatchObject({
+		code,
+	});
+}
+
+// Build a deterministic uncompressed DEFLATE block whose bit-flipped data remains decodable.
+function rawStoredDeflate(data: Uint8Array): Uint8Array {
+	if (data.byteLength > 0xffff) throw new Error("test DEFLATE block is too large");
+	return concat([
+		Uint8Array.of(0x01),
+		u16(data.byteLength),
+		u16(~data.byteLength & 0xffff),
+		data,
+	]);
+}
+
+// Flip only a payload bit, leaving ZIP sizes and headers intact so CRC is the isolated detector.
+function flipEntryPayloadByte(bytes: Uint8Array, payloadOffset: number): Uint8Array {
+	const copy = bytes.slice();
+	const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+	const nameLength = view.getUint16(26, true);
+	const extraLength = view.getUint16(28, true);
+	const byteOffset = 30 + nameLength + extraLength + payloadOffset;
+	const value = copy[byteOffset];
+	if (value === undefined) throw new Error("test payload offset is out of bounds");
+	copy[byteOffset] = value ^ 1;
+	return copy;
+}
+
+// Write the test's safe integer values as little-endian ZIP64 fields with a zero high word.
 function setU64(view: DataView, offset: number, value: number): void {
 	view.setUint32(offset, value, true);
 	view.setUint32(offset + 4, 0, true);
@@ -401,6 +480,13 @@ describe("openZip — deflate and real-world layouts", () => {
 			/corrupt zip: failed to inflate bad\.xml/,
 		);
 		await expect(zip.read("bad.xml")).rejects.toMatchObject({ code: "corrupt-zip" });
+		// The streaming inflater owns the same runtime-error boundary as the buffered inflater.
+		await expect(collectChunks(zip.readStream("bad.xml"))).rejects.toThrow(
+			/corrupt zip: failed to inflate bad\.xml/,
+		);
+		await expect(collectChunks(zip.readStream("bad.xml"))).rejects.toMatchObject({
+			code: "corrupt-zip",
+		});
 	});
 
 	it("returns empty bytes for a zero-length deflate entry", async () => {
@@ -417,7 +503,7 @@ describe("openZip — deflate and real-world layouts", () => {
 
 	it("rejects ZIP64 archives with an explicit error", async () => {
 		const zip = await buildZip({ name: "p.xml", content: "x", centralLocalOffset: 0xffffffff });
-		expectOpenZipError(zip, "unsupported", /ZIP64/);
+		await expectOpenZipError(zip, "unsupported", /ZIP64/);
 	});
 
 	it("rejects a part whose declared size exceeds maxPartBytes", async () => {
@@ -439,7 +525,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		["total entries", 10],
 	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(patchEocdU16(valid, offset, 0xffff), "unsupported", /ZIP64/);
+		await expectOpenZipError(patchEocdU16(valid, offset, 0xffff), "unsupported", /ZIP64/);
 	});
 
 	it.each([
@@ -447,7 +533,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		["central-directory offset", 16],
 	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(patchEocdU32(valid, offset, 0xffffffff), "unsupported", /ZIP64/);
+		await expectOpenZipError(patchEocdU32(valid, offset, 0xffffffff), "unsupported", /ZIP64/);
 	});
 
 	// Any disk metadata means the package is split across files. Returning its local subset would
@@ -457,17 +543,17 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		["central-directory start disk", 6],
 	])("rejects a nonzero EOCD %s field", async (_field, offset) => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(patchEocdU16(valid, offset, 1), "unsupported", /multi-disk/);
+		await expectOpenZipError(patchEocdU16(valid, offset, 1), "unsupported", /multi-disk/);
 	});
 
 	it("rejects unequal per-disk and total EOCD entry counts", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(patchEocdU16(valid, 8, 0), "unsupported", /multi-disk/);
+		await expectOpenZipError(patchEocdU16(valid, 8, 0), "unsupported", /multi-disk/);
 	});
 
 	it("rejects a central-directory entry stored on another disk", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(patchCentralDiskStart(valid, 1), "unsupported", /multi-disk/);
+		await expectOpenZipError(patchCentralDiskStart(valid, 1), "unsupported", /multi-disk/);
 	});
 
 	// The EOCD size/offset pair defines the only bytes the entry walker may consume. These mutations
@@ -481,18 +567,18 @@ describe("openZip — central-directory validation (F11.2)", () => {
 			centralComment: 2,
 		});
 		const realSize = readEocdU32(valid, 12);
-		expectOpenZipError(patchEocdU32(valid, 12, realSize - 1), "corrupt-zip");
+		await expectOpenZipError(patchEocdU32(valid, 12, realSize - 1), "corrupt-zip");
 	});
 
 	it("rejects a declared central-directory span that overlaps the EOCD", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
 		const realSize = readEocdU32(valid, 12);
-		expectOpenZipError(patchEocdU32(valid, 12, realSize + 1), "corrupt-zip");
+		await expectOpenZipError(patchEocdU32(valid, 12, realSize + 1), "corrupt-zip");
 	});
 
 	it("rejects trailing bytes inside the declared central-directory span", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(addDeclaredCentralTrailingByte(valid), "corrupt-zip");
+		await expectOpenZipError(addDeclaredCentralTrailingByte(valid), "corrupt-zip");
 	});
 
 	it("rejects a shifted central-directory offset even when the declared end is unchanged", async () => {
@@ -500,7 +586,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		const realOffset = readEocdU32(valid, 16);
 		const realSize = readEocdU32(valid, 12);
 		const shifted = patchEocdU32(patchEocdU32(valid, 16, realOffset - 1), 12, realSize + 1);
-		expectOpenZipError(shifted, "corrupt-zip");
+		await expectOpenZipError(shifted, "corrupt-zip");
 	});
 
 	// Entry counts must agree with the physical directory. The second mutation shrinks count and
@@ -508,20 +594,20 @@ describe("openZip — central-directory validation (F11.2)", () => {
 	it("rejects a zero entry count that would silently discard a declared directory", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
 		const zeroCounts = patchEocdU16(patchEocdU16(valid, 8, 0), 10, 0);
-		expectOpenZipError(zeroCounts, "corrupt-zip");
+		await expectOpenZipError(zeroCounts, "corrupt-zip");
 	});
 
 	it("rejects consistent forged metadata that hides later central-directory entries", async () => {
 		const valid = await loadFixture("basic.xlsx");
 		expect(openZip(valid).entries.size).toBeGreaterThan(1);
-		expectOpenZipError(declareOnlyFirstCentralEntry(valid), "corrupt-zip");
+		await expectOpenZipError(declareOnlyFirstCentralEntry(valid), "corrupt-zip");
 	});
 
 	// Both the real and fake EOCD signatures land at valid comment boundaries. Choosing the fake one
 	// must fail closed because its empty directory does not immediately precede that record.
 	it("fails closed when an EOCD-shaped comment suffix would hide every entry", async () => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		expectOpenZipError(appendFakeEmptyEocdAsComment(valid), "corrupt-zip");
+		await expectOpenZipError(appendFakeEmptyEocdAsComment(valid), "corrupt-zip");
 	});
 
 	it("accepts a valid empty classic ZIP", () => {
@@ -540,7 +626,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 
 	// This is a real 65,536-entry ZIP64 layout, not only a forged EOCD field. It proves the reader
 	// rejects the writer's shared classic-ZIP boundary before silently dropping the final entry.
-	it("rejects a genuine archive above the shared classic-ZIP entry ceiling", () => {
+	it("rejects a genuine archive above the shared classic-ZIP entry ceiling", async () => {
 		const zip64 = buildOversizedZip64();
 		const eocd = zip64.length - EOCD_FIXED_SIZE;
 		const view = new DataView(zip64.buffer);
@@ -550,7 +636,130 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		expect(view.getUint32(zip64Eocd + 36, true)).toBe(0);
 		expect(view.getUint32(eocd - 20, true)).toBe(0x07064b50);
 		expect(view.getUint16(eocd + 10, true)).toBe(0xffff);
-		expectOpenZipError(zip64, "unsupported", /ZIP64/);
+		await expectOpenZipError(zip64, "unsupported", /ZIP64/);
+	});
+});
+
+describe("openZip — completed-entry integrity (F11.3)", () => {
+	it("reads the central CRC and verifies valid stored, deflated, and data-descriptor entries", async () => {
+		const enc = new TextEncoder();
+		for (const options of [
+			{ name: "stored.txt", content: "stored checksum", method: 0 },
+			{ name: "deflated.txt", content: "deflated checksum", method: 8 },
+			{ name: "descriptor.txt", content: "descriptor checksum", dataDescriptor: true },
+		]) {
+			const bytes = await buildZip(options);
+			const zip = openZip(bytes, { verifyChecksums: true });
+			expect(zip.entries.get(options.name)?.crc32).toBe(crc32(enc.encode(options.content)));
+			expect(decode(await zip.read(options.name))).toBe(options.content);
+			expect(decode(await collectChunks(zip.readStream(options.name)))).toBe(options.content);
+		}
+	});
+
+	it.each([
+		{ kind: "stored", method: 0, flipOffset: 0 },
+		{ kind: "deflated", method: 8, flipOffset: 5 },
+	])("detects a bit-flipped $kind payload only when CRC verification is enabled", async ({
+		kind,
+		method,
+		flipOffset,
+	}) => {
+		const enc = new TextEncoder();
+		const name = `${kind}.txt`;
+		const content = `${kind} payload`;
+		const raw = enc.encode(content);
+		const bytes = await buildZip({
+			name,
+			content,
+			method,
+			...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
+		});
+		const damaged = flipEntryPayloadByte(bytes, flipOffset);
+
+		// CRC verification is deliberately opt-in for 1.0.1: the same-size corruption remains
+		// readable by default, preserving the previous behavior.
+		expect(await openZip(damaged).read(name)).not.toEqual(raw);
+		expect(await collectChunks(openZip(damaged).readStream(name))).not.toEqual(raw);
+
+		await expectReadAndStreamError(damaged, name, { verifyChecksums: true }, "corrupt-zip");
+	});
+
+	it("does not treat an expected CRC of zero as verification being disabled", async () => {
+		const name = "zero-crc.txt";
+		const bytes = await buildZip({ name, content: "nonempty", method: 0, centralCrc32: 0 });
+		expect(decode(await openZip(bytes).read(name))).toBe("nonempty");
+		await expectReadAndStreamError(bytes, name, { verifyChecksums: true }, "corrupt-zip");
+	});
+
+	it("rejects deflate output that ends before its declared uncompressed size", async () => {
+		const name = "short.xml";
+		const content = "short output";
+		const bytes = await buildZip({
+			name,
+			content,
+			centralUncompressedSize: content.length + 1,
+		});
+		await expectReadAndStreamError(bytes, name, undefined, "corrupt-zip");
+		await expectReadAndStreamError(bytes, name, { verifyChecksums: true }, "corrupt-zip");
+	});
+
+	it("rejects a stored entry whose compressed and uncompressed sizes disagree", async () => {
+		const name = "stored.bin";
+		const bytes = await buildZip({
+			name,
+			content: "stored bytes",
+			method: 0,
+			centralUncompressedSize: 13,
+		});
+		await expectReadAndStreamError(bytes, name, undefined, "corrupt-zip");
+		await expectReadAndStreamError(bytes, name, { verifyChecksums: true }, "corrupt-zip");
+	});
+
+	it("checks the zero-compressed deflate shortcut against the declared output size", async () => {
+		const name = "empty.xml";
+		const bytes = await buildZip({
+			name,
+			content: "",
+			centralCompressedSize: 0,
+			centralUncompressedSize: 1,
+		});
+		await expectReadAndStreamError(bytes, name, undefined, "corrupt-zip");
+	});
+
+	it("verifies genuine empty stored and deflated entries", async () => {
+		for (const method of [0, 8]) {
+			const name = `empty-${method}.xml`;
+			const bytes = await buildZip({ name, content: "", method });
+			const zip = openZip(bytes, { verifyChecksums: true });
+			expect(await zip.read(name)).toEqual(new Uint8Array(0));
+			expect(await collectChunks(zip.readStream(name))).toEqual(new Uint8Array(0));
+		}
+	});
+
+	it.each([
+		{ kind: "stored", method: 0, flipOffset: 0 },
+		{ kind: "deflated", method: 8, flipOffset: 5 },
+	])("makes no checksum claim when a $kind stream is cancelled before EOF", async ({
+		kind,
+		method,
+		flipOffset,
+	}) => {
+		const name = `cancel-${kind}.txt`;
+		const content = `cancel ${kind}`;
+		const raw = new TextEncoder().encode(content);
+		const valid = await buildZip({
+			name,
+			content,
+			method,
+			...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
+		});
+		const damaged = flipEntryPayloadByte(valid, flipOffset);
+		expect(() => openZip(damaged, { verifyChecksums: true })).not.toThrow();
+
+		const stream = openZip(damaged, { verifyChecksums: true }).readStream(name);
+		const first = await stream.next();
+		expect(first.done).toBe(false);
+		await expect(stream.return(undefined)).resolves.toMatchObject({ done: true });
 	});
 });
 
@@ -593,21 +802,16 @@ describe("openZip — decompression-bomb defaults (F9.7)", () => {
 		});
 		const guarded = openZip(bytes, { maxPartBytes: 1000 });
 		await expect(guarded.read("stored.bin")).rejects.toMatchObject({ code: "part-too-large" });
-		// Without the tight cap it still reads its real bytes.
+		// Without the tight cap, F11.3 reaches EOF and rejects the lying size as corrupt.
 		const open = openZip(bytes);
-		expect((await open.read("stored.bin")).length).toBe(5000);
+		await expect(open.read("stored.bin")).rejects.toMatchObject({ code: "corrupt-zip" });
 	});
 });
 
 describe("openZip — entry policy", () => {
 	it("rejects a zip with duplicate entry names", async () => {
 		const bytes = await loadFixture("edge-duplicate-entry.xlsx");
-		expect(() => openZip(bytes)).toThrow(/duplicate entry name/);
-		try {
-			openZip(bytes);
-		} catch (e) {
-			expect((e as XlsxError).code).toBe("corrupt-zip");
-		}
+		await expectOpenZipError(bytes, "corrupt-zip", /duplicate entry name/);
 	});
 
 	it("skips directory placeholder entries, keeping real parts", async () => {
@@ -618,26 +822,12 @@ describe("openZip — entry policy", () => {
 });
 
 describe("readStream", () => {
-	async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
-		const parts: Uint8Array[] = [];
-		let total = 0;
-		for await (const chunk of chunks) {
-			parts.push(chunk);
-			total += chunk.byteLength;
-		}
-		const out = new Uint8Array(total);
-		let offset = 0;
-		for (const part of parts) {
-			out.set(part, offset);
-			offset += part.byteLength;
-		}
-		return out;
-	}
-
 	it("streams the same bytes as read() for every part", async () => {
 		const zip = openZip(await loadFixture("basic.xlsx"));
 		for (const part of PARTS) {
-			expect(decode(await collect(zip.readStream(part)))).toBe(decode(await zip.read(part)));
+			expect(decode(await collectChunks(zip.readStream(part)))).toBe(
+				decode(await zip.read(part)),
+			);
 		}
 	});
 });

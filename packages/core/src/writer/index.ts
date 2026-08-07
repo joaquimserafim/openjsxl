@@ -3,7 +3,7 @@
 // re-exported from the package index is writeXlsx, streamXlsx, the bridge (workbookToInput), and
 // the input types.
 
-export { crc32 } from "./crc32";
+export { crc32 } from "../utils/crc32";
 export { deflateRaw } from "./deflate";
 export { workbookToInput } from "./from-workbook";
 export { streamXlsx } from "./stream";
