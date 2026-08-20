@@ -46,6 +46,7 @@ import type {
 } from "../types";
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
+import { directoryOf, relsPathFor } from "./opc-path";
 import {
 	type PrintSetup,
 	parseAutoFilter,
@@ -83,19 +84,6 @@ const REL_THEME = "/theme";
 // letter, not the "/"), so the legacy comment drawing is never mistaken for a picture drawing.
 const REL_DRAWING = "/drawing";
 const REL_TABLE = "/table";
-
-function directoryOf(path: string): string {
-	const slash = path.lastIndexOf("/");
-	return slash === -1 ? "" : path.slice(0, slash);
-}
-
-// The relationships for a part live in `<dir>/_rels/<file>.rels`.
-function relsPathFor(path: string): string {
-	const slash = path.lastIndexOf("/");
-	const dir = slash === -1 ? "" : path.slice(0, slash);
-	const file = slash === -1 ? path : path.slice(slash + 1);
-	return dir === "" ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`;
-}
 
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))
@@ -681,6 +669,7 @@ async function loadWorkbook(
 	// re-indexed against the sheets that actually loaded.
 	const sheets: Array<{ info: SheetInfo; path: string }> = [];
 	const rawToLoaded = new Map<number, number>();
+	const seenNames = new Set<string>();
 	for (let raw = 0; raw < workbookSheets.length; raw++) {
 		const entry = workbookSheets[raw];
 		if (entry === undefined) continue;
@@ -688,6 +677,14 @@ async function loadWorkbook(
 		if (rel === undefined || rel.targetMode === "External") continue;
 		const path = resolveTarget(workbookDir, rel.target);
 		if (!zip.has(path)) continue;
+		// parseWorkbook has already decoded CT_Sheet's ST_Xstring name. A malformed producer can
+		// therefore declare distinct wire spellings that collapse to the same logical (or same-case-
+		// folded) tab name, e.g. `A` and `_x0041_`. Match the writer's case-insensitive uniqueness
+		// rule and the reader's existing first-definition-wins lookup: keep the first READABLE sheet,
+		// drop later aliases, and leave them absent from rawToLoaded so scoped names reconcile below.
+		const nameKey = entry.name.toLowerCase();
+		if (seenNames.has(nameKey)) continue;
+		seenNames.add(nameKey);
 		rawToLoaded.set(raw, sheets.length);
 		sheets.push({
 			info: { name: entry.name, path, visible: entry.visible, state: entry.state },

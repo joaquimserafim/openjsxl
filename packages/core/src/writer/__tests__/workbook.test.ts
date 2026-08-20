@@ -88,6 +88,35 @@ describe("writeXlsx — value round-trips through openXlsx", () => {
 		expect(wb.sheet("Second").cell("A1").value).toBe(2);
 	});
 
+	it("protects escape-shaped sheet names on the wire and round-trips their logical names", async () => {
+		const bytes = await writeXlsx({
+			sheets: [
+				{ name: "_x0041_", rows: [[1]] },
+				{ name: "_x005F_x0041_", rows: [[2]] },
+				{ name: "R&D _x0041_", rows: [[3]] },
+			],
+			definedNames: [{ name: "_x0041_", refersTo: "'_x0041_'!A1" }],
+		});
+		const xml = new TextDecoder().decode(await openZip(bytes).read("xl/workbook.xml"));
+		expect(xml).toContain('<sheet name="_x005F_x0041_" sheetId="1" r:id="rId1"/>');
+		expect(xml).toContain('<sheet name="_x005F_x005F_x005F_x0041_" sheetId="2" r:id="rId2"/>');
+		expect(xml).toContain('<sheet name="R&amp;D _x005F_x0041_" sheetId="3" r:id="rId3"/>');
+		expect(xml).toContain(
+			"<definedName name=\"_x005F_x0041_\">'_x005F_x0041_'!A1</definedName>",
+		);
+
+		const wb = await openXlsx(bytes);
+		expect(wb.sheets.map((sheet) => sheet.name)).toEqual([
+			"_x0041_",
+			"_x005F_x0041_",
+			"R&D _x0041_",
+		]);
+		expect(wb.sheet("_x0041_").cell("A1").value).toBe(1);
+		expect(wb.sheet("_x005F_x0041_").cell("A1").value).toBe(2);
+		expect(wb.sheet("R&D _x0041_").cell("A1").value).toBe(3);
+		expect(wb.definedNames).toEqual([{ name: "_x0041_", refersTo: "'_x0041_'!A1" }]);
+	});
+
 	it("round-trips dates under the 1904 epoch", async () => {
 		const date = new Date(Date.UTC(2020, 0, 1));
 		const wb = await roundTrip({ sheets: [{ name: "S", rows: [[date]] }] }, { date1904: true });
@@ -113,6 +142,16 @@ describe("writeXlsx — value round-trips through openXlsx", () => {
 });
 
 describe("writeXlsx — structure", () => {
+	it("keeps the complete workbook XML exact for an ordinary sheet name", async () => {
+		const bytes = await writeXlsx({ sheets: [{ name: "S", rows: [[1]] }] });
+		const xml = new TextDecoder().decode(await openZip(bytes).read("xl/workbook.xml"));
+		expect(xml).toBe(
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+				'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+				'<sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>',
+		);
+	});
+
 	it("emits styles.xml only when a date is present", async () => {
 		const withDate = openZip(
 			await writeXlsx({ sheets: [{ name: "S", rows: [[new Date(Date.UTC(2020, 0, 1))]] }] }),
@@ -154,6 +193,15 @@ describe("writeXlsx — input validation (invalid-input)", () => {
 		expect(await code(() => writeXlsx({ sheets: [{ name: "a".repeat(32), rows: [] }] }))).toBe(
 			"invalid-input",
 		);
+	});
+
+	it("accepts a 31-character logical name even when ST_Xstring encoding makes its wire longer", async () => {
+		const name = `_x0041_${"a".repeat(24)}`;
+		expect(name).toHaveLength(31);
+		const bytes = await writeXlsx({ sheets: [{ name, rows: [[1]] }] });
+		const xml = new TextDecoder().decode(await openZip(bytes).read("xl/workbook.xml"));
+		expect(xml).toContain(`name="_x005F_x0041_${"a".repeat(24)}"`);
+		expect((await openXlsx(bytes)).sheets.map((sheet) => sheet.name)).toEqual([name]);
 	});
 
 	it("rejects forbidden characters in a sheet name", async () => {

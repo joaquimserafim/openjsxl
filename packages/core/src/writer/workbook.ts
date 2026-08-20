@@ -1,15 +1,14 @@
 import { XlsxError } from "../errors";
 import type { SheetState } from "../types";
+import { filterDatabaseName, validateDefinedNames } from "./defined-names";
 import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
-	filterDatabaseName,
 	packageRelsXml,
 	requireWorkbookObject,
 	sheetSideParts,
 	themeToEmit,
-	validateDefinedNames,
 	validateSheetMeta,
 	workbookRelsXml,
 	workbookXml,

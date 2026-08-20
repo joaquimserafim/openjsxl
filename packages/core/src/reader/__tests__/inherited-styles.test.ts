@@ -1,6 +1,8 @@
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import type { DecodeContext } from "../../ooxml";
+import { writeZip } from "../../writer/zip";
+import { openZip } from "../../zip";
 import { openXlsx, streamSheetRows } from "../workbook";
 import { parseCellStyles, readRows } from "../worksheet";
 
@@ -29,6 +31,27 @@ describe("parseCellStyles — effective style precedence", () => {
 		expect(styleOf(xml, "A1")).toBeUndefined(); // col 1, outside 2..3
 		expect(styleOf(xml, "B1")).toBe(7); // col 2, inside
 		expect(styleOf(xml, "D1")).toBeUndefined(); // col 4, outside
+	});
+
+	it("keeps the first covering column style when malformed ranges overlap", () => {
+		const xml = sheet(
+			'<cols><col min="1" max="2" style="7"/><col min="2" max="3" style="8"/></cols>' +
+				'<sheetData><row r="1"><c r="A1"/><c r="B1"/><c r="C1"/></row></sheetData>',
+		);
+		expect(styleOf(xml, "A1")).toBe(7);
+		expect(styleOf(xml, "B1")).toBe(7);
+		expect(styleOf(xml, "C1")).toBe(8);
+	});
+
+	it("clips defaults to Excel's grid without styling an out-of-grid ref", () => {
+		const xml = sheet(
+			'<cols><col min="-5" max="2" style="7"/><col min="16384" max="99999" style="8"/></cols>' +
+				'<sheetData><row r="1"><c r="A1"/><c r="B1"/><c r="XFD1"/><c r="XFE1"/></row></sheetData>',
+		);
+		expect(styleOf(xml, "A1")).toBe(7);
+		expect(styleOf(xml, "B1")).toBe(7);
+		expect(styleOf(xml, "XFD1")).toBe(8);
+		expect(styleOf(xml, "XFE1")).toBeUndefined();
 	});
 
 	it("inherits a row default only when customFormat is set", () => {
@@ -142,5 +165,40 @@ describe("inherited styles — end to end (col-row-styles.xlsx)", () => {
 		expect(byRef.get("B2")).toBe("date");
 		expect(byRef.get("B3")).toBe("date"); // cell s wins
 		expect(byRef.get("A3")).toBe("number"); // row percent is not a date
+	});
+
+	it("keeps a synthesized styled ref aligned across every public read path", async () => {
+		const source = openZip(await loadFixture("col-row-styles.xlsx"));
+		const decoder = new TextDecoder();
+		const encoder = new TextEncoder();
+		const parts: { name: string; data: Uint8Array }[] = [];
+		for (const name of source.entries.keys()) {
+			let data = await source.read(name);
+			if (name === "xl/worksheets/sheet1.xml") {
+				const xml = decoder.decode(data);
+				expect(xml).toContain('<c r="A1"><v>1</v></c><c r="B1">');
+				// Input: A1 followed by a cell without `r`; output: the second cell is synthesized as B1.
+				data = encoder.encode(xml.replace('<c r="B1">', "<c>"));
+			}
+			parts.push({ name, data });
+		}
+		const bytes = await writeZip(parts);
+		const sheet = (await openXlsx(bytes)).sheet("Sheet1");
+
+		expect(sheet.cell("B1").type).toBe("date");
+		expect(sheet.style("B1")?.numberFormat).toBe("mm-dd-yy");
+		expect(sheet.numberFormat("B1")).toBe("mm-dd-yy");
+
+		const buffered = new Map<string, string>();
+		for await (const row of sheet.rows()) {
+			for (const cell of row.cells) buffered.set(cell.ref, cell.type);
+		}
+		const streamed = new Map<string, string>();
+		for await (const row of streamSheetRows(bytes)) {
+			for (const cell of row.cells) streamed.set(cell.ref, cell.type);
+		}
+		expect(buffered.get("B1")).toBe("date");
+		expect(streamed.get("B1")).toBe("date");
+		expect(streamed).toEqual(buffered);
 	});
 });

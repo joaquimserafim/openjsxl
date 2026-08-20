@@ -83,7 +83,7 @@ describe("writeXlsx — <definedNames> emission", () => {
 		expect(xml).toContain('<definedName name="Greeting">"a&lt;b&amp;c"</definedName>');
 	});
 
-	it("preserves CR, CRLF, and lone LF in refersTo element text", async () => {
+	it("stores defined-name CR as ST_Xstring while preserving CR, CRLF, and lone LF logically", async () => {
 		const refersTo = 'CONCAT("a\rb","c\r\nd","e\nf")';
 		const bytes = await writeXlsx({
 			sheets: [{ name: "Sheet1", rows: [["a"]] }],
@@ -91,10 +91,55 @@ describe("writeXlsx — <definedNames> emission", () => {
 		});
 		const xml = await workbookXmlOf(bytes);
 		expect(xml).toContain(
-			'<definedName name="Breaks">CONCAT("a&#13;b","c&#13;\nd","e\nf")</definedName>',
+			'<definedName name="Breaks">CONCAT("a_x000D_b","c_x000D_\nd","e\nf")</definedName>',
 		);
 		expect(xml).not.toContain("\r");
 		expect((await openXlsx(bytes)).definedNames).toEqual([{ name: "Breaks", refersTo }]);
+	});
+
+	it("ST_Xstring-encodes the complete refersTo formula and decodes it once on read", async () => {
+		const definedNames = [
+			{ name: "QuotedSheet", refersTo: "'_x0041_'!B4" },
+			{ name: "BareSheet", refersTo: "_x0041_!B4" },
+			{ name: "ThreeD", refersTo: "'_x0041_:_x0042_'!A1" },
+			{ name: "StringConstant", refersTo: '"_x0041_"' },
+			{ name: "NameReference", refersTo: "_x0041_+1" },
+			{ name: "Structured", refersTo: "Table1[_x0041_]" },
+			{ name: "External", refersTo: "'[1]_x0041_'!A1" },
+			{ name: "Overlap", refersTo: '"_x005F_x0041_"' },
+		];
+		const bytes = await writeXlsx({
+			sheets: [{ name: "_x0041_", rows: [["a"]] }],
+			definedNames,
+		});
+		const xml = await workbookXmlOf(bytes);
+		expect(xml).toContain("'_x005F_x0041_'!B4");
+		expect(xml).toContain("_x005F_x0041_!B4");
+		expect(xml).toContain("'_x005F_x0041_:_x005F_x0042_'!A1");
+		expect(xml).toContain('"_x005F_x0041_"');
+		expect(xml).toContain("_x005F_x0041_+1");
+		expect(xml).toContain("Table1[_x005F_x0041_]");
+		expect(xml).toContain("'[1]_x005F_x0041_'!A1");
+		expect(xml).toContain('"_x005F_x005F_x005F_x0041_"');
+		expect((await openXlsx(bytes)).definedNames).toEqual(definedNames);
+	});
+
+	it("bridges an escape-shaped formula without accumulating another protection layer", async () => {
+		// The public model always carries logical text. A read -> input -> write bridge must therefore
+		// reproduce one protected wire value, not double-encode the existing `_x005F_` prefix.
+		const definedNames = [{ name: "SubjectCell", refersTo: "'_x0041_'!B4" }];
+		const first = await writeXlsx({
+			sheets: [{ name: "_x0041_", rows: [["a"]] }],
+			definedNames,
+		});
+		const second = await writeXlsx(await workbookToInput(await openXlsx(first)));
+		const firstXml = await workbookXmlOf(first);
+		const secondXml = await workbookXmlOf(second);
+		expect(secondXml).toBe(firstXml);
+		expect(secondXml).toContain(
+			"<definedName name=\"SubjectCell\">'_x005F_x0041_'!B4</definedName>",
+		);
+		expect((await openXlsx(second)).definedNames).toEqual(definedNames);
 	});
 
 	it("emits nothing for hidden:false (default) — no hidden attribute", async () => {
@@ -143,7 +188,7 @@ describe("writeXlsx — round-trip through the reader (shared model)", () => {
 			sheets: [{ name: "Sheet1", rows: [["a"]] }],
 			definedNames,
 		});
-		// Emitted ENCODED so Excel/openpyxl decode back to the literal name (not the character "A").
+		// Emitted ENCODED so Excel and conforming consumers decode to the literal name, not "A".
 		expect(await workbookXmlOf(bytes)).toContain(
 			'<definedName name="_x005F_x0041_">Sheet1!$A$1</definedName>',
 		);

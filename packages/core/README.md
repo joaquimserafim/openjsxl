@@ -116,6 +116,14 @@ colors, document properties, pivot tables, external-workbook links, gradient fil
 `.xlsx` without them (`Workbook.macroEnabled` flags a macro-enabled source). Full list: the root
 README's fidelity table.
 
+Worksheet names, legacy Note authors, and complete logical `DefinedName.refersTo` formulas apply the
+same `ST_Xstring` collision protection: logical `_x0041_` stores as `_x005F_x0041_` and each complete
+field decodes once on read. Supply `refersTo` in logical stored form without a leading `=`; wire
+encoding is automatic. Files written by openjsxl 1.0.0 with a raw escape-shaped value in these fields
+are ambiguous—Excel reads `_x0041_` as `A`, and no reader can recover whether the producer intended
+the literal spelling. openjsxl follows OOXML/Excel without a heuristic legacy mode; openpyxl 3.1.5
+does not consistently apply this rule to these schema fields.
+
 ## Other formats (read-only)
 
 openjsxl writes `.xlsx`, but reads more: `openXlsb` (Excel Binary Workbook), `openOds`

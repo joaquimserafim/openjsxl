@@ -4,8 +4,9 @@
 // silently normalize to LF — U+FFFE/U+FFFF, lone surrogates) are stored as `_xHHHH_` — one UTF-16
 // code unit in hex — and a LITERAL substring that happens to look like an escape is protected by
 // escaping its own leading underscore: the data `_x0041_` is stored as `_x005F_x0041_`. Excel and
-// openpyxl both apply this on load/save, so a writer that emits the pattern verbatim silently
-// corrupts such data for every other consumer (F9.6).
+// conforming consumers apply this on load/save, so a writer that emits the pattern verbatim silently
+// corrupts such data for those consumers (F9.6). Some third-party libraries apply the convention
+// only to selected schema fields; interoperability follows the OOXML field type, not their coverage.
 //
 // The pair is single-sourced here for the SHARED-BOUNDS invariant: whatever character the reader
 // can now hand back (a decoded control char, even a lone surrogate a producer escaped), the
@@ -35,7 +36,7 @@ function isEscapeShape(s: string, i: number): boolean {
 /**
  * Decode `_xHHHH_` escapes in stored string content — a single left-to-right, NON-overlapping,
  * non-reentrant pass (a decoded `_x005F_` yields a literal `_` that is never re-examined, so
- * `_x005F_x0041_` decodes to the data `_x0041_`, exactly as Excel and openpyxl's `re.sub` do).
+ * `_x005F_x0041_` decodes to the data `_x0041_`, matching Excel's single-pass behavior).
  * Text with no escape comes back unchanged (identity).
  */
 export function decodeXstring(s: string): string {

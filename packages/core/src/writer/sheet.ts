@@ -42,7 +42,6 @@ import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../
 import { encodeXstring } from "../ooxml/xstring";
 import type {
 	ColumnProps,
-	Comment,
 	ConditionalFormatting,
 	DataValidation,
 	DataValidationType,
@@ -52,7 +51,9 @@ import type {
 	SheetImage,
 	TableInfo,
 } from "../types";
+import { commentsParts } from "./comments";
 import type { MediaRegistry } from "./images";
+import { checkKeys, sheetInvalid, shortened } from "./sheet-validation";
 import { colorXml, type Fail, type StyleRegistry, validateColor } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
 import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, preserveAttr } from "./xml";
@@ -276,22 +277,6 @@ function renderFormulaCell(
 // and the accepted bounds are exactly what the reader's geometry accessors can produce — so the
 // bridge's geometry always writes.
 
-function sheetInvalid(sheetName: string, message: string): never {
-	throw new XlsxError("invalid-input", `sheet "${sheetName}": ${message}`);
-}
-
-function checkKeys(
-	sheetName: string,
-	what: string,
-	obj: Record<string, unknown>,
-	allowed: readonly string[],
-): void {
-	for (const key of Object.keys(obj)) {
-		if (!allowed.includes(key))
-			sheetInvalid(sheetName, `${what} has an unknown property "${key}"`);
-	}
-}
-
 // <cols> — one <col> per entry that survives normalization ({hidden: false} alone melts away).
 function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined): string {
 	if (columns === undefined) return "";
@@ -420,8 +405,6 @@ function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): strin
 // ── Structural metadata (F4.6): merges + hyperlinks — validation + emission ────────────────────
 // Both blocks live AFTER </sheetData> (schema order: … sheetData, mergeCells, …, hyperlinks, …).
 // Like geometry, unused blocks are empty strings, so a metadata-free sheet keeps its exact bytes.
-
-const shortened = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s);
 
 interface MergeRect {
 	readonly ref: string;
@@ -1408,120 +1391,6 @@ function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
 		out += `<formula>${escapeText(stored)}</formula>`;
 	}
 	return out;
-}
-
-// ── Comments (F5.2): xl/commentsN.xml + legacy VML drawing — validation + emission ─────────────
-// Excel renders a comment only when the sheet carries BOTH parts: the comments part (an authors
-// table + a commentList) AND a legacy VML drawing with one hidden note shape per comment. A
-// comments part alone reads back through a tolerant parser but shows nothing in Excel — which is
-// why openpyxl always writes both. We emit both from one validated list. Validation mirrors
-// hyperlinks: a single-cell canonical `ref` (no ranges), every caller property read exactly once
-// (TOCTOU), unknown keys rejected, author/text gated by isXmlSafe. Authors form a
-// first-occurrence-ordered unique table; a comment with no author shares one empty-string author
-// entry (matching openpyxl). Unused ⇒ nothing emitted, so byte-identity holds for comment-free
-// sheets.
-
-// The VML shell is constant; only the note shapes vary. Standard v/o/x prefixes; the box style,
-// fill, and shadow are copied verbatim from openpyxl's proven-rendering output.
-const VML_HEAD =
-	'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">' +
-	'<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
-	'<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">' +
-	'<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>';
-const VML_TAIL = "</xml>";
-
-// One hidden note shape. `index` gives a unique shape id (Excel's ids start at _x0000_s1025) and a
-// z-index; `row0`/`col0` are the 0-based cell coordinates. openpyxl emits no explicit <x:Anchor> —
-// Excel positions the box from Row/Column plus the fixed margin style — so those coordinates ARE
-// the anchor arithmetic.
-function vmlShape(index: number, row0: number, col0: number): string {
-	return (
-		`<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202" ` +
-		`style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:144px;height:79px;z-index:${index + 1};visibility:hidden" ` +
-		'fillcolor="#ffffe1" o:insetmode="auto">' +
-		'<v:fill color2="#ffffe1"/><v:shadow color="black" obscured="t"/><v:path o:connecttype="none"/>' +
-		'<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
-		'<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:AutoFill>False</x:AutoFill>' +
-		`<x:Row>${row0}</x:Row><x:Column>${col0}</x:Column></x:ClientData></v:shape>`
-	);
-}
-
-interface CommentsParts {
-	readonly commentsXml: string;
-	readonly vmlXml: string;
-}
-
-// Validate the comments and build both parts, or `undefined` when the sheet has none.
-function commentsParts(
-	sheetName: string,
-	comments: readonly Comment[] | undefined,
-): CommentsParts | undefined {
-	if (comments === undefined) return undefined;
-	if (!Array.isArray(comments)) sheetInvalid(sheetName, "comments must be an array");
-	if (comments.length === 0) return undefined;
-	const authors: string[] = [];
-	const authorIndex = new Map<string, number>();
-	const items: {
-		readonly ref: string;
-		readonly authorId: number;
-		readonly text: string;
-		readonly row: number;
-		readonly col: number;
-	}[] = [];
-	for (let i = 0; i < comments.length; i++) {
-		const raw = comments[i] as unknown;
-		const what = `comments[${i}]`;
-		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
-		checkKeys(sheetName, what, raw, ["ref", "author", "text"]);
-		// A comment anchors to ONE cell — a range has no meaning (Excel writes a single-cell ref).
-		const ref = raw.ref;
-		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
-		const cell = parseCanonicalCell(ref);
-		if (cell === undefined) {
-			sheetInvalid(
-				sheetName,
-				`${what}.ref "${shortened(ref)}" is not a canonical A1 cell within Excel's grid`,
-			);
-		}
-		// text is required (the reader always yields one, possibly empty). Comment text is
-		// ST_Xstring content like cell strings: XML-unsafe characters and literal `_xHHHH_`
-		// look-alikes store via the escape (F9.6) instead of rejecting — clean text unchanged.
-		const rawText = raw.text;
-		if (typeof rawText !== "string") sheetInvalid(sheetName, `${what}.text must be a string`);
-		const text = encodeXstring(rawText);
-		// author is optional; an absent author shares the single empty-string author entry.
-		const rawAuthor = raw.author;
-		let key: string;
-		if (rawAuthor === undefined) key = "";
-		else {
-			if (typeof rawAuthor !== "string")
-				sheetInvalid(sheetName, `${what}.author must be a string`);
-			if (!isXmlSafe(rawAuthor)) {
-				sheetInvalid(
-					sheetName,
-					`${what}.author contains a character not allowed in XML (a control character or lone surrogate)`,
-				);
-			}
-			key = rawAuthor;
-		}
-		let id = authorIndex.get(key);
-		if (id === undefined) {
-			id = authors.length;
-			authors.push(key);
-			authorIndex.set(key, id);
-		}
-		items.push({ ref, authorId: id, text, row: cell.row, col: cell.col });
-	}
-	const authorsXml = authors.map((a) => `<author>${escapeText(a)}</author>`).join("");
-	const listXml = items
-		.map(
-			(c) =>
-				`<comment ref="${c.ref}" authorId="${c.authorId}" shapeId="0"><text><t${preserveAttr(c.text)}>${escapeText(c.text)}</t></text></comment>`,
-		)
-		.join("");
-	const commentsXml = `${XML_DECL}\n<comments xmlns="${NS_MAIN}"><authors>${authorsXml}</authors><commentList>${listXml}</commentList></comments>`;
-	const vmlXml = `${VML_HEAD}${items.map((c, j) => vmlShape(j, c.row - 1, c.col - 1)).join("")}${VML_TAIL}`;
-	return { commentsXml, vmlXml };
 }
 
 // ── Tables (F9.1) ──────────────────────────────────────────────────────────────────────────────

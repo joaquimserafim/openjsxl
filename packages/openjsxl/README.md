@@ -95,6 +95,14 @@ document properties, pivot tables, external links, and gradient fills are not ca
 macros** — an `.xlsm` reads but rewrites without them (`Workbook.macroEnabled` flags it). Full
 list: the project README's fidelity table.
 
+Worksheet names, legacy Note authors, and complete logical `DefinedName.refersTo` formulas use
+OOXML's `ST_Xstring` collision protection, so a logical literal `_x0041_` stores as
+`_x005F_x0041_` and each complete field decodes exactly once. Supply `refersTo` in logical stored
+form without a leading `=`; wire encoding is automatic. A raw escape-shaped field from openjsxl
+1.0.0 is inherently ambiguous (Excel reads `_x0041_` as `A`), so the reader follows OOXML/Excel
+without guessing or double-decoding; openpyxl 3.1.5 does not consistently apply this rule to these
+schema fields.
+
 **Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
 Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
 `Workbook`, and `detectSpreadsheetFormat(bytes)` routes by content (`'xlsx' | 'xlsb' | 'ods' |
@@ -264,7 +272,8 @@ is a pass-through. ([06](https://github.com/joaquimserafim/openjsxl/blob/main/ex
 The 1.0 fidelity types — each is the same record on the reader and the writer.
 ([14](https://github.com/joaquimserafim/openjsxl/blob/main/examples/14-names-autofilter-protection-print.mjs))
 
-- **`DefinedName`** `{ name, refersTo, localSheetId?, hidden? }` — a named range/constant (`refersTo` is stored form, no leading `=`).
+- **`DefinedName`** `{ name, refersTo, localSheetId?, hidden? }` — a named range/constant (`refersTo`
+  is logical stored form without a leading `=`; do not pre-encode `_xHHHH_` text).
 - **`SheetAutoFilter`** `{ ref }` — the filter range; the paired `_xlnm._FilterDatabase` is managed for you.
 - **`SheetProtection`** — `{ sheet?, objects?, scenarios?, formatCells?, …, password?, algorithmName?, hashValue?, saltValue?, spinCount? }`. Password material carried verbatim (never computed).
 - **`WorkbookProtection`** — `{ lockStructure?, lockWindows?, workbookPassword?, workbookAlgorithmName?, workbookHashValue?, workbookSaltValue?, workbookSpinCount? }`.

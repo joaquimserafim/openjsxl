@@ -140,6 +140,41 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		}
 	});
 
+	it("shares the exact ST_Xstring sheet-name and Note-author parts with the buffered writer", async () => {
+		const input: WorkbookInput = {
+			sheets: [
+				{
+					name: "_x0041_",
+					rows: [["x"]],
+					comments: [{ ref: "A1", author: "_x0041_", text: "note" }],
+				},
+			],
+			definedNames: [{ name: "_x0041_", refersTo: "'_x0041_'!A1" }],
+		};
+		const bufferedBytes = await writeXlsx(input);
+		const streamedBytes = await drain(streamXlsx(input));
+		const partText = async (bytes: Uint8Array, name: string): Promise<string> =>
+			new TextDecoder().decode(await openZip(bytes).read(name));
+		const bufferedWorkbook = await partText(bufferedBytes, "xl/workbook.xml");
+		const streamedWorkbook = await partText(streamedBytes, "xl/workbook.xml");
+		const bufferedComments = await partText(bufferedBytes, "xl/comments1.xml");
+		const streamedComments = await partText(streamedBytes, "xl/comments1.xml");
+		expect(streamedWorkbook).toBe(bufferedWorkbook);
+		expect(streamedComments).toBe(bufferedComments);
+		expect(streamedWorkbook).toContain('<sheet name="_x005F_x0041_"');
+		expect(streamedWorkbook).toContain(
+			"<definedName name=\"_x005F_x0041_\">'_x005F_x0041_'!A1",
+		);
+		expect(streamedComments).toContain("<author>_x005F_x0041_</author>");
+
+		const wb = await openXlsx(streamedBytes);
+		expect(wb.sheets.map((sheet) => sheet.name)).toEqual(["_x0041_"]);
+		expect(wb.sheet("_x0041_").comments).toEqual([
+			{ ref: "A1", author: "_x0041_", text: "note" },
+		]);
+		expect(wb.definedNames).toEqual([{ name: "_x0041_", refersTo: "'_x0041_'!A1" }]);
+	});
+
 	it("streams sync- and async-iterable rows equivalently to a materialized array", async () => {
 		const rows = [["a", 1], [2, "b"], [{ value: 3, style }]];
 		function* syncGen(): Generator<(typeof rows)[number]> {

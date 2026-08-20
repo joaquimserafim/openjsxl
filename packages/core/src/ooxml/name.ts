@@ -135,7 +135,8 @@ export function definedNameEmittable(
 ): boolean {
 	if (definedNameProblem(dn.name) !== undefined) return false;
 	const r = dn.refersTo;
-	// `refersTo` is a stored-form formula (no leading `=`); it must be non-empty, within Excel's
+	// `refersTo` is a decoded logical stored-form formula (no leading `=`); it must be non-empty,
+	// within Excel's
 	// formula ceiling, and XML-safe to survive as element text. A hostile file can inject a control
 	// char via a numeric char ref (`&#1;`), which the tokenizer decodes to an XML-illegal character.
 	if (r.length === 0 || r.length > MAX_FORMULA_LEN || r.startsWith("=") || !isXmlSafe(r)) {

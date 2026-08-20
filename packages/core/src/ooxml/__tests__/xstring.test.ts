@@ -6,7 +6,7 @@ import { decodeXstring, encodeXstring } from "../xstring";
 //   1. decode(encode(s)) === s for EVERY string (lossless storage round-trip);
 //   2. encode is the IDENTITY on strings with nothing to escape (byte-identity for clean files);
 //   3. decode is single-pass and non-reentrant (a decoded `_x005F_` is never re-examined) —
-//      matching Excel and openpyxl (`re.sub` semantics), which is what makes our bytes agree.
+//      matching Excel's behavior, which is what makes our stored bytes interoperable.
 
 describe("decodeXstring", () => {
 	it("decodes a control-char escape the way Excel does", () => {
@@ -18,6 +18,8 @@ describe("decodeXstring", () => {
 
 	it("accepts hex in either case, but only a lowercase x", () => {
 		expect(decodeXstring("_x000b_")).toBe("\x0B");
+		// Excel Online normalizes the protected-underscore quad to lowercase `f` on save-back.
+		expect(decodeXstring("_x005f_x0041_")).toBe("_x0041_");
 		expect(decodeXstring("_X000B_")).toBe("_X000B_"); // uppercase X is NOT an escape
 	});
 

@@ -2,27 +2,19 @@ import { XlsxError } from "../errors";
 import {
 	type CellRef,
 	type DecodeContext,
-	decodeCell,
 	decodeXstring,
 	formatRef,
 	MAX_COL,
 	MAX_COL_WIDTH,
 	MAX_FORMULA_LEN,
-	MAX_PAGE_MARGIN,
-	MAX_PAGE_SCALE,
-	MAX_PAGE_SETUP_UINT,
 	MAX_ROW,
 	MAX_ROW_HEIGHT,
-	MAX_SPIN_COUNT,
-	MIN_PAGE_SCALE,
 	parseCanonicalRange,
-	parseRef,
 	type Relationship,
 	rangeRunsForward,
 	translateFormula,
 } from "../ooxml";
 import type {
-	Cell,
 	ColumnProps,
 	Comment,
 	FreezePane,
@@ -37,7 +29,21 @@ import type {
 	SheetProtection,
 } from "../types";
 import { localName, relationshipId } from "../utils";
-import { createXmlStream, tokenize, type XmlToken } from "../xml";
+import { createXmlStream, tokenize } from "../xml";
+import { createRowAssembler } from "./row-assembler";
+import {
+	type HeaderFooterChild,
+	headerFooterFromAttributes,
+	isHeaderFooterChild,
+	type Mutable,
+	pageMarginsFromAttributes,
+	pageSetupFromAttributes,
+	printOptionsFromAttributes,
+	sheetProtectionFromAttributes,
+	trueAttribute,
+} from "./worksheet-attributes";
+import { effectiveStyle, rowDefaultStyleFromToken, safeColumn } from "./worksheet-cell";
+import { columnStyleFromToken, createColumnStyleResolver } from "./worksheet-column-styles";
 
 // `Row` is part of the public reader surface; its canonical home is ../types (shared across
 // formats, M7). Re-exported here so the worksheet parsers and reader/workbook.ts keep their imports.
@@ -57,302 +63,6 @@ export type { Row } from "../types";
 // structure, so this code must not corrupt a well-formed row because of a malformed
 // neighbour. A new `<row>`/`<c>` opening while one is still unclosed finalizes the open one
 // first, and a row left open at end-of-input (truncated file) is still emitted.
-
-function safeColumn(ref: string): number | undefined {
-	try {
-		return parseRef(ref).col;
-	} catch {
-		return undefined;
-	}
-}
-
-// A cell's format can be set at three levels, not just on the cell. `<c s>` is per-cell, but a
-// whole column can be formatted with `<col … style>` and a whole row with `<row s customFormat>`.
-// The effective style index resolves in this precedence (SpreadsheetML §18.3.1.13/.73/.4):
-//
-//     cell's own `s`  >  row default (customFormat)  >  column default (<col>)  >  style 0
-//
-// Without this, a date column whose cells omit `s` reads as plain numbers, and numberFormat()
-// returns the wrong code — the common case where a producer formats a column once instead of
-// per cell. All three levels are indices into the SAME cellXfs table, so the resolved index
-// drops straight into StyleTable.isDateStyle/formatCode with no further translation.
-
-// A column-default style: `<col … style>` applies to every cell in columns [min, max] that does
-// not set its own `s`. (`style` is the column's default cell format — an index into cellXfs.)
-interface ColumnStyle {
-	readonly min: number;
-	readonly max: number;
-	readonly style: number;
-}
-
-function columnStyleFromToken(attrs: Readonly<Record<string, string>>): ColumnStyle | undefined {
-	// A <col> with no `style` sets width/visibility only — it contributes no default format.
-	if (attrs.style === undefined) return undefined;
-	const style = Number(attrs.style);
-	const min = Number(attrs.min);
-	const max = Number(attrs.max);
-	if (!Number.isInteger(style) || !Number.isInteger(min) || !Number.isInteger(max))
-		return undefined;
-	return { min, max, style };
-}
-
-// A row's default style is honored ONLY when `customFormat="1"`. The spec is explicit: `<row>`'s
-// `s` is "only applied if the customFormat attribute is '1'". Writers routinely emit a bookkeeping
-// `s` on ordinary rows, so without this gate we would restyle cells the file never meant to format.
-function rowDefaultStyleFromToken(attrs: Readonly<Record<string, string>>): number | undefined {
-	if (attrs.customFormat !== "1" && attrs.customFormat !== "true") return undefined;
-	if (attrs.s === undefined) return undefined;
-	const s = Number(attrs.s);
-	return Number.isInteger(s) ? s : undefined;
-}
-
-// Resolve the precedence above for one cell. A present-but-unparseable cell `s` still counts as
-// "the cell declared its own style" — it opts out of inherited defaults and falls back to style 0,
-// rather than silently borrowing the row/column format.
-function effectiveStyle(
-	ownS: string | undefined,
-	rowDefault: number | undefined,
-	col: number | undefined,
-	columns: readonly ColumnStyle[],
-): number | undefined {
-	if (ownS !== undefined) {
-		const s = Number(ownS);
-		return Number.isInteger(s) ? s : undefined;
-	}
-	if (rowDefault !== undefined) return rowDefault;
-	if (col !== undefined) {
-		// First covering range wins. Ranges don't overlap in a valid file; first-match keeps
-		// resolution deterministic even if a malformed file declares a column twice.
-		const range = columns.find((c) => col >= c.min && col <= c.max);
-		if (range !== undefined) return range.style;
-	}
-	return undefined;
-}
-
-interface RowAssembler {
-	/** Advance the state machine by one token; returns any rows that completed. */
-	push(token: XmlToken): Row[];
-	/** Emit a row left open at end of input (truncated file). */
-	flush(): Row[];
-}
-
-function createRowAssembler(ctx: DecodeContext): RowAssembler {
-	let inSheetData = false;
-	let inRow = false;
-	let lastRow = 0;
-	let rowIndex = 0;
-	let cells: Cell[] = [];
-	let lastCol = 0;
-
-	// Column defaults from `<cols>` (which precedes `<sheetData>`, so it is fully seen before any
-	// cell) and the current row's default (customFormat) — both feed effectiveStyle for cells
-	// that omit their own `s`. See the ColumnStyle/effectiveStyle notes above.
-	const columns: ColumnStyle[] = [];
-	let rowDefault: number | undefined;
-
-	let inCell = false;
-	let cellRef = "";
-	let cellType: string | undefined;
-	let cellStyle: number | undefined; // the `s` attribute (index into cellXfs)
-	let cellIsInline = false; // type === 'inlineStr': value lives in <is>, not <v>
-	let cellValue = "";
-	let tBuf = ""; // raw text of the currently-open inline <t>, decoded as one unit on close
-	let hasValue = false; // the value channel's element was present (even if empty)
-	let inValue = false; // inside <v>
-	let inInline = false; // inside <is>
-	let textDepth = 0; // open <t> within <is>
-	let phoneticDepth = 0; // open <rPh>/<phoneticPr> within <is> (excluded from the value)
-
-	// An inline <t>'s raw text buffers until the element closes and decodes as ONE ST_Xstring
-	// escape context (F9.6) — per run, like shared strings, so an escape never straddles runs.
-	// Also flushed at cell finalize, so misnested markup (a missing </t>) drops no text.
-	const flushT = () => {
-		if (tBuf !== "") {
-			cellValue += decodeXstring(tBuf);
-			tBuf = "";
-		}
-	};
-
-	// Finalize the open cell into the current row. A no-op when no cell is open.
-	const flushCell = () => {
-		if (!inCell) return;
-		flushT();
-		// A cached formula string (`t="str"`, its <v> is ST_Xstring) decodes as one context —
-		// the single <v> element. Other <v> channels (numbers, booleans, errors, shared-string
-		// INDEXES) are not xstrings and stay verbatim.
-		const value = cellType === "str" ? decodeXstring(cellValue) : cellValue;
-		cells.push(
-			decodeCell(
-				{
-					ref: cellRef,
-					type: cellType,
-					value: hasValue ? value : undefined,
-					style: cellStyle,
-				},
-				ctx,
-			),
-		);
-		inCell = false;
-	};
-
-	function push(token: XmlToken): Row[] {
-		const out: Row[] = [];
-
-		if (token.kind === "open") {
-			const name = localName(token.name);
-
-			if (name === "sheetData") {
-				if (!token.selfClosing) inSheetData = true;
-				return out;
-			}
-			// `<col>` lives in `<cols>`, a sibling that precedes `<sheetData>` — capture its
-			// default style before the inSheetData guard below would skip it.
-			if (name === "col") {
-				const cs = columnStyleFromToken(token.attrs);
-				if (cs !== undefined) columns.push(cs);
-				return out;
-			}
-			if (!inSheetData) return out;
-
-			if (name === "row") {
-				flushCell();
-				if (inRow) out.push({ index: rowIndex, cells });
-				const r = token.attrs.r;
-				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
-				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
-				lastRow = rowIndex;
-				// A non-customFormat row overwrites this back to undefined — no stale carryover.
-				rowDefault = rowDefaultStyleFromToken(token.attrs);
-				cells = [];
-				lastCol = 0;
-				if (token.selfClosing) {
-					out.push({ index: rowIndex, cells });
-					inRow = false;
-				} else {
-					inRow = true;
-				}
-				return out;
-			}
-			if (!inRow) return out;
-
-			if (name === "c") {
-				flushCell();
-				const r = token.attrs.r;
-				// The cell's column index, needed to resolve a `<col>` default style. Known even
-				// when `r` is absent (positional: one past the previous cell).
-				let col: number | undefined;
-				if (r !== undefined) {
-					cellRef = r;
-					col = safeColumn(r);
-					if (col !== undefined) lastCol = col;
-				} else {
-					lastCol += 1;
-					col = lastCol;
-					cellRef = formatRef({ col: lastCol, row: rowIndex });
-				}
-				cellType = token.attrs.t;
-				// Effective style: cell `s` → row default → column default → style 0.
-				cellStyle = effectiveStyle(token.attrs.s, rowDefault, col, columns);
-				cellIsInline = cellType === "inlineStr";
-				cellValue = "";
-				tBuf = "";
-				hasValue = false;
-				inValue = false;
-				inInline = false;
-				textDepth = 0;
-				phoneticDepth = 0;
-				if (token.selfClosing) {
-					cells.push(
-						decodeCell(
-							{ ref: cellRef, type: cellType, value: undefined, style: cellStyle },
-							ctx,
-						),
-					);
-				} else {
-					inCell = true;
-				}
-				return out;
-			}
-			if (!inCell) return out;
-
-			// A cell's value lives in exactly one channel, picked by its type: inline strings
-			// in <is>/<t>, everything else in <v>. Gate on the type so a stray element from
-			// the other channel can't pollute the value. Mark the value present as soon as its
-			// element opens, so an explicit but empty <v></v> or <is><t></t></is> reads as ""
-			// rather than collapsing to a blank cell.
-			if (cellIsInline) {
-				if (name === "is") {
-					hasValue = true;
-					if (!token.selfClosing) inInline = true;
-				} else if (name === "t") {
-					if (inInline && !token.selfClosing) textDepth++;
-				} else if (name === "rPh" || name === "phoneticPr") {
-					if (inInline && !token.selfClosing) phoneticDepth++;
-				}
-			} else if (name === "v") {
-				hasValue = true;
-				if (!token.selfClosing) inValue = true;
-			}
-			return out;
-		}
-
-		if (token.kind === "text") {
-			const collect = cellIsInline
-				? inInline && textDepth > 0 && phoneticDepth === 0
-				: inValue;
-			if (inCell && collect) {
-				if (cellIsInline) tBuf += token.value;
-				else cellValue += token.value;
-				hasValue = true;
-			}
-			return out;
-		}
-
-		// close
-		const name = localName(token.name);
-		if (name === "sheetData") {
-			flushCell();
-			if (inRow) {
-				out.push({ index: rowIndex, cells });
-				inRow = false;
-			}
-			inSheetData = false;
-			return out;
-		}
-		if (name === "row") {
-			if (inRow) {
-				flushCell();
-				out.push({ index: rowIndex, cells });
-				inRow = false;
-			}
-			return out;
-		}
-		if (!inCell) return out;
-		if (name === "c") flushCell();
-		else if (name === "v") inValue = false;
-		else if (name === "is") inInline = false;
-		else if (name === "t") {
-			if (textDepth > 0) {
-				textDepth--;
-				if (textDepth === 0) flushT();
-			}
-		} else if (name === "rPh" || name === "phoneticPr") {
-			if (phoneticDepth > 0) phoneticDepth--;
-		}
-		return out;
-	}
-
-	function flush(): Row[] {
-		flushCell();
-		if (inRow) {
-			inRow = false;
-			return [{ index: rowIndex, cells }];
-		}
-		return [];
-	}
-
-	return { push, flush };
-}
 
 /**
  * The comments a worksheet carries. Comments live in a separate part (xl/commentsN.xml) that
@@ -415,7 +125,8 @@ export function parseComments(xml: string): Comment[] {
 			const name = localName(token.name);
 			if (name === "authors") inAuthors = false;
 			else if (name === "author" && authorText !== undefined) {
-				authors.push(authorText);
+				// Decode the complete ST_Xstring once, after all XML text tokens have been joined.
+				authors.push(decodeXstring(authorText));
 				authorText = undefined;
 			} else if (name === "t") {
 				if (tDepth > 0) {
@@ -466,7 +177,7 @@ export function parseDimension(xml: string): string | undefined {
  */
 export function parseCellStyles(xml: string): Map<string, number> {
 	const styles = new Map<string, number>();
-	const columns: ColumnStyle[] = [];
+	const columns = createColumnStyleResolver();
 	let rowDefault: number | undefined;
 	let lastRow = 0;
 	let rowIndex = 0;
@@ -476,7 +187,7 @@ export function parseCellStyles(xml: string): Map<string, number> {
 		const name = localName(token.name);
 		if (name === "col") {
 			const cs = columnStyleFromToken(token.attrs);
-			if (cs !== undefined) columns.push(cs);
+			if (cs !== undefined) columns.add(cs);
 			continue;
 		}
 		if (name === "row") {
@@ -677,34 +388,6 @@ export function parseAutoFilter(xml: string): SheetAutoFilter | undefined {
 	return undefined;
 }
 
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-
-function bool01(v: string | undefined): boolean | undefined {
-	if (v === "1" || v === "true") return true;
-	if (v === "0" || v === "false") return false;
-	return undefined;
-}
-
-// The boolean attributes of <sheetProtection>, all optional and carried verbatim (F10.3).
-const SHEET_PROTECTION_FLAGS = [
-	"sheet",
-	"objects",
-	"scenarios",
-	"formatCells",
-	"formatColumns",
-	"formatRows",
-	"insertColumns",
-	"insertRows",
-	"insertHyperlinks",
-	"deleteColumns",
-	"deleteRows",
-	"selectLockedCells",
-	"selectUnlockedCells",
-	"sort",
-	"autoFilter",
-	"pivotTables",
-] as const;
-
 /**
  * The sheet's `<sheetProtection>` (F10.3), or `undefined` when it declares none. Scoped to a DIRECT
  * child of `<worksheet>` (depth 1) — the same guard as {@link parseAutoFilter}, since `<sheetProtection>`
@@ -717,7 +400,7 @@ export function parseSheetProtection(xml: string): SheetProtection | undefined {
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open") {
 			if (depth === 1 && localName(token.name) === "sheetProtection") {
-				return readSheetProtection(token.attrs);
+				return sheetProtectionFromAttributes(token.attrs);
 			}
 			if (!token.selfClosing) depth++;
 		} else if (token.kind === "close") {
@@ -725,26 +408,6 @@ export function parseSheetProtection(xml: string): SheetProtection | undefined {
 		}
 	}
 	return undefined;
-}
-
-function readSheetProtection(attrs: Readonly<Record<string, string>>): SheetProtection | undefined {
-	const out: Mutable<SheetProtection> = {};
-	for (const flag of SHEET_PROTECTION_FLAGS) {
-		const b = bool01(attrs[flag]);
-		if (b !== undefined) out[flag] = b;
-	}
-	if (attrs.password !== undefined) out.password = attrs.password;
-	if (attrs.algorithmName !== undefined) out.algorithmName = attrs.algorithmName;
-	if (attrs.hashValue !== undefined) out.hashValue = attrs.hashValue;
-	if (attrs.saltValue !== undefined) out.saltValue = attrs.saltValue;
-	// spinCount is xsd:unsignedInt — DROP an out-of-range value (a 21-digit count would otherwise become
-	// a float that re-emits as `1e+21`, invalid integer XML). Shared bound with the writer's reject.
-	const spin = attrs.spinCount;
-	if (spin !== undefined && /^[0-9]+$/.test(spin)) {
-		const n = Number(spin);
-		if (Number.isInteger(n) && n <= MAX_SPIN_COUNT) out.spinCount = n;
-	}
-	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // ── Print setup (F10.4): printOptions, pageMargins, pageSetup, headerFooter ────────────────────────
@@ -755,119 +418,6 @@ export interface PrintSetup {
 	readonly pageMargins?: PageMargins;
 	readonly pageSetup?: PageSetup;
 	readonly headerFooter?: HeaderFooter;
-}
-
-// A finite double attribute clamped into [0, max]; undefined when absent or non-numeric/non-finite.
-function clampedDouble(v: string | undefined, max: number): number | undefined {
-	if (v === undefined) return undefined;
-	const n = Number(v);
-	if (!Number.isFinite(n)) return undefined;
-	return n < 0 ? 0 : n > max ? max : n;
-}
-
-// A non-negative integer attribute within the xsd:unsignedInt ceiling; undefined otherwise. Gated to
-// canonical digits first so a hostile 21-digit value is DROPPED, not coerced to a lossy float.
-function uintAttr(v: string | undefined): number | undefined {
-	if (v === undefined || !/^[0-9]+$/.test(v)) return undefined;
-	const n = Number(v);
-	return Number.isInteger(n) && n <= MAX_PAGE_SETUP_UINT ? n : undefined;
-}
-
-// An enum attribute restricted to a fixed set; undefined when absent/unrecognized (falls to spec default).
-function enumAttr<T extends string>(v: string | undefined, allowed: readonly T[]): T | undefined {
-	return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
-}
-
-function readPrintOptions(attrs: Readonly<Record<string, string>>): PrintOptions | undefined {
-	const out: Mutable<PrintOptions> = {};
-	for (const flag of [
-		"gridLines",
-		"headings",
-		"horizontalCentered",
-		"verticalCentered",
-	] as const) {
-		const b = bool01(attrs[flag]);
-		if (b !== undefined) out[flag] = b;
-	}
-	return Object.keys(out).length > 0 ? out : undefined;
-}
-
-function readPageMargins(attrs: Readonly<Record<string, string>>): PageMargins | undefined {
-	// All six are required by the schema — produce a value only when every one is a finite number
-	// (clamped to [0, MAX_PAGE_MARGIN]); a missing/non-finite margin drops the whole element.
-	const left = clampedDouble(attrs.left, MAX_PAGE_MARGIN);
-	const right = clampedDouble(attrs.right, MAX_PAGE_MARGIN);
-	const top = clampedDouble(attrs.top, MAX_PAGE_MARGIN);
-	const bottom = clampedDouble(attrs.bottom, MAX_PAGE_MARGIN);
-	const header = clampedDouble(attrs.header, MAX_PAGE_MARGIN);
-	const footer = clampedDouble(attrs.footer, MAX_PAGE_MARGIN);
-	if (
-		left === undefined ||
-		right === undefined ||
-		top === undefined ||
-		bottom === undefined ||
-		header === undefined ||
-		footer === undefined
-	) {
-		return undefined;
-	}
-	return { left, right, top, bottom, header, footer };
-}
-
-function readPageSetup(attrs: Readonly<Record<string, string>>): PageSetup | undefined {
-	const out: Mutable<PageSetup> = {};
-	const paperSize = uintAttr(attrs.paperSize);
-	if (paperSize !== undefined) out.paperSize = paperSize;
-	const orientation = enumAttr(attrs.orientation, ["default", "portrait", "landscape"] as const);
-	if (orientation !== undefined) out.orientation = orientation;
-	// scale is a percentage in [MIN_PAGE_SCALE, MAX_PAGE_SCALE] — clamp a finite integer into range.
-	if (attrs.scale !== undefined && /^[0-9]+$/.test(attrs.scale)) {
-		const s = Number(attrs.scale);
-		if (Number.isInteger(s)) {
-			out.scale =
-				s < MIN_PAGE_SCALE ? MIN_PAGE_SCALE : s > MAX_PAGE_SCALE ? MAX_PAGE_SCALE : s;
-		}
-	}
-	const fitToWidth = uintAttr(attrs.fitToWidth);
-	if (fitToWidth !== undefined) out.fitToWidth = fitToWidth;
-	const fitToHeight = uintAttr(attrs.fitToHeight);
-	if (fitToHeight !== undefined) out.fitToHeight = fitToHeight;
-	const firstPageNumber = uintAttr(attrs.firstPageNumber);
-	if (firstPageNumber !== undefined) out.firstPageNumber = firstPageNumber;
-	const useFirstPageNumber = bool01(attrs.useFirstPageNumber);
-	if (useFirstPageNumber !== undefined) out.useFirstPageNumber = useFirstPageNumber;
-	const blackAndWhite = bool01(attrs.blackAndWhite);
-	if (blackAndWhite !== undefined) out.blackAndWhite = blackAndWhite;
-	const draft = bool01(attrs.draft);
-	if (draft !== undefined) out.draft = draft;
-	const cellComments = enumAttr(attrs.cellComments, ["none", "asDisplayed", "atEnd"] as const);
-	if (cellComments !== undefined) out.cellComments = cellComments;
-	const pageOrder = enumAttr(attrs.pageOrder, ["downThenOver", "overThenDown"] as const);
-	if (pageOrder !== undefined) out.pageOrder = pageOrder;
-	return Object.keys(out).length > 0 ? out : undefined;
-}
-
-const HF_CHILDREN = [
-	"oddHeader",
-	"oddFooter",
-	"evenHeader",
-	"evenFooter",
-	"firstHeader",
-	"firstFooter",
-] as const;
-
-function readHeaderFooterAttrs(attrs: Readonly<Record<string, string>>): Mutable<HeaderFooter> {
-	const out: Mutable<HeaderFooter> = {};
-	for (const flag of [
-		"differentOddEven",
-		"differentFirst",
-		"scaleWithDoc",
-		"alignWithMargins",
-	] as const) {
-		const b = bool01(attrs[flag]);
-		if (b !== undefined) out[flag] = b;
-	}
-	return out;
 }
 
 /**
@@ -882,23 +432,23 @@ export function parsePrintSetup(xml: string): PrintSetup {
 	let depth = 0;
 	let hf: Mutable<HeaderFooter> | undefined; // the depth-1 headerFooter being built
 	let inHeaderFooter = false;
-	let hfChild: (typeof HF_CHILDREN)[number] | undefined; // which child string is accumulating
+	let hfChild: HeaderFooterChild | undefined; // which child string is accumulating
 	let hfText = "";
 	for (const token of tokenize(xml)) {
 		if (token.kind === "open") {
 			const name = localName(token.name);
 			if (depth === 1) {
 				if (name === "printOptions") {
-					const po = readPrintOptions(token.attrs);
+					const po = printOptionsFromAttributes(token.attrs);
 					if (po !== undefined) out.printOptions = po;
 				} else if (name === "pageMargins") {
-					const m = readPageMargins(token.attrs);
+					const m = pageMarginsFromAttributes(token.attrs);
 					if (m !== undefined) out.pageMargins = m;
 				} else if (name === "pageSetup") {
-					const ps = readPageSetup(token.attrs);
+					const ps = pageSetupFromAttributes(token.attrs);
 					if (ps !== undefined) out.pageSetup = ps;
 				} else if (name === "headerFooter") {
-					hf = readHeaderFooterAttrs(token.attrs);
+					hf = headerFooterFromAttributes(token.attrs);
 					if (token.selfClosing) {
 						if (Object.keys(hf).length > 0) out.headerFooter = hf;
 						hf = undefined;
@@ -906,12 +456,8 @@ export function parsePrintSetup(xml: string): PrintSetup {
 						inHeaderFooter = true;
 					}
 				}
-			} else if (
-				inHeaderFooter &&
-				depth === 2 &&
-				(HF_CHILDREN as readonly string[]).includes(name)
-			) {
-				hfChild = name as (typeof HF_CHILDREN)[number];
+			} else if (inHeaderFooter && depth === 2 && isHeaderFooterChild(name)) {
+				hfChild = name;
 				hfText = "";
 			}
 			if (!token.selfClosing) depth++;
@@ -1014,8 +560,6 @@ export async function* streamRows(
 // ceilings), so whatever they return, the writer accepts — the bridge can carry geometry without
 // ever crashing on a tolerated file.
 
-const boolFlag = (val: string | undefined): boolean => val === "1" || val === "true";
-
 /**
  * Column width/visibility declarations from `<cols>`, in document order. Entries carrying only a
  * default STYLE (no width, not hidden) are style plumbing, not geometry — they are omitted here
@@ -1040,7 +584,7 @@ export function parseColumnProps(xml: string): ColumnProps[] {
 			const width = Number(token.attrs.width);
 			if (Number.isFinite(width) && width > 0 && width <= MAX_COL_WIDTH) props.width = width;
 		}
-		if (boolFlag(token.attrs.hidden)) props.hidden = true;
+		if (trueAttribute(token.attrs.hidden)) props.hidden = true;
 		if (props.width !== undefined || props.hidden) out.push(props);
 	}
 	return out;
@@ -1083,7 +627,7 @@ export function parseRowProperties(xml: string): Map<number, RowProps> {
 				props.height = height;
 			}
 		}
-		if (boolFlag(token.attrs.hidden)) props.hidden = true;
+		if (trueAttribute(token.attrs.hidden)) props.hidden = true;
 		if (props.height !== undefined || props.hidden) out.set(rowIndex, props);
 	}
 	return out;

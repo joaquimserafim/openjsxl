@@ -83,6 +83,26 @@ describe("writeXlsx — <autoFilter> emission", () => {
 			`<definedName name="_xlnm._FilterDatabase" localSheetId="1" hidden="1">'Bob''s'!$A$1:$B$2</definedName>`,
 		);
 	});
+
+	it("protects an escape-shaped sheet name inside the synthesized _FilterDatabase formula", async () => {
+		// The hidden filter name is a CT_DefinedName too, so its full refersTo text needs the same
+		// ST_Xstring protection as a caller-supplied name before Excel reads it.
+		const input: WorkbookInput = {
+			sheets: [{ name: "_x0041_", rows: [["a"]], autoFilter: { ref: "A1:B2" } }],
+		};
+		const bytes = await writeXlsx(input);
+		const xml = await workbookXmlOf(bytes);
+		expect(xml).toContain(
+			`<definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'_x005F_x0041_'!$A$1:$B$2</definedName>`,
+		);
+		// Both writer entry points share workbookXml; the bridge strips then re-synthesizes this
+		// internal name from the logical sheet/filter model and must produce the same bytes again.
+		expect(await workbookXmlOf(await drain(streamXlsx(input)))).toBe(xml);
+		const wb = await openXlsx(bytes);
+		expect(wb.sheet("_x0041_").autoFilter).toEqual({ ref: "A1:B2" });
+		expect(wb.definedNames).toEqual([]);
+		expect(await workbookXmlOf(await writeXlsx(await workbookToInput(wb)))).toBe(xml);
+	});
 });
 
 describe("writeXlsx — byte-identity when no autoFilter is used", () => {

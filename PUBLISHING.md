@@ -174,6 +174,14 @@ git push -f origin v<version>
   README becomes the **canonical documentation** — a full API reference for both entry points, verified
   against the built `.d.ts`. `.xlsx` output for existing input stays byte-identical (the freeze is
   additive / hygiene only). Follow semver from here.
+- **`1.0.1` (in progress; not published)** — patch-release correctness work. F11.4 applies the
+  existing internal `ST_Xstring` codec in both directions to worksheet names, legacy Note authors,
+  and complete logical workbook-defined-name formulas (`DefinedName.refersTo`): literal `_x0041_`
+  now survives Microsoft Excel instead of becoming `A` or an externalized reference; ordinary field
+  bytes and the public API remain unchanged. A raw escape-shaped value written in these fields by
+  1.0.0 is inherently ambiguous and is read according to OOXML/Excel, with no heuristic legacy mode.
+  A Microsoft Excel Online 16.0300 save-back fixture pins the corrected local reference. Extend this
+  entry with the remaining owner-approved 1.0.1 corrections before release.
 
 ## Notes
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_FORMULA_LEN } from "../formula";
 import { parseWorkbook } from "../workbook";
 
 describe("parseWorkbook", () => {
@@ -12,6 +13,24 @@ describe("parseWorkbook", () => {
 		expect(parseWorkbook(xml).sheets).toEqual([
 			{ name: "First", rid: "rId1", visible: true, state: "visible" },
 			{ name: "Second", rid: "rId2", visible: true, state: "visible" },
+		]);
+	});
+
+	it("decodes each sheet name as one ST_Xstring attribute value", () => {
+		const xml =
+			"<workbook><sheets>" +
+			'<sheet name="Plain" r:id="rId1"/>' +
+			'<sheet name="_x0041_" r:id="rId2"/>' +
+			'<sheet name="_x005F_x0041_" r:id="rId3"/>' +
+			'<sheet name="_x005f_x0042_" r:id="rId4"/>' +
+			'<sheet name="&#95;x0043_ &amp; Co" r:id="rId5"/>' +
+			"</sheets></workbook>";
+		expect(parseWorkbook(xml).sheets.map((sheet) => sheet.name)).toEqual([
+			"Plain",
+			"A",
+			"_x0041_",
+			"_x0042_",
+			"C & Co",
 		]);
 	});
 
@@ -109,9 +128,64 @@ describe("parseWorkbook — defined names (F10.1)", () => {
 		]);
 	});
 
-	it("drops a refersTo that decodes to an XML-illegal control character", () => {
-		// A numeric char ref the tokenizer decodes to U+0001 — cannot re-emit as element text.
-		const xml = wrap('<definedName name="Ctrl">Sheet1!$A$1&#1;</definedName>');
+	it("decodes the complete ST_Formula value once, without interpreting formula tokens", () => {
+		// CT_DefinedName extends ST_Formula, and ST_Formula restricts ST_Xstring. The whole text is
+		// decoded uniformly: quoted/bare sheet names, strings, names, structured refs, and externals.
+		const protectedFormula =
+			"SUM('_x005F_x0041_:_x005F_x0042_'!A1)+_x005F_x0041_+" +
+			"Table1[_x005F_x0041_]+\"_x005F_x0041_\"+'[1]_x005F_x0041_'!A1";
+		const logicalFormula =
+			"SUM('_x0041_:_x0042_'!A1)+_x0041_+" + "Table1[_x0041_]+\"_x0041_\"+'[1]_x0041_'!A1";
+		const xml = wrap(
+			`<definedName name="Protected">${protectedFormula}</definedName>` +
+				"<definedName name=\"Raw\">'_x0041_'!B4</definedName>" +
+				'<definedName name="Lower">"_x005f_x0041_"</definedName>' +
+				'<definedName name="Overlap">"_x005F_x005F_x005F_x0041_"</definedName>',
+		);
+		expect(parseWorkbook(xml).definedNames).toEqual([
+			{ name: "Protected", refersTo: logicalFormula },
+			// A raw escape is data on the wire, so decoding does not depend on whether sheet A exists.
+			{ name: "Raw", refersTo: "'A'!B4" },
+			{ name: "Lower", refersTo: '"_x0041_"' },
+			{ name: "Overlap", refersTo: '"_x005F_x0041_"' },
+		]);
+	});
+
+	it("accumulates split text and CDATA before decoding the complete formula", () => {
+		// Producers may split one escape sequence across tokenizer events. Decoding each chunk would
+		// miss it, so the parser must join all text first and perform one non-reentrant decode pass.
+		const xml = wrap(
+			"<definedName name=\"Split\">'_x005F_<![CDATA[x0041_]]>'!B4</definedName>",
+		);
+		expect(parseWorkbook(xml).definedNames).toEqual([
+			{ name: "Split", refersTo: "'_x0041_'!B4" },
+		]);
+	});
+
+	it("validates the decoded logical formula length, not its longer protected wire form", () => {
+		// 1,171 protected underscores occupy 8,197 wire characters but only 1,171 logical ones.
+		const wire = "_x005F_".repeat(Math.floor(MAX_FORMULA_LEN / 7) + 1);
+		expect(wire.length).toBeGreaterThan(MAX_FORMULA_LEN);
+		const [name] = parseWorkbook(
+			wrap(`<definedName name="LongWire">${wire}</definedName>`),
+		).definedNames;
+		expect(name?.refersTo).toBe("_".repeat(wire.length / 7));
+	});
+
+	it("applies stored-form validation after ST_Xstring decoding", () => {
+		// `_x003D_` is `=`. Accepting this raw wire text before decoding would leak a logical formula
+		// that violates the public no-leading-equals invariant.
+		const xml = wrap('<definedName name="EncodedEquals">_x003D_A1</definedName>');
+		expect(parseWorkbook(xml).definedNames).toEqual([]);
+	});
+
+	it.each([
+		"&#1;",
+		"_x0001_",
+	])("drops a refersTo that decodes %s to an XML-illegal control character", (escapedControl) => {
+		// Validate after both XML-entity and ST_Xstring decoding so the writer can re-emit every
+		// surviving logical value safely.
+		const xml = wrap(`<definedName name="Ctrl">Sheet1!$A$1${escapedControl}</definedName>`);
 		expect(parseWorkbook(xml).definedNames).toEqual([]);
 	});
 

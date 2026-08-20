@@ -32,6 +32,33 @@ describe("parseComments — units", () => {
 		]);
 	});
 
+	it("decodes each complete legacy author as ST_Xstring before resolving authorId", () => {
+		const xml =
+			"<comments><authors>" +
+			"<author>_x0041_</author>" + // raw escape → A
+			"<author>_x005F_x0041_</author>" + // protected literal
+			"<author>_x005f_x0041_</author>" + // Excel Online's lowercase save-back form
+			"<author>_x00<![CDATA[41_]]></author>" + // one escape split across text tokens
+			"<author>_x005F_<![CDATA[x0041_]]></author>" + // protected form must not decode twice
+			"<author/>" +
+			"</authors><commentList>" +
+			'<comment ref="A1" authorId="0"><text><t>a</t></text></comment>' +
+			'<comment ref="A2" authorId="1"><text><t>b</t></text></comment>' +
+			'<comment ref="A3" authorId="2"><text><t>c</t></text></comment>' +
+			'<comment ref="A4" authorId="3"><text><t>d</t></text></comment>' +
+			'<comment ref="A5" authorId="4"><text><t>e</t></text></comment>' +
+			'<comment ref="A6" authorId="5"><text><t>f</t></text></comment>' +
+			"</commentList></comments>";
+		expect(parseComments(xml)).toEqual([
+			{ ref: "A1", author: "A", text: "a" },
+			{ ref: "A2", author: "_x0041_", text: "b" },
+			{ ref: "A3", author: "_x0041_", text: "c" },
+			{ ref: "A4", author: "A", text: "d" },
+			{ ref: "A5", author: "_x0041_", text: "e" },
+			{ ref: "A6", text: "f" },
+		]);
+	});
+
 	it("omits the author when the authorId resolves to nothing", () => {
 		const xml =
 			"<comments><authors><author>A</author></authors>" +
@@ -44,6 +71,20 @@ describe("parseComments — units", () => {
 			"<comments><authors><author>A</author></authors>" +
 			'<commentList><comment ref="A1"><text><t>x</t></text></comment></commentList></comments>';
 		expect(parseComments(xml)).toEqual([{ ref: "A1", text: "x" }]);
+	});
+
+	it("does not fabricate author 0 for empty or non-integer authorId values", () => {
+		const xml =
+			"<comments><authors><author>A</author></authors><commentList>" +
+			'<comment ref="A1" authorId=""><text><t>empty</t></text></comment>' +
+			'<comment ref="A2" authorId="x"><text><t>text</t></text></comment>' +
+			'<comment ref="A3" authorId="1.5"><text><t>fraction</t></text></comment>' +
+			"</commentList></comments>";
+		expect(parseComments(xml)).toEqual([
+			{ ref: "A1", text: "empty" },
+			{ ref: "A2", text: "text" },
+			{ ref: "A3", text: "fraction" },
+		]);
 	});
 
 	it("tolerates a namespace prefix and an empty comment", () => {

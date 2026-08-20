@@ -26,6 +26,7 @@ import {
 } from "../xlsb";
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
+import { directoryOf, relsPathFor } from "./opc-path";
 import { type ReadOptions, Workbook } from "./workbook";
 
 // The `.xlsb` reader. An Excel Binary Workbook is the SAME OPC container as `.xlsx` — the package
@@ -48,18 +49,6 @@ const NO_CONDITIONAL_FORMATTING: readonly ConditionalFormatting[] = [];
 const NO_COLUMNS: readonly ColumnProps[] = [];
 const NO_IMAGES: readonly SheetImage[] = [];
 const NO_ROW_PROPS: ReadonlyMap<number, RowProps> = new Map();
-
-function directoryOf(path: string): string {
-	const slash = path.lastIndexOf("/");
-	return slash === -1 ? "" : path.slice(0, slash);
-}
-
-function relsPathFor(path: string): string {
-	const slash = path.lastIndexOf("/");
-	const dir = slash === -1 ? "" : path.slice(0, slash);
-	const file = slash === -1 ? path : path.slice(slash + 1);
-	return dir === "" ? `_rels/${file}.rels` : `${dir}/_rels/${file}.rels`;
-}
 
 async function readText(zip: ZipArchive, path: string): Promise<string> {
 	if (!zip.has(path))

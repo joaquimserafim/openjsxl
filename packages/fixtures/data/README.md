@@ -249,6 +249,19 @@ git-ignored [`../local/`](../local) directory and are never committed.
   value is cross-checked against **python-calamine** (an independent ODF reader) in
   `reader/__tests__/ods.test.ts`.
 
+- **`excel-online-xstring-saveback.xlsx`** — saved and downloaded from **Microsoft Excel Online
+  16.0300** on 2026-08-07 after changing only `Control!B12` from `BEFORE` to `AFTER` in the
+  openjsxl-authored F11.4 interoperability workbook. It exercises an escape-shaped logical worksheet
+  name, defined-name name and `refersTo` formula, literal cell text, and legacy Note author. Excel
+  Online writes the protected worksheet/name form `_x005f_x0041_`, protected formula
+  `_x005F_x0041_!B4`, and protected Note author `_x005F_x0041_`; openjsxl must expose their logical
+  `_x0041_` values without fabricating an external link. The `AFTER` marker proves the Excel Online
+  save cycle completed. SHA-256:
+  `4188b92a0b9bf7af6adf37337b1911db4115d299a13558eddf16a0e2431aeb80`.
+  `reader/__tests__/xstring-excel-online.test.ts` pins the producer wire forms and logical
+  read→write→read result. The earlier failed return that changed the reference to `[1]A!B4` is
+  deliberately not committed.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

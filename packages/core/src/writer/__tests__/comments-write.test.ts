@@ -85,6 +85,51 @@ describe("writeXlsx — comments part (xl/commentsN.xml)", () => {
 		expect(xml).toContain('<comment ref="E5" authorId="2" shapeId="0">');
 	});
 
+	it("encodes escape-shaped authors after logical deduplication and preserves their authorIds", async () => {
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "S",
+					rows: [["v"]],
+					comments: [
+						{ ref: "A1", author: "A", text: "plain" },
+						{ ref: "A2", author: "_x0041_", text: "literal" },
+						{ ref: "A3", author: "_x005F_x0041_", text: "overlap" },
+						{ ref: "A4", author: "_x0041_", text: "repeat" },
+						{ ref: "A5", author: "", text: "explicit empty" },
+						{ ref: "A6", text: "absent" },
+					],
+				},
+			],
+		});
+		const xml = await part(bytes, "xl/comments1.xml");
+		expect(xml).toContain(
+			"<authors><author>A</author>" +
+				"<author>_x005F_x0041_</author>" +
+				"<author>_x005F_x005F_x005F_x0041_</author>" +
+				"<author></author></authors>",
+		);
+		expect(xml).toContain('<comment ref="A1" authorId="0" shapeId="0">');
+		expect(xml).toContain('<comment ref="A2" authorId="1" shapeId="0">');
+		expect(xml).toContain('<comment ref="A3" authorId="2" shapeId="0">');
+		expect(xml).toContain('<comment ref="A4" authorId="1" shapeId="0">');
+		expect(xml).toContain('<comment ref="A5" authorId="3" shapeId="0">');
+		expect(xml).toContain('<comment ref="A6" authorId="3" shapeId="0">');
+
+		const first = await openXlsx(bytes);
+		const expected = [
+			{ ref: "A1", author: "A", text: "plain" },
+			{ ref: "A2", author: "_x0041_", text: "literal" },
+			{ ref: "A3", author: "_x005F_x0041_", text: "overlap" },
+			{ ref: "A4", author: "_x0041_", text: "repeat" },
+			{ ref: "A5", text: "explicit empty" },
+			{ ref: "A6", text: "absent" },
+		];
+		expect(first.sheet("S").comments).toEqual(expected);
+		const bridged = await openXlsx(await writeXlsx(await workbookToInput(first)));
+		expect(bridged.sheet("S").comments).toEqual(expected);
+	});
+
 	it("escapes comment text and preserves surrounding whitespace", async () => {
 		const bytes = await writeXlsx({
 			sheets: [
@@ -104,7 +149,7 @@ describe("writeXlsx — comments part (xl/commentsN.xml)", () => {
 		expect(xml).toContain('<text><t xml:space="preserve">  padded  </t></text>');
 	});
 
-	it("preserves CR, CRLF, and lone LF in comment-author element text", async () => {
+	it("stores author CR as ST_Xstring while preserving CR, CRLF, and lone LF logically", async () => {
 		const author = "Jo\rhn\r\nDoe\nX";
 		const bytes = await writeXlsx({
 			sheets: [
@@ -116,7 +161,7 @@ describe("writeXlsx — comments part (xl/commentsN.xml)", () => {
 			],
 		});
 		const xml = await part(bytes, "xl/comments1.xml");
-		expect(xml).toContain("<author>Jo&#13;hn&#13;\nDoe\nX</author>");
+		expect(xml).toContain("<author>Jo_x000D_hn_x000D_\nDoe\nX</author>");
 		expect(xml).not.toContain("\r");
 		expect((await openXlsx(bytes)).sheet("S").comments).toEqual([
 			{ ref: "A1", author, text: "note" },

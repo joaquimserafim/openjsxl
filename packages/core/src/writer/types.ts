@@ -164,9 +164,10 @@ export interface WorkbookInput {
 	readonly themeXml?: string;
 	/**
 	 * Workbook-level defined (named) ranges and constants (F10.1), emitted as `<definedNames>`. Each
-	 * entry is a {@link DefinedName}: a legal identifier `name`, a stored-form `refersTo` formula (no
-	 * leading `=`, e.g. `'Sheet1'!$A$1:$B$2` or `42`), an optional 0-based `localSheetId` for a
-	 * sheet-scoped name, and an optional `hidden` flag. Invalid entries are rejected with a typed
+	 * entry is a {@link DefinedName}: a legal identifier `name`, a logical stored-form `refersTo`
+	 * formula (no leading `=`; ST_Xstring wire encoding is automatic), an optional 0-based
+	 * `localSheetId` for a sheet-scoped name, and an optional `hidden` flag. Invalid entries are
+	 * rejected with a typed
 	 * {@link import("../errors").XlsxError}. Absent (or empty) emits nothing, so a names-free workbook
 	 * stays byte-identical. The reader's `Workbook.definedNames` is exactly this shape, so a workbook
 	 * round-trips its names through {@link workbookToInput}.

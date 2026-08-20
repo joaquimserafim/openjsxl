@@ -168,6 +168,16 @@ throws: characters XML can't carry (control chars, lone surrogates) are stored w
 An optional second argument `writeXlsx(input, { date1904: true })` selects the 1904 date epoch
 (legacy Mac workbooks); dates are 1900-epoch by default.
 
+Worksheet tab names, legacy Note authors, and the complete logical formula in
+`DefinedName.refersTo` use that same `ST_Xstring` collision rule: a logical literal `_x0041_` stores
+as `_x005F_x0041_`, and the reader decodes each complete field exactly once. Pass defined-name
+formulas as logical stored form (without a leading `=`); never pre-encode their `_xHHHH_` text.
+Compatibility note: openjsxl 1.0.0 wrote these fields raw, so an escape-shaped value in a
+1.0.0-produced file is ambiguous and Microsoft Excel interprets it as an escape (`_x0041_` → `A`).
+There is no reliable way to infer the original intent; openjsxl follows OOXML/Excel rather than
+double-decoding or guessing. openpyxl 3.1.5 does not consistently apply this rule to these schema
+fields, so its behavior can differ for this case.
+
 ### Styles & layout (0.4)
 
 A cell can also be `{ value, style }` — the style shape is exactly what `sheet.style(ref)`
@@ -293,7 +303,7 @@ formatting, autofilters, protection, and print setup**:
 | column widths, row heights, hidden, freeze | **external workbook links** — a formula's `[1]Sheet!` reference re-emits as text with no target |
 | merged ranges & hyperlinks | **gradient fills** — read as no fill |
 | sheet visibility (hidden / veryHidden) | **threaded comment** thread structure — the text survives as a legacy comment; replies/authorship threading is dropped |
-| sheet names & tab order | `calcChain`/`calcPr` — dropped; Excel recomputes the dependency chain on open |
+| sheet names & tab order, including literal `_xHHHH_` spellings | `calcChain`/`calcPr` — dropped; Excel recomputes the dependency chain on open |
 | tables (name, range, columns, header/totals, style) | |
 | data validations (dropdowns & input rules) | |
 | conditional formatting (highlights, scales, bars, icon sets) | |
@@ -460,7 +470,8 @@ The workbook-fidelity features that complete a faithful round trip — all read 
 same record on both sides:
 
 - **Defined names** (`Workbook.definedNames` ↔ `WorkbookInput.definedNames`) — named ranges and
-  constants, workbook-global or sheet-scoped (`localSheetId`); `refersTo` is stored form (no leading `=`).
+  constants, workbook-global or sheet-scoped (`localSheetId`); `refersTo` is logical stored form (no
+  leading `=`), and its complete `ST_Xstring` wire encoding/decoding is automatic.
 - **Protection** (`Worksheet.protection` ↔ `SheetInput.protection`, `Workbook.protection` ↔
   `WorkbookInput.protection`, `CellStyle.protection`) — lock a sheet (`{ sheet: true }`) or the workbook
   structure (`{ lockStructure: true }`); cells are locked by default, so `{ locked: false }` leaves a cell
@@ -631,7 +642,8 @@ is a pass-through. ([06](./examples/06-write.mjs), [08](./examples/08-streaming-
 The 1.0 fidelity types — each is the same record on the reader and the writer.
 ([14](./examples/14-names-autofilter-protection-print.mjs))
 
-- **`DefinedName`** `{ name, refersTo, localSheetId?, hidden? }` — a named range/constant (`refersTo` is stored form, no leading `=`).
+- **`DefinedName`** `{ name, refersTo, localSheetId?, hidden? }` — a named range/constant (`refersTo`
+  is logical stored form without a leading `=`; do not pre-encode `_xHHHH_` text).
 - **`SheetAutoFilter`** `{ ref }` — the filter range; the paired `_xlnm._FilterDatabase` is managed for you.
 - **`SheetProtection`** — `{ sheet?, objects?, scenarios?, formatCells?, …, password?, algorithmName?, hashValue?, saltValue?, spinCount? }`. Password material carried verbatim (never computed).
 - **`WorkbookProtection`** — `{ lockStructure?, lockWindows?, workbookPassword?, workbookAlgorithmName?, workbookHashValue?, workbookSaltValue?, workbookSpinCount? }`.
