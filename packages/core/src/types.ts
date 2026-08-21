@@ -59,7 +59,11 @@ export interface Hyperlink {
 	 * worksheet's relationships. Absent for a purely in-workbook link.
 	 */
 	readonly target?: string;
-	/** In-workbook destination, e.g. "'Sheet2'!B5". Absent for a purely external link. */
+	/**
+	 * Location within the destination: an in-workbook reference when `target` is absent (for
+	 * example, `"'Sheet2'!B5"`), or a fragment within the external `target` when both are present.
+	 * Pass logical text; OOXML `ST_Xstring` encoding is automatic, so do not pre-encode `_xHHHH_`.
+	 */
 	readonly location?: string;
 	/** Hover text the producer attached to the link, if any. */
 	readonly tooltip?: string;

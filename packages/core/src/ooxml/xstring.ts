@@ -8,11 +8,11 @@
 // corrupts such data for those consumers (F9.6). Some third-party libraries apply the convention
 // only to selected schema fields; interoperability follows the OOXML field type, not their coverage.
 //
-// The pair is single-sourced here for the SHARED-BOUNDS invariant: whatever character the reader
-// can now hand back (a decoded control char, even a lone surrogate a producer escaped), the
-// writer re-encodes rather than rejects — `decodeXstring(encodeXstring(s)) === s` for EVERY
-// string, and `encodeXstring` is the IDENTITY on strings with nothing to escape, which is what
-// keeps clean files byte-identical.
+// The pair is single-sourced here for codec identity: `decodeXstring(encodeXstring(s)) === s` for
+// EVERY string, and `encodeXstring` is the IDENTITY on strings with nothing to escape, which keeps
+// clean fields byte-identical. Individual schema sites may impose stricter public-model bounds;
+// for example, a hyperlink location that decodes outside the writer's XML-safe input set degrades
+// away rather than being exposed.
 
 // One UTF-16 code unit of a hex quad: 0-9, A-F, a-f. `charCodeAt` past the end is NaN — false.
 function isHexUnit(c: number): boolean {

@@ -162,21 +162,26 @@ await writeFile('report.xlsx', bytes); // opens cleanly in Excel and LibreOffice
 The output is deterministic (identical input → identical bytes), strings are written inline (no
 shared-strings table), and input the format can't represent — no sheets, a bad or duplicate sheet
 name, a non-finite number, an invalid `Date` — throws a typed `XlsxError` with
-`code: 'invalid-input'` rather than producing a file Excel must repair. String *content* never
-throws: characters XML can't carry (control chars, lone surrogates) are stored with the same
-`_xHHHH_` escape Excel uses, so they round-trip instead of corrupting or rejecting.
+`code: 'invalid-input'` rather than producing a file Excel must repair. Cell and legacy Note text
+do not fail solely because XML cannot carry a character: controls and lone surrogates are stored
+with Excel's `_xHHHH_` escape, so they round-trip instead of corrupting or rejecting.
 An optional second argument `writeXlsx(input, { date1904: true })` selects the 1904 date epoch
 (legacy Mac workbooks); dates are 1900-epoch by default.
 
-Worksheet tab names, legacy Note authors, and the complete logical formula in
-`DefinedName.refersTo` use that same `ST_Xstring` collision rule: a logical literal `_x0041_` stores
-as `_x005F_x0041_`, and the reader decodes each complete field exactly once. Pass defined-name
-formulas as logical stored form (without a leading `=`); never pre-encode their `_xHHHH_` text.
+Worksheet tab names, legacy Note authors, complete logical `DefinedName.refersTo` formulas, and
+`Hyperlink.location` values use OOXML's `ST_Xstring` collision rule: a logical literal `_x0041_`
+stores as `_x005F_x0041_`, and the reader decodes each complete field exactly once. Supply
+defined-name formulas without a leading `=` and locations as logical text; never pre-encode
+`_xHHHH_`. Without `target`, a location is an in-workbook reference such as `'Sheet2'!B5`; with
+`target`, it is a fragment within that external destination.
+
 Compatibility note: openjsxl 1.0.0 wrote these fields raw, so an escape-shaped value in a
 1.0.0-produced file is ambiguous and Microsoft Excel interprets it as an escape (`_x0041_` → `A`).
 There is no reliable way to infer the original intent; openjsxl follows OOXML/Excel rather than
-double-decoding or guessing. openpyxl 3.1.5 does not consistently apply this rule to these schema
-fields, so its behavior can differ for this case.
+double-decoding or guessing. Direct writer locations must be XML-safe. On read, a location that
+decodes to a value rejected by the XML writer is omitted; if no target remains, the hyperlink is
+omitted. openpyxl 3.1.5 does not consistently apply this rule to these schema fields, so its
+behavior can differ for this case.
 
 ### Styles & layout (0.4)
 
@@ -573,7 +578,7 @@ A sheet's cells, style/format accessors, and metadata.
 | `name` / `path` | `string` | Tab name / part locator. |
 | `visible` / `state` | `boolean` / `SheetState` | Visibility (`state` is the source; `visible === (state === "visible")`). |
 | `mergedCells` | `readonly string[]` | Merged ranges in A1, document order. |
-| `hyperlinks` | `readonly Hyperlink[]` | Hyperlinks, document order. |
+| `hyperlinks` | `readonly Hyperlink[]` | Hyperlinks in document order; location is in-workbook without target, or a fragment within target when both are present. |
 | `dimension` | `string \| undefined` | Declared used range in A1. |
 | `comments` | `readonly Comment[]` | Cell comments. |
 | `tables` | `readonly TableInfo[]` | Defined tables. |

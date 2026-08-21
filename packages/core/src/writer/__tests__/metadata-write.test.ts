@@ -102,7 +102,72 @@ describe("writeXlsx — hyperlinks", () => {
 		expect(wb.sheet("L").hyperlinks).toEqual(hyperlinks);
 	});
 
-	it("emits the per-sheet rels part with TargetMode external, ids matching the sheet", async () => {
+	it("encodes every ST_Xstring location once, then re-reads the logical values", async () => {
+		const hyperlinks = [
+			{ ref: "A1", location: "'_x0041_'!A1" },
+			{ ref: "A2", location: "_x005F_x0041_" },
+			{ ref: "A3", location: "_x005f_x0041_" },
+			{ ref: "A4", location: "_x0041_x0042_" },
+			{ ref: "A5", location: 'entity & < > "' },
+			{ ref: "A6", location: "cr\rhere" },
+			{ ref: "A7", location: "tab\tline\nend" },
+			{ ref: "A8", target: "https://example.com/book.xlsx", location: "'_x0041_'!A1" },
+			{ ref: "A9", location: "'Wrong sheet'!A1" },
+			{ ref: "A10", location: "'Missing sheet'!A1" },
+		] as const;
+		const bytes = await writeXlsx({
+			sheets: [{ name: "_x0041_", rows: [["links"]], hyperlinks }],
+		});
+		const workbookXml = decoder.decode(await openZip(bytes).read("xl/workbook.xml"));
+		const sheetXml = decoder.decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
+		expect(workbookXml).toContain('<sheet name="_x005F_x0041_"');
+		expect(sheetXml).toContain(
+			"<hyperlinks>" +
+				`<hyperlink ref="A1" location="'_x005F_x0041_'!A1"/>` +
+				'<hyperlink ref="A2" location="_x005F_x005F_x005F_x0041_"/>' +
+				'<hyperlink ref="A3" location="_x005F_x005f_x005F_x0041_"/>' +
+				'<hyperlink ref="A4" location="_x005F_x0041_x005F_x0042_"/>' +
+				'<hyperlink ref="A5" location="entity &amp; &lt; &gt; &quot;"/>' +
+				'<hyperlink ref="A6" location="cr_x000D_here"/>' +
+				'<hyperlink ref="A7" location="tab&#9;line&#10;end"/>' +
+				`<hyperlink ref="A8" r:id="rId1" location="'_x005F_x0041_'!A1"/>` +
+				'<hyperlink ref="A9" location="\'Wrong sheet\'!A1"/>' +
+				'<hyperlink ref="A10" location="\'Missing sheet\'!A1"/>' +
+				"</hyperlinks>",
+		);
+
+		// Destination syntax stays opaque: even wrong or missing sheet names are carried verbatim.
+		// The ST_Xstring layer changes only the wire spelling.
+		expect((await openXlsx(bytes)).sheet("_x0041_").hyperlinks).toEqual(hyperlinks);
+	});
+
+	it("keeps the clean-location corpus on the previous byte path", async () => {
+		const bytes = await writeXlsx({
+			sheets: [
+				{
+					name: "L",
+					rows: [["links"]],
+					hyperlinks: [
+						{ ref: "A1", location: "Plain!A1" },
+						{ ref: "A2", location: "_X0041_" },
+						{ ref: "A3", location: "_x123_" },
+						{ ref: "A4", location: 'R&D <Q> "one"' },
+						{ ref: "A5", location: "tab\tline\nend" },
+					],
+				},
+			],
+		});
+		const sheetXml = decoder.decode(await openZip(bytes).read("xl/worksheets/sheet1.xml"));
+		expect(sheetXml).toContain(
+			'<hyperlinks><hyperlink ref="A1" location="Plain!A1"/>' +
+				'<hyperlink ref="A2" location="_X0041_"/>' +
+				'<hyperlink ref="A3" location="_x123_"/>' +
+				'<hyperlink ref="A4" location="R&amp;D &lt;Q&gt; &quot;one&quot;"/>' +
+				'<hyperlink ref="A5" location="tab&#9;line&#10;end"/></hyperlinks>',
+		);
+	});
+
+	it("keeps clean location bytes unchanged and emits matching external relationship ids", async () => {
 		const bytes = await writeXlsx({
 			sheets: [
 				{
@@ -169,7 +234,7 @@ describe("writeXlsx — hyperlinks", () => {
 				writeXlsx({ sheets: [{ name: "L", rows: [[1]], hyperlinks: [link] }] }),
 			).rejects.toMatchObject({
 				code: "invalid-input",
-				message: /needs a target .* and\/or a location/,
+				message: /needs an external target and\/or a location/,
 			});
 		}
 	});
@@ -183,6 +248,10 @@ describe("writeXlsx — hyperlinks", () => {
 			[{ ref: "A1", target: "x", url: "y" }, /unknown property "url"/],
 			[{ ref: "A1", target: "x", tooltip: 5 }, /tooltip must be a string/],
 			[{ ref: "A1", target: "a\u0001b" }, /target contains a character not allowed in XML/],
+			[
+				{ ref: "A1", location: "a\u0001b" },
+				/location contains a character not allowed in XML/,
+			],
 		];
 		for (const [link, pattern] of cases) {
 			const err = await writeXlsx({

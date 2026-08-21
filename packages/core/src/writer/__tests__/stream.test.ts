@@ -140,13 +140,21 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		}
 	});
 
-	it("shares the exact ST_Xstring sheet-name and Note-author parts with the buffered writer", async () => {
+	it("shares exact ST_Xstring tab, Note-author, and hyperlink-location parts", async () => {
 		const input: WorkbookInput = {
 			sheets: [
 				{
 					name: "_x0041_",
 					rows: [["x"]],
 					comments: [{ ref: "A1", author: "_x0041_", text: "note" }],
+					hyperlinks: [
+						{ ref: "A1", location: "'_x0041_'!A1" },
+						{
+							ref: "A2",
+							target: "https://example.com/book.xlsx",
+							location: "cr\r_x0041_\ttab\nline",
+						},
+					],
 				},
 			],
 			definedNames: [{ name: "_x0041_", refersTo: "'_x0041_'!A1" }],
@@ -159,19 +167,41 @@ describe("streamXlsx — reader equivalence with writeXlsx", () => {
 		const streamedWorkbook = await partText(streamedBytes, "xl/workbook.xml");
 		const bufferedComments = await partText(bufferedBytes, "xl/comments1.xml");
 		const streamedComments = await partText(streamedBytes, "xl/comments1.xml");
+		const bufferedSheet = await partText(bufferedBytes, "xl/worksheets/sheet1.xml");
+		const streamedSheet = await partText(streamedBytes, "xl/worksheets/sheet1.xml");
+		const bufferedRels = await partText(bufferedBytes, "xl/worksheets/_rels/sheet1.xml.rels");
+		const streamedRels = await partText(streamedBytes, "xl/worksheets/_rels/sheet1.xml.rels");
 		expect(streamedWorkbook).toBe(bufferedWorkbook);
 		expect(streamedComments).toBe(bufferedComments);
+		// Full worksheet parts intentionally differ (`streamXlsx` omits <dimension>), so compare the
+		// affected block and relationship part instead of making a false archive-identity claim.
+		expect(streamedSheet.match(/<hyperlinks>.*<\/hyperlinks>/)?.[0]).toBe(
+			bufferedSheet.match(/<hyperlinks>.*<\/hyperlinks>/)?.[0],
+		);
+		expect(streamedRels).toBe(bufferedRels);
 		expect(streamedWorkbook).toContain('<sheet name="_x005F_x0041_"');
 		expect(streamedWorkbook).toContain(
 			"<definedName name=\"_x005F_x0041_\">'_x005F_x0041_'!A1",
 		);
 		expect(streamedComments).toContain("<author>_x005F_x0041_</author>");
+		expect(streamedSheet).toContain(`location="'_x005F_x0041_'!A1"`);
+		expect(streamedSheet).toContain('location="cr_x000D__x005F_x0041_&#9;tab&#10;line"');
 
 		const wb = await openXlsx(streamedBytes);
+		const bufferedWb = await openXlsx(bufferedBytes);
 		expect(wb.sheets.map((sheet) => sheet.name)).toEqual(["_x0041_"]);
 		expect(wb.sheet("_x0041_").comments).toEqual([
 			{ ref: "A1", author: "_x0041_", text: "note" },
 		]);
+		expect(wb.sheet("_x0041_").hyperlinks).toEqual([
+			{ ref: "A1", location: "'_x0041_'!A1" },
+			{
+				ref: "A2",
+				target: "https://example.com/book.xlsx",
+				location: "cr\r_x0041_\ttab\nline",
+			},
+		]);
+		expect(wb.sheet("_x0041_").hyperlinks).toEqual(bufferedWb.sheet("_x0041_").hyperlinks);
 		expect(wb.definedNames).toEqual([{ name: "_x0041_", refersTo: "'_x0041_'!A1" }]);
 	});
 

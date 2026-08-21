@@ -28,7 +28,7 @@ import type {
 	SheetAutoFilter,
 	SheetProtection,
 } from "../types";
-import { localName, relationshipId } from "../utils";
+import { isXmlSafe, localName, relationshipId } from "../utils";
 import { createXmlStream, tokenize } from "../xml";
 import { createRowAssembler } from "./row-assembler";
 import {
@@ -483,9 +483,11 @@ export function parsePrintSetup(xml: string): PrintSetup {
  * The hyperlinks a worksheet declares, in document order. They live in a `<hyperlinks>` block
  * (a sibling of `<sheetData>`); each `<hyperlink>` carries the covered `ref` plus some of:
  * an `r:id` pointing into the worksheet's own relationships (the external target), an
- * in-workbook `location`, a `tooltip`, and a `display` override. The external target is joined
- * from `rels` here so callers get the resolved URL, not a bare relationship id; a link with no
- * resolvable `r:id` simply has no `target`. A missing/empty `ref` is skipped.
+ * `location`, a `tooltip`, and a `display` override. Without a target, `location` is an
+ * in-workbook reference; with a target, it is a fragment within that external destination. The
+ * external target is joined from `rels` here so callers get the resolved URL, not a bare
+ * relationship id. A missing/empty `ref`, or a link left with no destination after relationship
+ * resolution and location decoding, is skipped.
  */
 export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): Hyperlink[] {
 	const links: Hyperlink[] = [];
@@ -496,17 +498,25 @@ export function parseHyperlinks(xml: string, rels?: Map<string, Relationship>): 
 
 		// Built immutably (Hyperlink is readonly): include only the attributes that are present.
 		const rid = relationshipId(token.attrs);
-		const target = rid !== undefined ? rels?.get(rid)?.target : undefined;
-		const location = token.attrs.location;
+		const resolvedTarget = rid !== undefined ? rels?.get(rid)?.target : undefined;
+		const target =
+			resolvedTarget !== undefined && resolvedTarget !== "" ? resolvedTarget : undefined;
+		// XML entities are already decoded. Decode the complete ST_Xstring once; omit a result the
+		// public writer cannot safely emit (for example, `_x0001_`), then drop a link left with no
+		// destination.
+		const rawLocation = token.attrs.location;
+		const decodedLocation = rawLocation !== undefined ? decodeXstring(rawLocation) : undefined;
+		const location =
+			decodedLocation !== undefined && decodedLocation !== "" && isXmlSafe(decodedLocation)
+				? decodedLocation
+				: undefined;
+		if (target === undefined && location === undefined) continue;
 		const tooltip = token.attrs.tooltip;
 		const display = token.attrs.display;
 		links.push({
 			ref,
-			// An empty external target is no destination — gate it exactly like an empty location,
-			// so a degenerate `Target=""` rel doesn't surface as a target the writer then melts
-			// away (which would make read→write→read lossy instead of lossless-or-typed).
-			...(target !== undefined && target !== "" ? { target } : {}),
-			...(location !== undefined && location !== "" ? { location } : {}),
+			...(target !== undefined ? { target } : {}),
+			...(location !== undefined ? { location } : {}),
 			...(tooltip !== undefined ? { tooltip } : {}),
 			...(display !== undefined ? { display } : {}),
 		});

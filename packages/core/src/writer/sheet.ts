@@ -795,10 +795,11 @@ function mergeCellsXml(sheetName: string, merges: readonly string[] | undefined)
 
 // <hyperlinks> — each link covers a cell or range and needs somewhere to go: an external target
 // (URL / mailto: / file:, written VERBATIM into the sheet's rels part with TargetMode="External")
-// and/or an in-workbook location. Empty-string destinations normalize away (the reader never
-// yields an empty location); tooltip/display are carried verbatim, empty or not, mirroring the
-// reader exactly. Returns the external targets in r:id order — non-empty means the sheet needs
-// a relationships part.
+// and/or a location. Without a target, the location is an in-workbook reference; with a target,
+// it is a fragment within that external destination. Empty-string destinations normalize away
+// (the reader never yields an empty location); tooltip/display are carried verbatim, empty or not,
+// mirroring the reader exactly. Returns external targets in r:id order — non-empty means the sheet
+// needs a relationships part.
 function hyperlinksXml(
 	sheetName: string,
 	hyperlinks: readonly Hyperlink[] | undefined,
@@ -848,10 +849,7 @@ function hyperlinksXml(
 		const target = rawTarget === "" ? undefined : rawTarget;
 		const location = rawLocation === "" ? undefined : rawLocation;
 		if (target === undefined && location === undefined) {
-			sheetInvalid(
-				sheetName,
-				`${what} needs a target (external) and/or a location (in-workbook)`,
-			);
+			sheetInvalid(sheetName, `${what} needs an external target and/or a location`);
 		}
 		const tooltip = str("tooltip", raw.tooltip);
 		const display = str("display", raw.display);
@@ -860,7 +858,11 @@ function hyperlinksXml(
 			targets.push(target);
 			attrs += ` r:id="rId${targets.length}"`;
 		}
-		if (location !== undefined) attrs += ` location="${escapeAttr(location)}"`;
+		// `location` is logical ST_Xstring text. Encode the complete value once before XML attribute
+		// escaping: `'_x0041_'!A1` becomes `'_x005F_x0041_'!A1`; CR becomes `_x000D_`, while
+		// TAB/LF become numeric character references in `escapeAttr`. The previous bytes stay unchanged
+		// only when the logical value contains neither escape/collision-shaped text nor CR.
+		if (location !== undefined) attrs += ` location="${escapeAttr(encodeXstring(location))}"`;
 		if (tooltip !== undefined) attrs += ` tooltip="${escapeAttr(tooltip)}"`;
 		if (display !== undefined) attrs += ` display="${escapeAttr(display)}"`;
 		entries.push(`<hyperlink${attrs}/>`);

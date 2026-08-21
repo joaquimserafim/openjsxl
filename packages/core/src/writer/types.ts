@@ -84,8 +84,9 @@ export interface SheetInput {
 	readonly merges?: readonly string[];
 	/**
 	 * Hyperlinks on this sheet (F4.6) — the same records `Worksheet.hyperlinks` returns. Each needs
-	 * a `ref` (cell or range) plus an external `target` and/or an in-workbook `location`; `tooltip`
-	 * and `display` are optional. External targets get the sheet's relationships part.
+	 * a `ref` (cell or range) plus an external `target` and/or a `location`; `location` is an
+	 * in-workbook reference without `target`, or a fragment within `target` when both are present.
+	 * `tooltip` and `display` are optional. External targets get the sheet's relationships part.
 	 */
 	readonly hyperlinks?: readonly Hyperlink[];
 	/**

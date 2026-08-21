@@ -235,8 +235,9 @@ export class XlsxWorksheet implements Worksheet {
 
 	/**
 	 * Hyperlinks declared on this sheet, in document order. Each carries the covered `ref` and,
-	 * where present, a resolved external `target`, an in-workbook `location`, a `tooltip`, and a
-	 * `display` override. Empty when none.
+	 * where present, a resolved external `target`, a `location`, a `tooltip`, and a `display`
+	 * override. Without `target`, `location` is an in-workbook reference; with `target`, it is a
+	 * fragment within that external destination. Empty when none.
 	 */
 	get hyperlinks(): readonly Hyperlink[] {
 		if (this.#hyperlinks === undefined) {

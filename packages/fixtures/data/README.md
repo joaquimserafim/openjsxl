@@ -262,6 +262,19 @@ git-ignored [`../local/`](../local) directory and are never committed.
   read→write→read result. The earlier failed return that changed the reference to `[1]A!B4` is
   deliberately not committed.
 
+- **`excel-online-hyperlink-location-saveback.xlsx`** — saved and downloaded from **Microsoft
+  Excel Online 16.0300** on 2026-08-21 from the openjsxl-authored E20 POST workbook. In the real
+  UI, the PRE workbook offered no **Open link** action, while the POST hyperlink opened the literal
+  `_x0041_` worksheet at its `B4` marker. The owner then edited only populated cell `Control!B12`
+  from `BEFORE` to `AFTER`; Excel autosaved it and no repair, conversion, or unsupported-feature
+  warning was observed. The return preserves Excel's lowercase protected tab and hyperlink
+  `location` forms (`_x005f_x0041_`), including the link that also retains the external target
+  `https://example.com/`. It contains no recovery or workbook external-link parts. SHA-256:
+  `c31e6054beb282b6f7b2d89fe61f30604232c8d83a010e6c29da8d4f3ba7cc7a`.
+  `reader/__tests__/hyperlink-location-excel-online.test.ts` pins the producer bytes, checksum-
+  verified logical links, and read→write→read result. The PRE workbook and the earlier POST return
+  whose marker remained `BEFORE` are evidence only and are deliberately not committed.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.
