@@ -59,10 +59,12 @@ describe("writeXlsx — formula cells", () => {
 	});
 
 	it("preserves CR, CRLF, and lone LF in formula element text", async () => {
+		// F11.1 made CR survive; F11.20 fixed its wire spelling to the ST_Xstring form `_x000D_` (the
+		// canonical CR form E20 established) — LF stays literal. The logical round trip is the contract.
 		const formula = 'CONCAT("a\rb","c\r\nd","e\nf")';
 		const bytes = await writeXlsx(one({ formula, value: "abcdef" }));
 		const xml = await sheetXmlOf(bytes);
-		expect(xml).toContain('<f>CONCAT("a&#13;b","c&#13;\nd","e\nf")</f>');
+		expect(xml).toContain('<f>CONCAT("a_x000D_b","c_x000D_\nd","e\nf")</f>');
 		expect(xml).not.toContain("\r");
 		expect((await openXlsx(bytes)).sheet("S").formula("A1")).toBe(formula);
 	});

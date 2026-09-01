@@ -275,6 +275,27 @@ git-ignored [`../local/`](../local) directory and are never committed.
   verified logical links, and read→write→read result. The PRE workbook and the earlier POST return
   whose marker remained `BEFORE` are evidence only and are deliberately not committed.
 
+- **`excel-online-formula-xstring-saveback.xlsx`** — saved and downloaded from **Microsoft
+  Excel Online 16.0300** on 2026-08-22 from the openjsxl-authored F11.20 POST workbook (cell,
+  table, data-validation, and conditional-formatting formulas referencing a worksheet literally
+  named `_x0041_`, plus a `"_x0041_"` string literal). In the real UI the PRE control (HEAD's
+  writer, formulas raw) broke exactly as the OOXML `ST_Xstring` rule predicts — Excel decoded the
+  reference to a sheet named `A`, found none, and fabricated an external workbook link
+  (`='https://d.docs.live.net/…/[A]A'!B4*2`, "Trust workbook links" banner; `A2` showed `A`) —
+  while the POST workbook resolved: `Control!A1` = 42, `A2` = `_x0041_`, `A3` = 7, table Tag =
+  `a_x0041_`/`b_x0041_`, no repair or unsupported-feature warning. The owner then edited only
+  populated cell `Control!B12` from `BEFORE` to `AFTER`; Excel autosaved it. The return preserves
+  the protected spellings — Excel's lowercase tab `_x005f_x0041_`, our uppercase `_x005F_x0041_`
+  inside every formula (quotes dropped from the now-unquoted sheet reference; the table formula
+  normalized to `T[[#This Row],[Item]]&"_x005F_x0041_"`) — and moved both cross-sheet
+  data-validation/conditional-formatting rules into `x14` `<extLst>` extensions (still carrying
+  the protected text), which openjsxl documents as skipped. It contains no recovery or workbook
+  external-link parts. SHA-256:
+  `4f2dae0fbdef29bea148ff0ba3a1fc2d6f53e421888e1d3efe3cada2fda51548`.
+  `reader/__tests__/formula-xstring-excel-online.test.ts` pins the producer bytes, the
+  checksum-verified logical formulas/values, and the read→write→read result. The PRE workbook is
+  evidence only and is deliberately not committed.
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

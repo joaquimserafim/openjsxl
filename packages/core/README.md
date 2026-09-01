@@ -116,16 +116,18 @@ colors, document properties, pivot tables, external-workbook links, gradient fil
 `.xlsx` without them (`Workbook.macroEnabled` flags a macro-enabled source). Full list: the root
 README's fidelity table.
 
-Worksheet tab names, legacy Note authors, complete logical `DefinedName.refersTo` formulas, and
-`Hyperlink.location` values use OOXML's `ST_Xstring` collision rule: logical `_x0041_` stores as
-`_x005F_x0041_`, and the reader decodes each complete field exactly once. Supply defined-name
-formulas without a leading `=` and locations as logical text; never pre-encode `_xHHHH_`. Without
-`target`, a location is an in-workbook reference such as `'Sheet2'!B5`; with `target`, it is a
-fragment within that external destination.
+Worksheet tab names, legacy Note authors, `Hyperlink.location` values, and every formula field —
+cell formulas, `DefinedName.refersTo`, data-validation `formula1`/`formula2`, conditional-formatting
+`formulas`, and table `totalsRowFormula`/`calculatedColumnFormula` (`ST_Formula` ⊂ `ST_Xstring`) —
+use OOXML's `ST_Xstring` collision rule: logical `_x0041_` stores as `_x005F_x0041_`, and the reader
+decodes each complete field exactly once. Supply every formula in logical stored form without a
+leading `=` and locations as logical text; never pre-encode `_xHHHH_`. Without `target`, a location
+is an in-workbook reference such as `'Sheet2'!B5`; with `target`, it is a fragment within that
+external destination.
 
 Files written by openjsxl 1.0.0 with a raw escape-shaped value in these fields are ambiguous—Excel
 reads `_x0041_` as `A`, and no reader can recover whether the producer intended the literal
-spelling. openjsxl follows OOXML/Excel without a heuristic legacy mode. Direct writer locations
+spelling. openjsxl follows OOXML/Excel without a heuristic legacy mode. Separately, since 1.0.1 a carriage return inside any formula field travels as the `ST_Xstring` escape `_x000D_` (not `&#13;`): the 1.0.1 reader reads both spellings, but an openjsxl reader older than 1.0.1 shows the seven literal characters `_x000D_` for a CR written by 1.0.1. Direct writer locations
 must be XML-safe. On read, a location that decodes to a value rejected by the XML writer is omitted;
 if no target remains, the hyperlink is omitted. openpyxl 3.1.5 does not consistently apply this
 rule to these schema fields.

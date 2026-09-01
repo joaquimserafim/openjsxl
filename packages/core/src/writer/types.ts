@@ -43,6 +43,11 @@ export type CellValue = string | number | boolean | Date | null | undefined;
 export interface StyledCell {
 	readonly value?: CellValue;
 	readonly style?: CellStyle;
+	/**
+	 * Formula text in logical stored form (no leading `=`). `ST_Formula` is a restriction of
+	 * `ST_Xstring`, so the writer applies the `_xHHHH_` wire escape itself — pass `_x0041_` to store
+	 * the literal `_x0041_`; never pre-encode.
+	 */
 	readonly formula?: string;
 }
 

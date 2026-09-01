@@ -236,7 +236,11 @@ function cachedValueXml(
 }
 
 // Render a formula cell. `formula` is the caller's value read once (TOCTOU): it must be a non-empty,
-// XML-safe string in stored form (no leading `=`) within Excel's length ceiling.
+// XML-safe string in stored form (no leading `=`) within Excel's length ceiling. It is LOGICAL text:
+// ST_Formula is a restriction of ST_Xstring (F11.20), so the complete value goes through
+// encodeXstring exactly once, after validation and immediately before XML escaping — a literal
+// `_x0041_` stores as `_x005F_x0041_` (Excel would otherwise read it as `A`), CR stores as
+// `_x000D_` (the canonical CR wire form E20 established), and clean text is byte-identical.
 function renderFormulaCell(
 	ref: string,
 	sAttr: string,
@@ -269,7 +273,7 @@ function renderFormulaCell(
 		);
 	}
 	const cached = cachedValueXml(ref, value, date1904);
-	return `<c r="${ref}"${sAttr}${cached.tAttr}><f>${escapeText(formula)}</f>${cached.vXml}</c>`;
+	return `<c r="${ref}"${sAttr}${cached.tAttr}><f>${escapeText(encodeXstring(formula))}</f>${cached.vXml}</c>`;
 }
 
 // ── Sheet geometry (F4.5): validation + emission ───────────────────────────────────────────────
@@ -1056,9 +1060,13 @@ function dataValidationsXml(
 		// sqref is the LAST attribute (matching Excel/openpyxl); tokens are canonical A1 — no escaping.
 		attrs += ` sqref="${tokens.join(" ")}"`;
 
+		// Operands are logical ST_Formula (⊂ ST_Xstring) text, validated above as such; the complete
+		// value is encoded once right before escaping (F11.20) — clean operands stay byte-identical.
 		let children = "";
-		if (formula1 !== undefined) children += `<formula1>${escapeText(formula1)}</formula1>`;
-		if (formula2 !== undefined) children += `<formula2>${escapeText(formula2)}</formula2>`;
+		if (formula1 !== undefined)
+			children += `<formula1>${escapeText(encodeXstring(formula1))}</formula1>`;
+		if (formula2 !== undefined)
+			children += `<formula2>${escapeText(encodeXstring(formula2))}</formula2>`;
 		entries.push(
 			children === ""
 				? `<dataValidation${attrs}/>`
@@ -1390,7 +1398,8 @@ function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
 		if (++emitted > MAX_CF_FORMULAS) {
 			sheetInvalid(sheetName, `${what} has more than ${MAX_CF_FORMULAS} formulas`);
 		}
-		out += `<formula>${escapeText(stored)}</formula>`;
+		// Logical ST_Formula text, encoded once right before escaping (F11.20).
+		out += `<formula>${escapeText(encodeXstring(stored))}</formula>`;
 	}
 	return out;
 }
@@ -1699,13 +1708,21 @@ function tableColumnXml(
 		const fn = provided.totalsRowFunction;
 		if (fn !== undefined)
 			attrs += ` totalsRowFunction="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowFunction`, fn))}"`;
+		// Both formulas are logical ST_Formula (⊂ ST_Xstring) text: validated, then encoded once
+		// right before escaping (F11.20) — the same convention the table name/label already use.
 		const totalsFormula = provided.totalsRowFormula;
 		if (totalsFormula !== undefined) {
-			children += `<totalsRowFormula>${escapeText(requireXmlString(sheetName, `${what} totalsRowFormula`, totalsFormula))}</totalsRowFormula>`;
+			const logical = requireXmlString(sheetName, `${what} totalsRowFormula`, totalsFormula);
+			children += `<totalsRowFormula>${escapeText(encodeXstring(logical))}</totalsRowFormula>`;
 		}
 		const calcFormula = provided.calculatedColumnFormula;
 		if (calcFormula !== undefined) {
-			children += `<calculatedColumnFormula>${escapeText(requireXmlString(sheetName, `${what} calculatedColumnFormula`, calcFormula))}</calculatedColumnFormula>`;
+			const logical = requireXmlString(
+				sheetName,
+				`${what} calculatedColumnFormula`,
+				calcFormula,
+			);
+			children += `<calculatedColumnFormula>${escapeText(encodeXstring(logical))}</calculatedColumnFormula>`;
 		}
 	}
 	return children === ""

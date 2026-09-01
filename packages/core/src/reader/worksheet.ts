@@ -263,11 +263,23 @@ export function parseFormulas(xml: string): Map<string, string> {
 
 	// Record a completed <f> for the current cell. Empty text ⟺ a shared dependent (its text lives
 	// on the master); non-empty text is a plain, array-master, or shared-master formula.
-	const finalize = (text: string): void => {
+	const finalize = (raw: string): void => {
 		if (curRef === undefined) return;
+		// ST_Formula is a restriction of ST_Xstring (F11.20): decode the COMPLETE accumulated element
+		// text exactly once, BEFORE the length ceiling, master registration, and dependent translation,
+		// so the accessor, the bridge, and the evaluator all see logical text (a stored `_x005F_x0041_`
+		// IS the literal `_x0041_`; a raw `_x0041_` is the character `A`, as Excel reads it). A decoded
+		// value the strict writer cannot emit (a control char / lone surrogate a producer escaped)
+		// degrades to "no formula" — the cached value survives — keeping the shared bound closed.
+		const logical = raw === "" ? "" : decodeXstring(raw);
+		// Stored form carries no leading `=` (the writer refuses one): a producer that wrote `=A1` —
+		// raw, or as the escape `_x003D_A1` — meant the formula A1, so strip one, the same
+		// normalization the DV/CF parsers apply. A dependent is recognized by its EMPTY wire text.
+		const text = logical.startsWith("=") ? logical.slice(1) : logical;
+		if (raw !== "" && (text === "" || !isXmlSafe(text))) return;
 		if (fType === "shared") {
 			if (fSi === undefined) return;
-			if (text === "") {
+			if (raw === "") {
 				if (curCell !== undefined) deps.push({ ref: curRef, cell: curCell, si: fSi });
 			} else {
 				// Register the master for translation ONLY when its text is within Excel's length

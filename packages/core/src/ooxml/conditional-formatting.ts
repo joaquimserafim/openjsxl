@@ -10,6 +10,7 @@ import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
 import { isCanonicalSqrefToken, MAX_SQREF_RANGES } from "./data-validation";
 import { parseColor } from "./styles";
+import { decodeXstring } from "./xstring";
 
 // Conditional-formatting parser (F9.3). Reads the worksheet's MAIN-part `<conditionalFormatting>`
 // blocks into the shared model, resolving each `<cfRule @dxfId>` to an inline {@link DxfStyle} against
@@ -52,8 +53,11 @@ const bool01 = (v: string | undefined): boolean | undefined => {
 };
 
 // A formula operand in stored form (leading `=` stripped), or undefined when empty / XML-unsafe.
+// The complete element text is ST_Xstring-decoded exactly once FIRST (F11.20: ST_Formula ⊂
+// ST_Xstring), so the `=` strip, the safety check, and the MAX_CF_FORMULAS count all see logical text.
 const storedFormula = (text: string): string | undefined => {
-	const s = text.startsWith("=") ? text.slice(1) : text;
+	const logical = decodeXstring(text);
+	const s = logical.startsWith("=") ? logical.slice(1) : logical;
 	return s !== "" && isXmlSafe(s) ? s : undefined;
 };
 

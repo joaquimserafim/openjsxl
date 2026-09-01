@@ -1,5 +1,5 @@
 import type { DxfStyle, TableColumn, TableInfo, TableStyleInfo } from "../types";
-import { localName } from "../utils";
+import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
 import { parseRef } from "./a1";
 import { normalizeName } from "./name";
@@ -159,14 +159,22 @@ export function parseTable(xml: string, dxfs?: readonly DxfStyle[]): TableInfo |
 						column = undefined;
 					}
 					break;
+				// Both formulas are ST_Formula ⊂ ST_Xstring (F11.20): decode the complete element text
+				// exactly once; a decoded value the strict writer would refuse (a control char / lone
+				// surrogate a producer escaped) is omitted so the reader never yields a formula the
+				// writer rejects — the column itself still carries.
 				case "totalsRowFormula":
-					if (column !== undefined && textTarget === "totals")
-						column.totalsRowFormula = text;
+					if (column !== undefined && textTarget === "totals") {
+						const f = decodeXstring(text);
+						if (isXmlSafe(f)) column.totalsRowFormula = f;
+					}
 					textTarget = undefined;
 					break;
 				case "calculatedColumnFormula":
-					if (column !== undefined && textTarget === "calc")
-						column.calculatedColumnFormula = text;
+					if (column !== undefined && textTarget === "calc") {
+						const f = decodeXstring(text);
+						if (isXmlSafe(f)) column.calculatedColumnFormula = f;
+					}
 					textTarget = undefined;
 					break;
 			}

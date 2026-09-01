@@ -139,7 +139,10 @@ describe("writeXlsx — data validation round-trip", () => {
 			formula2: '"c\r\nd\ne"',
 		};
 		const xml = await sheetXml({ name: "S", rows: [[1]], dataValidations: [dv] });
-		expect(xml).toContain('<formula1>"a&#13;b"</formula1><formula2>"c&#13;\nd\ne"</formula2>');
+		// CR wire form is the ST_Xstring `_x000D_` (F11.20; E20's canonical CR spelling); LF stays literal.
+		expect(xml).toContain(
+			'<formula1>"a_x000D_b"</formula1><formula2>"c_x000D_\nd\ne"</formula2>',
+		);
 		expect(xml).not.toContain("\r");
 		expect(await roundTrip([dv])).toEqual([dv]);
 	});

@@ -114,9 +114,12 @@ describe("writeXlsx — tables round-trip", () => {
 			],
 		};
 		const xml = await tablePart(sheet);
-		expect(xml).toContain("<totalsRowFormula>SUBTOTAL(109,[Amount])&#13;+0</totalsRowFormula>");
+		// CR wire form is the ST_Xstring `_x000D_` (F11.20; E20's canonical CR spelling); LF stays literal.
 		expect(xml).toContain(
-			'<calculatedColumnFormula>[Item]&amp;"&#13;\nx\n"</calculatedColumnFormula>',
+			"<totalsRowFormula>SUBTOTAL(109,[Amount])_x000D_+0</totalsRowFormula>",
+		);
+		expect(xml).toContain(
+			'<calculatedColumnFormula>[Item]&amp;"_x000D_\nx\n"</calculatedColumnFormula>',
 		);
 		expect(xml).not.toContain("\r");
 		const column = (await roundTrip(sheet)).tables[0]?.columns[1];

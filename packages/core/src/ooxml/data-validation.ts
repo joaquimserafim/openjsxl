@@ -7,6 +7,7 @@ import type {
 import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
 import { parseCanonicalCell } from "./a1";
+import { decodeXstring } from "./xstring";
 
 // Data-validation parser (F9.2). Reads the worksheet's MAIN-part `<dataValidations>` block into the
 // shared {@link DataValidation} model. TOLERANT — and every degrade brings the value into exactly the
@@ -120,9 +121,13 @@ function clampSafe(raw: string, max: number): string | undefined {
 
 // A formula operand in STORED form: a single leading `=` stripped (decision 6 — the writer stores DV
 // formulas without it, and stripping here too makes read a fixpoint of write). Dropped when empty or
-// XML-unsafe, so the reader never yields a formula the writer refuses.
+// XML-unsafe, so the reader never yields a formula the writer refuses. The complete element text is
+// ST_Xstring-decoded exactly once FIRST (F11.20: ST_Formula ⊂ ST_Xstring), so an encoded leading
+// `_x003D_` still counts as `=`, the inline-list limit measures logical text, and the safety check
+// sees the decoded characters.
 function storedFormula(text: string): string | undefined {
-	const stored = text.startsWith("=") ? text.slice(1) : text;
+	const logical = decodeXstring(text);
+	const stored = logical.startsWith("=") ? logical.slice(1) : logical;
 	return stored !== "" && isXmlSafe(stored) ? stored : undefined;
 }
 

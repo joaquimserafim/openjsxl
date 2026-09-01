@@ -103,8 +103,9 @@ describe("writeXlsx — conditional formatting round-trip", () => {
 			sheets: [{ name: "S", rows: [[1]], conditionalFormatting: cf }],
 		});
 		const xml = await partText(bytes, "xl/worksheets/sheet1.xml");
+		// CR wire form is the ST_Xstring `_x000D_` (F11.20; E20's canonical CR spelling); LF stays literal.
 		expect(xml).toContain(
-			'<formula>A1="a&#13;b"</formula><formula>A1="c&#13;\nd\ne"</formula>',
+			'<formula>A1="a_x000D_b"</formula><formula>A1="c_x000D_\nd\ne"</formula>',
 		);
 		expect(xml).not.toContain("\r");
 		expect(await roundTrip(cf)).toEqual(cf);

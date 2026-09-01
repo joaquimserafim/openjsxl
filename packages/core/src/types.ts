@@ -84,9 +84,9 @@ export interface TableColumn {
 	readonly totalsRowLabel?: string;
 	/** A built-in totals-row function (e.g. `"sum"`, `"count"`), if any (carried verbatim). */
 	readonly totalsRowFunction?: string;
-	/** A custom totals-row formula, if any — element text, carried verbatim, never evaluated. */
+	/** A custom totals-row formula, if any — logical text (`ST_Xstring`-decoded once), never evaluated. */
 	readonly totalsRowFormula?: string;
-	/** A calculated-column formula, if any — element text, carried verbatim, never evaluated. */
+	/** A calculated-column formula, if any — logical text (`ST_Xstring`-decoded once), never evaluated. */
 	readonly calculatedColumnFormula?: string;
 	/**
 	 * The header-cell highlight for this column (`headerRowDxfId`), resolved to an inline
@@ -138,8 +138,9 @@ export interface TableInfo {
 
 // ── Data validation (F9.2) ─────────────────────────────────────────────────────────────────────
 // One shared model: what `Worksheet.dataValidations` returns IS what `SheetInput.dataValidations`
-// accepts, so a rule crosses the bridge as a structural pass-through. Formula operands are carried
-// as verbatim TEXT (never evaluated). Worksheet-level x14 validations (Excel 2010+ cross-sheet list
+// accepts, so a rule crosses the bridge as a structural pass-through. Formula operands are LOGICAL
+// text (`ST_Formula` ⊂ `ST_Xstring`, decoded once on read / encoded once on write; F11.20), never
+// evaluated. Worksheet-level x14 validations (Excel 2010+ cross-sheet list
 // sources) live in `<extLst>` and are skipped on read / never emitted — a named degradation.
 
 /** A validation kind (`<dataValidation type>`), ECMA-376 ST_DataValidationType. */
@@ -169,7 +170,7 @@ export type DataValidationErrorStyle = "stop" | "warning" | "information";
 
 /**
  * A data-validation rule (`<dataValidation>`) constraining one or more cell ranges. `formula1` and
- * `formula2` are the producer's operand TEXT, carried verbatim: for a `list` type `formula1` is
+ * `formula2` are the producer's operand text in logical form (`ST_Xstring`-decoded once, F11.20): for a `list` type `formula1` is
  * either a range (`$A$1:$A$3`, possibly cross-sheet) or an inline comma list in quotes (`"a,b,c"` —
  * the quotes ARE part of the text); for `whole`/`decimal`/`date`/`time`/`textLength` they are the
  * bound(s); for `custom` `formula1` is the expression.
@@ -186,9 +187,13 @@ export interface DataValidation {
 	readonly type: DataValidationType;
 	/** The comparison operator (for whole/decimal/date/time/textLength); absent for list/custom/none. */
 	readonly operator?: DataValidationOperator;
-	/** The first operand text in stored form (a leading `=` stripped) — a bound, list source, or expression. */
+	/**
+	 * The first operand text in stored form (a leading `=` stripped) — a bound, list source, or
+	 * expression. Logical text: the `ST_Xstring` wire escape is decoded once on read / encoded once on
+	 * write, so never pre-encode `_xHHHH_`.
+	 */
 	readonly formula1?: string;
-	/** The second operand text in stored form — only meaningful for `between`/`notBetween`. */
+	/** The second operand text in stored form (logical, as `formula1`) — only for `between`/`notBetween`. */
 	readonly formula2?: string;
 	/** Whether an empty cell passes validation (`allowBlank`). */
 	readonly allowBlank?: boolean;
@@ -285,7 +290,8 @@ interface CfRuleBase {
 
 /**
  * A highlight rule — one that paints matching cells with a {@link DxfStyle}. Discriminated by `type`.
- * `formulas` are the `<formula>` children verbatim (0–3); the declarative attrs (`operator`/`text`/
+ * `formulas` are the `<formula>` children as logical text (0–3; `ST_Formula` ⊂ `ST_Xstring`, decoded
+ * once on read / encoded once on write — F11.20); the declarative attrs (`operator`/`text`/
  * `timePeriod`/`rank`/…) and any generated formula BOTH pass through untouched — regenerating either
  * would desynchronize a dual-encoded rule.
  */
@@ -302,6 +308,7 @@ export interface CfHighlightRule extends CfRuleBase {
 	readonly aboveAverage?: boolean;
 	readonly equalAverage?: boolean;
 	readonly stdDev?: number;
+	/** Operand formulas in logical stored form (no leading `=`); never pre-encode `_xHHHH_`. */
 	readonly formulas?: readonly string[];
 }
 
@@ -729,7 +736,11 @@ export interface Worksheet {
 	numberFormat(ref: string): string | undefined;
 	/** The resolved style at `ref`, or `undefined` (also when the format has no styles). */
 	style(ref: string): CellStyle | undefined;
-	/** The formula text at `ref`, or `undefined` (also when the format doesn't carry formula text). */
+	/**
+	 * The formula text at `ref`, or `undefined` (also when the format doesn't carry formula text).
+	 * Logical stored form (no leading `=`): the `ST_Xstring` wire escape is decoded once on read, so a
+	 * stored `_x005F_x0041_` is the literal `_x0041_` and a raw `_x0041_` is `A` (as Excel reads it).
+	 */
 	formula(ref: string): string | undefined;
 	/** The pictures on this sheet, in order. Empty when none (or unsupported by the format). */
 	images(): Promise<readonly SheetImage[]>;

@@ -95,17 +95,19 @@ document properties, pivot tables, external links, and gradient fills are not ca
 macros** — an `.xlsm` reads but rewrites without them (`Workbook.macroEnabled` flags it). Full
 list: the project README's fidelity table.
 
-Worksheet tab names, legacy Note authors, complete logical `DefinedName.refersTo` formulas, and
-`Hyperlink.location` values use OOXML's `ST_Xstring` collision rule: a logical literal `_x0041_`
-stores as `_x005F_x0041_`, and the reader decodes each complete field exactly once. Supply
-defined-name formulas without a leading `=` and locations as logical text; never pre-encode
-`_xHHHH_`. Without `target`, a location is an in-workbook reference such as `'Sheet2'!B5`; with
-`target`, it is a fragment within that external destination.
+Worksheet tab names, legacy Note authors, `Hyperlink.location` values, and **every formula field** —
+cell formulas, `DefinedName.refersTo`, data-validation `formula1`/`formula2`, conditional-formatting
+`formulas`, and table `totalsRowFormula`/`calculatedColumnFormula` (`ST_Formula` is a restriction of
+`ST_Xstring`) — use OOXML's `ST_Xstring` collision rule: a logical literal `_x0041_` stores as
+`_x005F_x0041_`, and the reader decodes each complete field exactly once. Supply every formula in
+logical stored form without a leading `=` and locations as logical text; never pre-encode `_xHHHH_`.
+Without `target`, a location is an in-workbook reference such as `'Sheet2'!B5`; with `target`, it is
+a fragment within that external destination.
 
 Compatibility note: openjsxl 1.0.0 wrote these fields raw, so an escape-shaped value in a
 1.0.0-produced file is ambiguous and Microsoft Excel interprets it as an escape (`_x0041_` → `A`).
 There is no reliable way to infer the original intent; openjsxl follows OOXML/Excel rather than
-double-decoding or guessing. Direct writer locations must be XML-safe. On read, a location that
+double-decoding or guessing. Separately, since 1.0.1 a carriage return inside any formula field travels as the `ST_Xstring` escape `_x000D_` (not `&#13;`): the 1.0.1 reader reads both spellings, but an openjsxl reader older than 1.0.1 shows the seven literal characters `_x000D_` for a CR written by 1.0.1. Direct writer locations must be XML-safe. On read, a location that
 decodes to a value rejected by the XML writer is omitted; if no target remains, the hyperlink is
 omitted. openpyxl 3.1.5 does not consistently apply this rule to these schema fields, so its
 behavior can differ for this case.
@@ -224,7 +226,7 @@ A sheet's cells, style/format accessors, and metadata.
 | `freeze` | `FreezePane \| undefined` | Frozen pane. |
 | `numberFormat(ref)` | `(ref: string) => string \| undefined` | Format code at a cell. |
 | `style(ref)` | `(ref: string) => CellStyle \| undefined` | Resolved style at a cell. |
-| `formula(ref)` | `(ref: string) => string \| undefined` | Formula text at a cell. |
+| `formula(ref)` | `(ref: string) => string \| undefined` | Formula text at a cell — logical stored form (`ST_Xstring`-decoded once). |
 | `images()` | `() => Promise<readonly SheetImage[]>` | Anchored pictures (lazy). |
 | `cell(ref)` | `(ref: string) => Cell` | Cell at A1; absent cells read as `empty`. |
 | `rows()` | `() => AsyncGenerator<Row>` | Stream populated rows (sparse). |
