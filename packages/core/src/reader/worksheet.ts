@@ -44,6 +44,12 @@ import {
 } from "./worksheet-attributes";
 import { effectiveStyle, rowDefaultStyleFromToken, safeColumn } from "./worksheet-cell";
 import { columnStyleFromToken, createColumnStyleResolver } from "./worksheet-column-styles";
+import {
+	createWorksheetStructure,
+	isWorksheetRow,
+	pushWorksheetClose,
+	pushWorksheetOpen,
+} from "./worksheet-structure";
 
 // `Row` is part of the public reader surface; its canonical home is ../types (shared across
 // formats, M7). Re-exported here so the worksheet parsers and reader/workbook.ts keep their imports.
@@ -174,32 +180,46 @@ export function parseDimension(xml: string): string | undefined {
  * ref: an explicit `r` is used verbatim; a cell without `r` is positioned one past the previous
  * cell (`formatRef`), exactly as the assembler synthesizes its ref — otherwise a no-`r` cell that
  * inherits a column/row style would read as a date via cell() but as "General" via numberFormat().
+ * Only worksheet/cols and worksheet/sheetData/row contribute metadata; extension lookalikes are
+ * outside that shared structural scope and cannot overwrite a real cell.
  */
 export function parseCellStyles(xml: string): Map<string, number> {
 	const styles = new Map<string, number>();
 	const columns = createColumnStyleResolver();
+	const structure = createWorksheetStructure();
 	let rowDefault: number | undefined;
 	let lastRow = 0;
 	let rowIndex = 0;
 	let lastCol = 0;
 	for (const token of tokenize(xml)) {
-		if (token.kind !== "open") continue;
-		const name = localName(token.name);
-		if (name === "col") {
+		if (token.kind === "text") continue;
+		if (token.kind === "close") {
+			const ended = pushWorksheetClose(structure, token.name);
+			if (ended === "sheetData" || ended === "row") {
+				rowDefault = undefined;
+				lastCol = 0;
+			}
+			continue;
+		}
+
+		const opened = pushWorksheetOpen(structure, token.name, token.selfClosing);
+		if (opened === "col") {
 			const cs = columnStyleFromToken(token.attrs);
 			if (cs !== undefined) columns.add(cs);
 			continue;
 		}
-		if (name === "row") {
+		if (opened === "row") {
 			const r = token.attrs.r;
 			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
 			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
 			lastRow = rowIndex;
-			rowDefault = rowDefaultStyleFromToken(token.attrs);
+			rowDefault = isWorksheetRow(structure)
+				? rowDefaultStyleFromToken(token.attrs)
+				: undefined;
 			lastCol = 0;
 			continue;
 		}
-		if (name !== "c") continue;
+		if (opened !== "c") continue;
 		// Resolve the cell's ref and column with the same positional rule as the assembler.
 		const r = token.attrs.r;
 		let ref: string;

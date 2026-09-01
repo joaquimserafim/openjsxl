@@ -30,7 +30,6 @@ describe("row assembler state — lifecycle", () => {
 		const left = createRowAssemblyState({ sharedStrings: [] });
 		const right = createRowAssemblyState({ sharedStrings: [] });
 		expect(left).toMatchObject({
-			inSheetData: false,
 			inRow: false,
 			lastRow: 0,
 			rowIndex: 0,
@@ -39,6 +38,7 @@ describe("row assembler state — lifecycle", () => {
 		});
 		expect(left.cells).not.toBe(right.cells);
 		expect(left.columnStyles).not.toBe(right.columnStyles);
+		expect(left.structure).not.toBe(right.structure);
 		expect(left.cell).not.toBe(right.cell);
 		expect(createCellAssembly()).toMatchObject({ open: false, value: "", hasValue: false });
 	});
@@ -151,7 +151,10 @@ describe("row assembler state — lifecycle", () => {
 describe("row assembler state — token transitions", () => {
 	it("opens only the selected value channel and collects eligible text", () => {
 		const state = createRowAssemblyState({ sharedStrings: [] });
-		state.cell.open = true;
+		pushOpen(state, open("worksheet"));
+		pushOpen(state, open("sheetData"));
+		pushOpen(state, open("row", { r: "1" }));
+		pushOpen(state, open("c", { r: "A1" }));
 		openValueChannel(state.cell, "is", false);
 		pushText(state, "ignored");
 		expect(state.cell.value).toBe("");
@@ -173,34 +176,35 @@ describe("row assembler state — token transitions", () => {
 
 	it("gates rows on sheetData and captures prefixed column styles first", () => {
 		const state = createRowAssemblyState({ sharedStrings: [] });
+		pushOpen(state, open("x:worksheet"));
 		expect(pushOpen(state, open("row", { r: "9" }, true))).toEqual([]);
+		pushOpen(state, open("x:cols"));
 		pushOpen(state, open("x:col", { min: "2", max: "3", style: "7" }, true));
+		pushClose(state, "x:cols");
 		// Input columns 2..3/style 7; output is a direct lookup with no retained range scan.
 		expect(state.columnStyles.styleFor(2)).toBe(7);
 		expect(state.columnStyles.styleFor(4)).toBeUndefined();
 		pushOpen(state, open("x:sheetData", {}, true));
-		expect(state.inSheetData).toBe(false);
+		expect(state.structure.region).toBeUndefined();
 		pushOpen(state, open("x:sheetData"));
-		expect(state.inSheetData).toBe(true);
+		expect(state.structure.region).toBe("sheetData");
 		expect(pushOpen(state, open("x:row", { r: "2" }, true))).toEqual([{ index: 2, cells: [] }]);
 	});
 
 	it("closes rows and sheetData at the exact token", () => {
 		const state = createRowAssemblyState({ sharedStrings: [] });
-		state.inSheetData = true;
-		state.inRow = true;
-		state.rowIndex = 3;
+		pushOpen(state, open("worksheet"));
+		pushOpen(state, open("sheetData"));
+		pushOpen(state, open("row", { r: "3" }));
 		startCell(state, { r: "A3" }, true);
 		expect(pushClose(state, "x:row")).toEqual([
 			{ index: 3, cells: [{ ref: "A3", type: "empty", value: null }] },
 		]);
 		expect(pushClose(state, "row")).toEqual([]);
 
-		state.inRow = true;
-		state.rowIndex = 4;
-		state.cells = [];
+		pushOpen(state, open("row", { r: "4" }));
 		expect(pushClose(state, "sheetData")).toEqual([{ index: 4, cells: [] }]);
-		expect(state.inSheetData).toBe(false);
+		expect(state.structure.region).toBeUndefined();
 	});
 
 	it("flushes an open row once at end-of-input", () => {
@@ -217,6 +221,7 @@ describe("row assembler state — token transitions", () => {
 	it("dispatches open, text, and close tokens", () => {
 		const state = createRowAssemblyState({ sharedStrings: [] });
 		for (const token of [
+			open("worksheet"),
 			open("sheetData"),
 			open("row", { r: "1" }),
 			open("c", { r: "A1" }),

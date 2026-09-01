@@ -57,9 +57,10 @@ describe("StyleTable.formatCode — units", () => {
 });
 
 describe("parseCellStyles — units", () => {
-	it("maps addressed cells to their style index, skipping cells without r or s", () => {
+	it("maps addressed cells to their style index and omits cells with no effective style", () => {
 		const map = parseCellStyles(
-			'<row><c r="A1" s="2"/><c r="B1"><v>1</v></c><c r="C1" s="0"/></row>',
+			'<worksheet><sheetData><row><c r="A1" s="2"/><c r="B1"><v>1</v></c>' +
+				'<c r="C1" s="0"/></row></sheetData></worksheet>',
 		);
 		expect(map.get("A1")).toBe(2);
 		expect(map.has("B1")).toBe(false); // no s attribute

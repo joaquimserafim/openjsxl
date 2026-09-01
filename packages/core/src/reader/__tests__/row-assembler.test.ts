@@ -17,6 +17,7 @@ const close = (name: string): XmlToken => ({ kind: "close", name });
 function assemble(tokens: readonly XmlToken[], ctx: DecodeContext = { sharedStrings: [] }): Row[] {
 	const assembler = createRowAssembler(ctx);
 	const rows: Row[] = [];
+	assembler.push(open("worksheet"));
 	for (const token of tokens) rows.push(...assembler.push(token));
 	rows.push(...assembler.flush());
 	return rows;
@@ -29,6 +30,7 @@ function valueCell(attrs: Readonly<Record<string, string>>, value: string): XmlT
 describe("createRowAssembler — row and cell state", () => {
 	it("assembles only rows inside sheetData and accepts namespace prefixes", () => {
 		const assembler = createRowAssembler({ sharedStrings: [] });
+		expect(assembler.push(open("x:worksheet"))).toEqual([]);
 		expect(assembler.push(open("x:row", { r: "9" }, true))).toEqual([]);
 		expect(assembler.push(open("x:sheetData", {}, true))).toEqual([]);
 		expect(assembler.push(open("x:row", { r: "8" }, true))).toEqual([]);
@@ -59,6 +61,7 @@ describe("createRowAssembler — row and cell state", () => {
 
 	it("can emit an unclosed row and a new self-closing row from one token", () => {
 		const assembler = createRowAssembler({ sharedStrings: [] });
+		assembler.push(open("worksheet"));
 		assembler.push(open("sheetData"));
 		assembler.push(open("row", { r: "1" }));
 		assembler.push(open("c", { r: "A1" }, true));
@@ -131,6 +134,7 @@ describe("createRowAssembler — row and cell state", () => {
 
 	it("recovers unclosed cells and rows, then flushes EOF only once", () => {
 		const assembler = createRowAssembler({ sharedStrings: [] });
+		assembler.push(open("worksheet"));
 		assembler.push(open("sheetData"));
 		assembler.push(open("row", { r: "1" }));
 		for (const token of valueCell({ r: "A1" }, "1").slice(0, -1)) assembler.push(token);
@@ -157,6 +161,7 @@ describe("createRowAssembler — row and cell state", () => {
 
 	it("finishes buffered inline text when sheetData closes early", () => {
 		const assembler = createRowAssembler({ sharedStrings: [] });
+		assembler.push(open("worksheet"));
 		assembler.push(open("sheetData"));
 		assembler.push(open("row", { r: "3" }));
 		assembler.push(open("c", { r: "A3", t: "inlineStr" }));
@@ -233,7 +238,9 @@ describe("createRowAssembler — text and styles", () => {
 		};
 		assemble(
 			[
+				open("cols"),
 				open("col", { min: "1", max: "4", style: "7" }, true),
+				close("cols"),
 				open("sheetData"),
 				open("row", { r: "1", s: "5", customFormat: "1" }),
 				...valueCell({ r: "A1" }, "1"),

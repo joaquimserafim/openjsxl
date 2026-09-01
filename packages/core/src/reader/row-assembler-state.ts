@@ -8,6 +8,14 @@ import {
 	columnStyleFromToken,
 	createColumnStyleResolver,
 } from "./worksheet-column-styles";
+import {
+	createWorksheetStructure,
+	isWorksheetRegion,
+	isWorksheetRow,
+	pushWorksheetClose,
+	pushWorksheetOpen,
+	type WorksheetStructure,
+} from "./worksheet-structure";
 
 // Internal row-assembler lifecycle and token transitions. They stay small enough to test directly
 // without going through the XML tokenizer or exposing new package API.
@@ -29,7 +37,7 @@ export interface CellAssembly {
 
 export interface RowAssemblyState {
 	readonly ctx: DecodeContext;
-	inSheetData: boolean;
+	readonly structure: WorksheetStructure;
 	inRow: boolean;
 	lastRow: number;
 	rowIndex: number;
@@ -62,7 +70,7 @@ export function createCellAssembly(): CellAssembly {
 export function createRowAssemblyState(ctx: DecodeContext): RowAssemblyState {
 	return {
 		ctx,
-		inSheetData: false,
+		structure: createWorksheetStructure(),
 		inRow: false,
 		lastRow: 0,
 		rowIndex: 0,
@@ -185,27 +193,24 @@ export function openValueChannel(cell: CellAssembly, name: string, selfClosing: 
 	}
 }
 
-/** Handle an opening token. Example: `<sheetData>` changes `inSheetData` to true and emits `[]`. */
+/** Handle an opening token. Example: canonical `<sheetData>` opens row scope and emits `[]`. */
 export function pushOpen(
 	state: RowAssemblyState,
 	token: Extract<XmlToken, { kind: "open" }>,
 ): Row[] {
 	const name = localName(token.name);
-	if (name === "sheetData") {
-		if (!token.selfClosing) state.inSheetData = true;
-		return [];
-	}
-	// `<col>` precedes `<sheetData>`, so collect defaults before applying the sheet-data gate.
-	if (name === "col") {
+	const opened = pushWorksheetOpen(state.structure, token.name, token.selfClosing);
+	// `<col>` precedes `<sheetData>`, but only a canonical direct `<cols>` owns its defaults.
+	if (opened === "col") {
 		const style = columnStyleFromToken(token.attrs);
 		if (style !== undefined) state.columnStyles.add(style);
 		return [];
 	}
-	if (!state.inSheetData) return [];
+	if (!isWorksheetRegion(state.structure, "sheetData")) return [];
 
-	if (name === "row") return startRow(state, token.attrs, token.selfClosing);
-	if (!state.inRow) return [];
-	if (name === "c") {
+	if (opened === "row") return startRow(state, token.attrs, token.selfClosing);
+	if (!isWorksheetRow(state.structure) || !state.inRow) return [];
+	if (opened === "c") {
 		startCell(state, token.attrs, token.selfClosing);
 		return [];
 	}
@@ -229,21 +234,25 @@ export function pushText(state: RowAssemblyState, value: string): void {
 /** Handle a closing token. Example: `</row>` emits the completed row exactly once. */
 export function pushClose(state: RowAssemblyState, nameWithPrefix: string): Row[] {
 	const name = localName(nameWithPrefix);
-	if (name === "sheetData") {
+	const ended = pushWorksheetClose(state.structure, nameWithPrefix);
+	if (ended === "sheetData") {
 		const row = finishRow(state);
-		state.inSheetData = false;
 		return row === undefined ? [] : [row];
 	}
-	if (name === "row") {
+	if (ended === "row") {
 		if (!state.inRow) return [];
 		const row = finishRow(state);
 		return row === undefined ? [] : [row];
 	}
+	if (ended === "c") {
+		finishCell(state);
+		return [];
+	}
+	if (!isWorksheetRow(state.structure) || !state.inRow) return [];
 
 	const { cell } = state;
 	if (!cell.open) return [];
-	if (name === "c") finishCell(state);
-	else if (name === "v") cell.inValue = false;
+	if (name === "v") cell.inValue = false;
 	else if (name === "is") cell.inInline = false;
 	else if (name === "t") {
 		if (cell.textDepth > 0) {
