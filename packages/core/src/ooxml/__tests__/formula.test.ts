@@ -6,6 +6,10 @@ import { MAX_FORMULA_LEN, translateFormula } from "../formula";
 // them pins our translator to the reference behavior, including the subtle cases the scope calls
 // out: cross-sheet cell parts DO shift (the sheet name stays), $-absolute parts pin, strings and
 // function names are never touched.
+//
+// F11.9 adds: references are recognized case-insensitively and rewritten in canonical uppercase;
+// bracketed spans (structured references, external-workbook indexes) are opaque; malformed brackets
+// degrade to "leave the rest unchanged". Where we deliberately diverge from openpyxl it is noted.
 
 // [master formula, Δrow, Δcol, expected]
 const VECTORS: [string, number, number, string][] = [
@@ -44,6 +48,52 @@ const VECTORS: [string, number, number, string][] = [
 	["COUNTIF(B:B,A1)", 4, 2, "COUNTIF(D:D,C5)"],
 ];
 
+// F11.9 — openpyxl Translator output (origin C1 → C2 is Δ(1,0); C1 → D3 is Δ(2,1)) for structured
+// references, lowercase references, external-workbook brackets, and their look-alikes.
+const F119_VECTORS: [string, number, number, string][] = [
+	// Structured references are opaque — an A1-looking column name never shifts.
+	["SUM(Table1[A1])", 1, 0, "SUM(Table1[A1])"],
+	["SUM(Table1[A1])", 2, 1, "SUM(Table1[A1])"],
+	["Table1[@A1]", 2, 1, "Table1[@A1]"],
+	["Table1[[#Data],[A1]]", 2, 1, "Table1[[#Data],[A1]]"],
+	["SUM(Table1[[#Headers],[Col'[1']]])", 2, 1, "SUM(Table1[[#Headers],[Col'[1']]])"],
+	["[@A1]*2", 2, 1, "[@A1]*2"], // bare structured ref inside a table body
+	["A1[Col]", 2, 1, "A1[Col]"], // an A1-looking TABLE name
+	// Lowercase references shift and come back canonical uppercase (the F11.9 defect).
+	["a1+Table1[B2]", 1, 0, "A2+Table1[B2]"],
+	["a1+Table1[B2]", 2, 1, "B3+Table1[B2]"],
+	["a1", 2, 1, "B3"],
+	["a:a", 2, 1, "B:B"],
+	["sum(a1:b2)", 2, 1, "sum(B3:C4)"], // the lowercase function NAME stays as written
+	["log10(a1)", 2, 1, "log10(B3)"],
+	["abc1!a1", 2, 1, "abc1!B3"], // unquoted sheet name stays; its cell part shifts
+	["'my sheet'!a1", 2, 1, "'my sheet'!B3"],
+	['"a1"&a1', 2, 1, '"a1"&B3'],
+	// External-workbook brackets are opaque; the cell part still shifts (openpyxl agrees).
+	["[1]Sheet1!A1", 2, 1, "[1]Sheet1!B3"],
+	["[Book.xlsx]Sheet1!a1", 2, 1, "[Book.xlsx]Sheet1!B3"],
+	// Boundaries: not references.
+	["name_a1", 2, 1, "name_a1"],
+	["A1_x", 2, 1, "A1_x"],
+	["A1.5", 2, 1, "A1.5"],
+	// A reference must START at a boundary (review A1): a numeral's exponent is not a cell, whether
+	// lowercase (the F11.9 regression the review caught) or uppercase (pre-existing), and a
+	// Unicode-prefixed name keeps its A1-shaped tail.
+	["2e5+a1", 1, 0, "2e5+A2"],
+	["2e5", 0, 1, "2e5"],
+	["1E3+A1", 1, 0, "1E3+A2"],
+	["1.5E+3*A1", 1, 1, "1.5E+3*B2"],
+	["ñA1+A1", 1, 0, "ñA1+A2"],
+	["日本A1", 1, 0, "日本A1"],
+	// Rows are 1-based (review A2): `A0`, `0:0`, `A01` are names, never cells — verbatim, and a
+	// fully pinned `$A$0` is byte-stable rather than `#REF!`.
+	["A0+A1", 1, 0, "A0+A2"],
+	["a0", 1, 0, "a0"],
+	["$A$0", 1, 0, "$A$0"],
+	["0:0", 1, 0, "0:0"],
+	["A01+A1", 1, 0, "A01+A2"],
+];
+
 describe("translateFormula — matches openpyxl's Translator", () => {
 	it("reproduces every reference vector", () => {
 		for (const [formula, dRow, dCol, expected] of VECTORS) {
@@ -51,21 +101,76 @@ describe("translateFormula — matches openpyxl's Translator", () => {
 		}
 	});
 
+	it("reproduces the F11.9 structured / lowercase / external vectors", () => {
+		for (const [formula, dRow, dCol, expected] of F119_VECTORS) {
+			expect(translateFormula(formula, dRow, dCol), formula).toBe(expected);
+		}
+	});
+
+	it("canonicalizes the WHOLE rewritten token to uppercase (deliberate divergence from openpyxl)", () => {
+		// openpyxl leaves a fully pinned `$a$1` lowercase and only uppercases the parts it moves; we
+		// emit Excel's canonical spelling for every reference we rewrite. Same cell either way.
+		expect(translateFormula("$a$1+a$1+$a1", 1, 0)).toBe("$A$1+A$1+$A2");
+	});
+
 	it("is the identity for a zero offset (the master cell itself)", () => {
 		expect(translateFormula("A1+$B$2*Sheet1!C3", 0, 0)).toBe("A1+$B$2*Sheet1!C3");
+		expect(translateFormula("a1+Table1[", 0, 0)).toBe("a1+Table1["); // even malformed text
 	});
 
 	it("rewrites a reference shifted off the grid to #REF! (Excel behavior; openpyxl throws)", () => {
 		expect(translateFormula("A1", -1, 0)).toBe("#REF!"); // row 0
 		expect(translateFormula("A1", 0, -1)).toBe("#REF!"); // column 0
 		expect(translateFormula("B2*2", -5, 0)).toBe("#REF!*2"); // only the off-grid ref becomes #REF!
+		expect(translateFormula("XFD1", 0, 1)).toBe("#REF!"); // past the last column (openpyxl: XFE1)
 	});
 
 	it("does not shift things that only look like references", () => {
-		// A lowercase name (stored refs are uppercase), a function name, and a string are left alone.
+		// A real defined name, a function name, and a string are left alone; lowercase `a1` is a cell.
 		expect(translateFormula('myRange+SUM(A1)&"B7"', 1, 0)).toBe('myRange+SUM(A2)&"B7"');
 		// A pseudo-column past XFD (ZZZ = 18278 > 16384) is not an addressable cell — leave verbatim.
 		expect(translateFormula("ZZZ1+A1", 1, 0)).toBe("ZZZ1+A2");
+		expect(translateFormula("zzz1+a1", 1, 0)).toBe("zzz1+A2");
+	});
+
+	it("leaves everything from an unbalanced bracket onward unchanged (no partial rewrite, no throw)", () => {
+		// openpyxl raises TokenizerError on an unmatched `[`; the tolerant reader must not.
+		expect(translateFormula("Table1[", 1, 0)).toBe("Table1[");
+		expect(translateFormula("A1+Table1[Col", 1, 0)).toBe("A2+Table1[Col"); // A1 before it still shifts
+		expect(translateFormula("A1+Table1[[#Data],[Col]+B1", 1, 0)).toBe(
+			"A2+Table1[[#Data],[Col]+B1",
+		);
+		// Divergence from openpyxl (its bracket matcher counts raw `[`/`]` and ignores `'`): we follow
+		// Excel's structured-reference escape rule, where `'` escapes the next character inside a
+		// header (`[Col']]` is the column named `Col]`), so `[Col']` is unclosed — the rest is verbatim.
+		expect(translateFormula("A1+Table1[Col']+B1", 1, 0)).toBe("A2+Table1[Col']+B1");
+		// Divergence from openpyxl (it leaves `]A1` whole): a stray `]` opens no span, so the `A1`
+		// after it is an ordinary reference and shifts.
+		expect(translateFormula("]A1", 1, 0)).toBe("]A2");
+	});
+
+	it("keeps balanced nested and escaped brackets byte-verbatim, and shifts what follows", () => {
+		expect(translateFormula("Table1[[#Data],[Col']']]]+A1", 1, 0)).toBe(
+			"Table1[[#Data],[Col']']]]+A2",
+		);
+		expect(translateFormula('T[[#This Row],[Item]]&"_x0041_"+a1', 1, 0)).toBe(
+			'T[[#This Row],[Item]]&"_x0041_"+A2',
+		);
+	});
+
+	it("stays linear on hostile input (a 1 MB structured reference; a 1 MB unbalanced bracket)", () => {
+		const cell = "SUM(Table1[[#Data],[A1]])+";
+		const big = cell.repeat(Math.ceil(1_000_000 / cell.length));
+		const t0 = performance.now();
+		const out = translateFormula(big, 1, 1);
+		const balanced = performance.now() - t0;
+		expect(out).toBe(big); // nothing to shift inside the spans; the `+` glue is verbatim
+		const open = `A1+Table1[${"[x],".repeat(250_000)}`; // never closes
+		const t1 = performance.now();
+		expect(translateFormula(open, 1, 1)).toBe(`B2+Table1[${"[x],".repeat(250_000)}`);
+		const unbalanced = performance.now() - t1;
+		expect(balanced).toBeLessThan(2_000);
+		expect(unbalanced).toBeLessThan(2_000);
 	});
 
 	it("exposes Excel's formula length ceiling", () => {
