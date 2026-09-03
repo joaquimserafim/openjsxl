@@ -283,7 +283,8 @@ export async function openXlsb(
 		}
 	}
 
-	return new Workbook(infos, byName);
+	// The parsed BrtWbProp flag (always false until F11.13 reads it) — surfaced as Workbook.date1904.
+	return new Workbook(infos, byName, undefined, [], undefined, false, date1904);
 }
 
 async function readPart(zip: ZipArchive, path: string): Promise<Uint8Array> {

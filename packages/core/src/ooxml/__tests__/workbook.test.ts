@@ -196,3 +196,18 @@ describe("parseWorkbook — defined names (F10.1)", () => {
 		).toEqual([]);
 	});
 });
+
+describe("parseWorkbook — <workbookPr date1904> (F11.10)", () => {
+	const wb = (attr: string) =>
+		`<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr${attr}/><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+
+	it("reads the xsd:boolean lexical forms, with whitespace collapsed, case-sensitively", () => {
+		expect(parseWorkbook(wb(' date1904="1"')).date1904).toBe(true);
+		expect(parseWorkbook(wb(' date1904="true"')).date1904).toBe(true);
+		expect(parseWorkbook(wb(' date1904=" 1 "')).date1904).toBe(true); // whiteSpace=collapse
+		expect(parseWorkbook(wb(' date1904="0"')).date1904).toBe(false);
+		expect(parseWorkbook(wb(' date1904="false"')).date1904).toBe(false);
+		expect(parseWorkbook(wb(' date1904="TRUE"')).date1904).toBe(false); // schema-invalid → default
+		expect(parseWorkbook(wb("")).date1904).toBe(false); // absent → the 1900 default
+	});
+});

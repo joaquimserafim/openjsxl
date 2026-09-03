@@ -56,7 +56,13 @@ async function* buildStreamParts(
 			);
 		}
 	}
-	const date1904 = options?.date1904 === true;
+	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
+	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
+	const inputDate1904 = workbook.date1904;
+	if (inputDate1904 !== undefined && typeof inputDate1904 !== "boolean") {
+		throw new XlsxError("invalid-input", "workbook.date1904 must be a boolean when present");
+	}
+	const date1904 = options?.date1904 ?? inputDate1904 ?? false;
 	// Read the caller's optional carried theme ONCE (single-read TOCTOU, matching writeXlsx).
 	const carriedTheme = workbook.themeXml;
 	// Read + validate the optional defined names ONCE (F10.1), matching writeXlsx — absent → byte-identical.

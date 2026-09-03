@@ -162,6 +162,15 @@ export interface WorkbookInput {
 	/** At least one sheet, in tab order. */
 	readonly sheets: readonly SheetInput[];
 	/**
+	 * The workbook's date system (F11.10) — `true` selects the legacy 1904 epoch (`<workbookPr
+	 * date1904="1"/>`), so every date the writer serializes uses it and raw serials the caller passes
+	 * (formula cached values, validation operands) keep their meaning. This is what
+	 * `workbookToInput` carries from `Workbook.date1904`, so a 1904 workbook rewrites as a 1904
+	 * workbook. An explicit `WriteOptions.date1904` overrides it. Absent (or `false`) = 1900 system,
+	 * byte-identical to a workbook that never set it.
+	 */
+	readonly date1904?: boolean;
+	/**
 	 * The workbook's raw theme part (`xl/theme/theme1.xml`), carried verbatim (F5.3). When a written
 	 * style uses a theme color, the writer emits this instead of the built-in Office theme — so a
 	 * custom-theme file keeps its exact colors on rewrite. Must be a non-empty, XML-safe string;
@@ -244,6 +253,8 @@ export interface StreamSheetInput {
 export interface StreamWorkbookInput {
 	readonly sheets: readonly StreamSheetInput[];
 	readonly themeXml?: string;
+	/** The workbook's date system (F11.10) — see {@link WorkbookInput.date1904}. */
+	readonly date1904?: boolean;
 	/** Workbook-level defined names (F10.1) — the same {@link DefinedName} shape as {@link WorkbookInput}. */
 	readonly definedNames?: readonly DefinedName[];
 	/** Workbook-level protection (F10.3) — see {@link WorkbookInput.protection}. */
@@ -251,6 +262,10 @@ export interface StreamWorkbookInput {
 }
 
 export interface WriteOptions {
-	/** Use the 1904 date epoch (legacy Mac) instead of the default 1900 system. */
+	/**
+	 * Use the 1904 date epoch (legacy Mac) instead of the default 1900 system. When set (even
+	 * `false`) it overrides {@link WorkbookInput.date1904}; when absent, the input's own flag — what
+	 * the bridge carries from `Workbook.date1904` — decides, defaulting to 1900.
+	 */
 	readonly date1904?: boolean;
 }

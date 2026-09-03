@@ -313,6 +313,10 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		...(themeXml !== undefined ? { themeXml } : {}),
 		...(definedNames.length > 0 ? { definedNames } : {}),
 		...(protection !== undefined ? { protection } : {}),
+		// The date system (F11.10): carried only when it is the 1904 epoch, so a 1900 workbook's bridge
+		// output stays byte-identical, and a 1904 workbook rewrites as a 1904 workbook — its raw serials
+		// (formula caches, validation operands) keep their meaning instead of shifting 1,462 days.
+		...(workbook.date1904 ? { date1904: true } : {}),
 	};
 	return out;
 }

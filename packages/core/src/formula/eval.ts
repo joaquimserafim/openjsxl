@@ -121,8 +121,8 @@ function parseA1(ref: string): { col: number; row: number } | undefined {
 }
 
 // Convert a reader Cell into an EvalValue. A date becomes its serial (the number Excel arithmetic
-// sees); a 1904-epoch workbook would shift this, a documented v0.8 edge (the flag isn't surfaced).
-function cellToValue(cell: Cell): EvalValue {
+// sees) in the WORKBOOK's date system (F11.10): a 1904-epoch file's 1904-01-01 is serial 0, not 1462.
+function cellToValue(cell: Cell, date1904: boolean): EvalValue {
 	switch (cell.type) {
 		case "empty":
 			return null;
@@ -133,7 +133,7 @@ function cellToValue(cell: Cell): EvalValue {
 		case "boolean":
 			return cell.value;
 		case "date":
-			return dateToSerial(cell.value);
+			return dateToSerial(cell.value, date1904);
 		case "error":
 			return errorFromString(cell.value);
 	}
@@ -159,7 +159,11 @@ class Evaluator {
 		const now = options.now;
 		const random = options.random;
 		this.hasVolatileSource = now !== undefined || random !== undefined;
+		// The workbook's date system threads into every serial ↔ date conversion the engine makes:
+		// date-valued cells (cellToValue), the injected clock, and the date built-ins (via ctx).
+		const date1904 = workbook.date1904;
 		this.ctx = {
+			date1904,
 			now: () => {
 				if (now === undefined) {
 					throw new FormulaError(
@@ -167,7 +171,7 @@ class Evaluator {
 						"options.now is required for NOW/TODAY",
 					);
 				}
-				return dateToSerial(now());
+				return dateToSerial(now(), date1904);
 			},
 			random: () => {
 				if (random === undefined) {
@@ -198,7 +202,7 @@ class Evaluator {
 					const model: ModelCell =
 						formula !== undefined
 							? { kind: "formula", text: formula }
-							: { kind: "value", value: cellToValue(cell) };
+							: { kind: "value", value: cellToValue(cell, this.workbook.date1904) };
 					if (colMap === undefined) {
 						colMap = new Map();
 						cells.set(row.index, colMap);

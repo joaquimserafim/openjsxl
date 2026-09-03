@@ -13,10 +13,16 @@ import { type EvalValue, errorValue, isErrorValue, isRangeView } from "./value";
  * inside `evaluate` they are always safe to call.
  */
 export interface EvalContext {
-	/** Current moment as an Excel date serial, from `options.now`. */
+	/** Current moment as an Excel date serial (in the workbook's date system), from `options.now`. */
 	now(): number;
 	/** A uniform random number in [0, 1), from `options.random`. */
 	random(): number;
+	/**
+	 * The workbook's date system (F11.10): `true` for the legacy 1904 epoch (serial 0 =
+	 * 1904-01-01), `false` for the default 1900 system. Every built-in serial ↔ date conversion uses
+	 * it; a user function that converts dates should too (`serialToDate(serial, ctx.date1904)`).
+	 */
+	readonly date1904: boolean;
 }
 
 /** A lazily-evaluated argument. Lazy functions (IF, CHOOSE) pull only the arguments they need. */

@@ -107,7 +107,7 @@ non-finite number, invalid `Date`, malformed or overlapping merges) throws `Xlsx
 character: controls and lone surrogates store via Excel's `_xHHHH_` escape and round-trip. The
 round trip is lossless for values, types, sheet names/order, styles, formulas, comments, pictures,
 custom themes, geometry, merges, hyperlinks, visibility, defined names, tables, data
-validations, conditional formatting, autofilter ranges, protection (sheet/workbook locks +
+validations, conditional formatting, autofilter ranges, the 1904 date system, protection (sheet/workbook locks +
 per-cell locked/hidden, password hashes verbatim), and print setup (margins, page setup,
 print options, header/footer). Documented drops (never silent): in-cell rich text flattens to
 plain text; an autofilter's per-column criteria/sort, row/column outline grouping, sheet tab

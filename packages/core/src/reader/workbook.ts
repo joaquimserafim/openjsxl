@@ -500,6 +500,14 @@ export class Workbook {
 	 * before a rewrite discards their macros. Always `false` for `.xlsx` and for ods/xlsb/csv.
 	 */
 	readonly macroEnabled: boolean;
+	/**
+	 * The workbook's date system (F11.10): `true` when `<workbookPr date1904>` selects the legacy
+	 * Mac 1904 epoch (serial 0 = 1904-01-01), `false` for the default 1900 system. The reader already
+	 * honours it when typing date cells; the formula evaluator uses it for every serial ↔ date
+	 * conversion. Always `false` for `.ods`/`.csv`; `.xlsb` reports the parsed `BrtWbProp` flag
+	 * once F11.13 lands (until then `false`).
+	 */
+	readonly date1904: boolean;
 	readonly #byName: Map<string, Worksheet>;
 	readonly #themeXml: string | undefined;
 	// Note: `Worksheet` here is the public interface (../types), so this same `Workbook` class is
@@ -517,6 +525,7 @@ export class Workbook {
 		definedNames: readonly DefinedName[] = [],
 		protection?: WorkbookProtection,
 		macroEnabled = false,
+		date1904 = false,
 	) {
 		this.sheets = sheets;
 		this.#byName = byName;
@@ -524,6 +533,7 @@ export class Workbook {
 		this.definedNames = definedNames;
 		this.protection = protection;
 		this.macroEnabled = macroEnabled;
+		this.date1904 = date1904;
 	}
 
 	/** The worksheet with this tab name. Throws if there is none. */
@@ -579,6 +589,8 @@ interface LoadedWorkbook {
 	readonly protection: WorkbookProtection | undefined;
 	/** Whether the workbook part's content type is macro-enabled (`.xlsm`/`.xltm`) — F10.5. */
 	readonly macroEnabled: boolean;
+	/** The `<workbookPr date1904>` flag (F11.10) — also inside `context` for cell typing. */
+	readonly date1904: boolean;
 }
 
 // Read the small parts every sheet depends on — relationships, the workbook, shared strings,
@@ -718,6 +730,7 @@ async function loadWorkbook(
 		definedNames: reconciledNames,
 		protection,
 		macroEnabled,
+		date1904,
 	};
 }
 
@@ -749,7 +762,7 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml, definedNames, protection, macroEnabled } =
+	const { zip, context, sheets, themeXml, definedNames, protection, macroEnabled, date1904 } =
 		await loadWorkbook(source, options);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
@@ -796,7 +809,7 @@ export async function openXlsx(
 		}
 	}
 
-	return new Workbook(infos, byName, themeXml, definedNames, protection, macroEnabled);
+	return new Workbook(infos, byName, themeXml, definedNames, protection, macroEnabled, date1904);
 }
 
 /**

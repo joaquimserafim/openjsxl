@@ -68,7 +68,13 @@ export async function writeXlsx(
 	requireWorkbookObject(workbook);
 	const sheets = workbook.sheets;
 	const { states, names } = validate(sheets);
-	const date1904 = options?.date1904 === true;
+	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
+	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
+	const inputDate1904 = workbook.date1904;
+	if (inputDate1904 !== undefined && typeof inputDate1904 !== "boolean") {
+		throw new XlsxError("invalid-input", "workbook.date1904 must be a boolean when present");
+	}
+	const date1904 = options?.date1904 ?? inputDate1904 ?? false;
 	// Read the caller's optional carried theme ONCE too. It only matters if a style needs a theme part.
 	const carriedTheme = workbook.themeXml;
 	// Read the caller's optional defined names ONCE (single-read TOCTOU) and validate into the trusted

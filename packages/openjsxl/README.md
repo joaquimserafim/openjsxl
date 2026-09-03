@@ -88,7 +88,7 @@ const bytes = await writeXlsx({
 `workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —
 values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
 hyperlinks, sheet visibility, defined names, tables, data validations, conditional formatting,
-autofilter ranges, protection (sheet/workbook locks + per-cell locked/hidden), and print setup
+autofilter ranges, the 1904 date system, protection (sheet/workbook locks + per-cell locked/hidden), and print setup
 (margins, orientation, scale, header/footer) all round-trip. Documented drops (never silent):
 in-cell rich text flattens to plain text; autofilter criteria/sort, outline grouping, tab colors,
 document properties, pivot tables, external links, and gradient fills are not carried; and **VBA
@@ -198,6 +198,7 @@ Returned by every reader. ([01](https://github.com/joaquimserafim/openjsxl/blob/
 | `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
 | `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
 | `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
+| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (always `false` for ods/csv; `.xlsb` reports `false` until its `BrtWbProp` flag is read). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
 | `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
 | `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
 | `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |
@@ -318,7 +319,7 @@ The opt-in evaluator — a separate import that never changes the core bundle.
 - **Results** — `WorkbookEvalResult` `{ cells: readonly CellResult[]; get(sheet, ref): ScalarValue | undefined }`; `CellResult` `{ sheet, ref, value }`.
 - **Values** — `ScalarValue` = `number | string | boolean | null | FormulaErrorValue`; `EvalValue` = `ScalarValue | RangeView`; `FormulaErrorValue` `{ kind: "error", code: ErrorCode }`; `ErrorCode` (the eight `ST_CellErrorType` values + `#CYCLE!`).
 - **`RangeView`** — a lazy window over a reference's used cells: `sheet`, `startCol/startRow/endCol/endRow`, `width`/`height`/`cellCount` (getters), `entries()`, `values()`, `populatedCount()`, `single()`, `topLeft()`, `cellAt(rowOffset, colOffset)`; `RangeEntry` `{ col, row, value }`.
-- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both extending `FunctionSpecBase` `{ minArgs, maxArgs, volatile? }`; `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number }` and (lazy) `ArgThunk` = `() => EvalValue`.
+- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both extending `FunctionSpecBase` `{ minArgs, maxArgs, volatile? }`; `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number; date1904: boolean }` and (lazy) `ArgThunk` = `() => EvalValue`.
 - **AST** — `FormulaAst` is the union of `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `ErrorLiteral`, `ArrayLiteral` (`ArrayElement`), `CellRefNode`, `NameRef`, `RangeRef`, `UnionRef`, `FunctionCall`, `EmptyArg`, `UnaryOp`, `PostfixOp`, `BinaryOp`, `Group`, `StructuredRef`, `ExternalRef`; a qualifying sheet is `SheetSpec`. The single-cell node is **`CellRefNode`** (named so it never collides with `openjsxl`'s `CellRef`, letting you import both entry points at once).
 - **Errors** — `FormulaError extends Error` `{ code: FormulaErrorCode, position? }`; `FormulaErrorCode` = `"parse-error"` | `"depth-exceeded"` | `"too-many-args"` | `"budget-exceeded"` | `"volatile-unconfigured"` | `"unsupported"`.
 

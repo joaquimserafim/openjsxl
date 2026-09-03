@@ -83,6 +83,8 @@ async function styleSnapshot(wb: Workbook) {
 			})),
 		};
 	}
+	// The date system (F11.10) is carried state too — keyed under a name no sheet can have.
+	out["[workbook]"] = { date1904: wb.date1904 };
 	return out;
 }
 
@@ -125,6 +127,8 @@ async function dataSnapshot(wb: Workbook) {
 			state: info.state,
 		};
 	}
+	// The date system (F11.10) is carried state too — keyed under a name no sheet can have.
+	out["[workbook]"] = { date1904: wb.date1904 };
 	return out;
 }
 

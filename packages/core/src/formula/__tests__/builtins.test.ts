@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openXlsx } from "../../reader/workbook";
 import { type CellInput, writeXlsx } from "../../writer";
 import { type EvaluateOptions, evaluateCell, evaluateWorkbook } from "../eval";
+import type { EvalContext } from "../functions";
 import { type EvalValue, errorValue } from "../value";
 
 // The built-in function library (F8.3), driven end to end (writeXlsx → openXlsx → evaluateWorkbook).
@@ -556,5 +557,125 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		const g = await evalSheet([[text], [f(`COUNTIF(A1,"${pattern}")`)]]);
 		expect(g("A2")).toBe(0); // no match, and — crucially — it does not hang
 		expect(performance.now() - start).toBeLessThan(2000);
+	});
+});
+
+describe("builtins — the workbook's date system threads through every conversion (F11.10)", () => {
+	// The same formulas evaluated in a 1900 workbook and a 1904 workbook: the DATE the user means is
+	// identical, the serial differs by exactly the 1,462-day epoch shift, and every date-part
+	// function agrees on the calendar date. Serial 0 in a 1904 workbook is 1904-01-01 (a Friday).
+	async function pair(rows: readonly (readonly CellInput[])[], options?: EvaluateOptions) {
+		const run = async (date1904: boolean) => {
+			const bytes = await writeXlsx({ sheets: [{ name: "S", rows }] }, { date1904 });
+			const book = await openXlsx(bytes);
+			expect(book.date1904).toBe(date1904);
+			const result = await evaluateWorkbook(book, options);
+			return (ref: string) => result.get("S", ref);
+		};
+		return { g1900: await run(false), g1904: await run(true) };
+	}
+
+	it("a date cell becomes the serial of ITS workbook: 1904-01-01 is 0 under 1904, 1462 under 1900", async () => {
+		const { g1900, g1904 } = await pair([[new Date(Date.UTC(1904, 0, 1)), f("A1"), f("A1+1")]]);
+		expect(g1904("B1")).toBe(0);
+		expect(g1904("C1")).toBe(1);
+		expect(g1900("B1")).toBe(1462);
+		expect(g1900("C1")).toBe(1463);
+	});
+
+	it("DATE/YEAR/MONTH/DAY/WEEKDAY/EDATE/EOMONTH agree on the calendar and differ on the serial", async () => {
+		const { g1900, g1904 } = await pair([
+			[
+				f("DATE(1904,1,1)"),
+				f("YEAR(DATE(1904,1,1))"),
+				f("YEAR(0)"), // serial 0: 1904-01-01 under 1904, 1899-12-30 under 1900
+				f("WEEKDAY(DATE(1904,1,1))"), // Friday → 6 (Sun=1)
+				f("EDATE(DATE(1904,1,1),1)"), // 1904-02-01
+				f("EOMONTH(DATE(1904,1,1),0)"), // 1904-01-31
+				f("DAY(EOMONTH(DATE(2020,1,15),0))"), // 31 in both systems
+				f("DATE(2020,1,15)"),
+			],
+		]);
+		expect(g1904("A1")).toBe(0);
+		expect(g1900("A1")).toBe(1462);
+		expect(g1904("B1")).toBe(1904);
+		expect(g1900("B1")).toBe(1904);
+		expect(g1904("C1")).toBe(1904);
+		expect(g1900("C1")).toBe(1899);
+		expect(g1904("D1")).toBe(6);
+		expect(g1900("D1")).toBe(6);
+		expect(g1904("E1")).toBe(31);
+		expect(g1900("E1")).toBe(1462 + 31);
+		expect(g1904("F1")).toBe(30);
+		expect(g1900("F1")).toBe(1462 + 30);
+		expect(g1904("G1")).toBe(31);
+		expect(g1900("G1")).toBe(31);
+		expect(g1900("H1")).toBe(43845);
+		expect(g1904("H1")).toBe(43845 - 1462);
+	});
+
+	it("the injected clock feeds NOW/TODAY in the workbook's date system", async () => {
+		const now = () => new Date(Date.UTC(2020, 0, 15, 12, 0, 0));
+		const { g1900, g1904 } = await pair([[f("TODAY()"), f("NOW()")]], { now });
+		expect(g1900("A1")).toBe(43845);
+		expect(g1900("B1")).toBe(43845.5);
+		expect(g1904("A1")).toBe(43845 - 1462);
+		expect(g1904("B1")).toBe(43845.5 - 1462);
+	});
+
+	it("the valid-serial ceiling is epoch-aware: 9999-12-31 is 2958465 under 1900 and 2957003 under 1904", async () => {
+		const { g1900, g1904 } = await pair([
+			[
+				f("YEAR(2958465)"),
+				f("YEAR(2957003)"),
+				f("YEAR(2957004)"),
+				f("DATE(9999,12,31)"),
+				f("DATE(1903,12,31)"),
+			],
+		]);
+		expect(g1900("A1")).toBe(9999);
+		expect(g1900("B1")).toBe(9995); // an ordinary 1900 serial
+		expect(g1900("C1")).toBe(9995);
+		expect(g1900("D1")).toBe(2958465);
+		expect(g1900("E1")).toBe(1461); // 1903-12-31 is representable under 1900
+		expect(g1904("A1")).toEqual(err("#NUM!")); // past 9999-12-31 under 1904
+		expect(g1904("B1")).toBe(9999);
+		expect(g1904("C1")).toEqual(err("#NUM!"));
+		expect(g1904("D1")).toBe(2957003);
+		expect(g1904("E1")).toEqual(err("#NUM!")); // before the 1904 epoch: not representable
+	});
+
+	it("a user function sees the workbook's date system on its EvalContext", async () => {
+		const functions = {
+			EPOCH: {
+				minArgs: 0,
+				maxArgs: 0,
+				evaluate: (_a: readonly EvalValue[], ctx: EvalContext) =>
+					ctx.date1904 ? 1904 : 1900,
+			},
+		};
+		const { g1900, g1904 } = await pair([[f("EPOCH()")]], { functions });
+		expect(g1900("A1")).toBe(1900);
+		expect(g1904("A1")).toBe(1904);
+	});
+
+	it("ordinary 1900 workbooks are unchanged, including openjsxl's documented 1900 leap-day anchoring", async () => {
+		// dates.ts anchors the 1900 system at 1899-12-30 so every date from 1900-03-01 on matches
+		// Excel exactly (serial 61 = 1900-03-01); the two months before Excel's phantom 1900-02-29
+		// are one serial off from Excel's calendar by design. F11.10 must not move any of this.
+		const { g1900 } = await pair([
+			[
+				f("DATE(1900,2,28)"),
+				f("DATE(1900,3,1)"),
+				f("YEAR(60)"),
+				f("DAY(61)"),
+				f("DATE(2020,2,29)"),
+			],
+		]);
+		expect(g1900("A1")).toBe(60); // Excel: 59 — the documented pre-March-1900 one-off
+		expect(g1900("B1")).toBe(61); // matches Excel from here on
+		expect(g1900("C1")).toBe(1900);
+		expect(g1900("D1")).toBe(1);
+		expect(g1900("E1")).toBe(43890); // a real leap day, matches Excel
 	});
 });

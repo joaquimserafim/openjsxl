@@ -61,7 +61,9 @@ export function parseWorkbook(xml: string): WorkbookMeta {
 		if (token.kind === "open") {
 			const tag = localName(token.name);
 			if (tag === "workbookPr") {
-				const flag = token.attrs.date1904;
+				// xsd:boolean: lexical {1, true, 0, false} with whitespace collapse — trim, but stay
+				// case-sensitive ("TRUE" is schema-invalid and degrades to the 1900 default).
+				const flag = token.attrs.date1904?.trim();
 				if (flag === "1" || flag === "true") date1904 = true;
 			} else if (tag === "workbookProtection") {
 				protection = workbookProtectionFromAttributes(token.attrs);
