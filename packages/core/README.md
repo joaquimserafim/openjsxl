@@ -139,7 +139,8 @@ openjsxl writes `.xlsx`, but reads more: `openXlsb` (Excel Binary Workbook), `op
 `detectSpreadsheetFormat(bytes)` → `'xlsx' | 'xlsb' | 'ods' | 'csv' | undefined` routes by content
 (container formats by their package; CSV by a documented text heuristic). Accessors a format can't
 express degrade (`style()` → `undefined`, `mergedCells` → `[]`), never throw. `.xlsb`/`.ods` carry
-values, dates, merges (ods) and hyperlinks; `.csv` infers numbers & booleans only (never dates).
+values, dates (an `.xlsb` on the epoch its `BrtWbProp` 1904 flag selects), merges (ods) and
+hyperlinks; `.csv` infers numbers & booleans only (never dates).
 Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `writeXlsx`).
 
 ## Exports

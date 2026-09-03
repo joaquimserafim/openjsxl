@@ -8,8 +8,8 @@ import { openXlsb } from "../xlsb";
 
 // F11.10 — `Workbook.date1904` surfaces the workbook's date system on the shared model so the formula
 // engine (and any consumer converting serials) uses the right epoch. XLSX reports `<workbookPr
-// date1904>`; ODS/CSV have no such notion (false); XLSB reports the parsed `BrtWbProp` flag, which
-// F11.13 will read — until then the reader's documented 1900 default (false).
+// date1904>`; ODS/CSV have no such notion (false); XLSB reports `BrtWbProp.f1904` (F11.13), absent →
+// the 1900 default (false).
 
 describe("Workbook.date1904", () => {
 	it("is false for a default-epoch .xlsx and true when written with { date1904: true }", async () => {
@@ -29,9 +29,13 @@ describe("Workbook.date1904", () => {
 		expect((await openXlsx(await loadFixture("date_1904.xlsx"))).date1904).toBe(true);
 	});
 
-	it("is false for .ods and .csv, and false for .xlsb until F11.13 parses BrtWbProp", async () => {
+	it("is false for .ods and .csv, and for an .xlsb that carries no BrtWbProp", async () => {
 		expect((await openOds(await loadFixture("odf-basic.ods"))).date1904).toBe(false);
 		expect(openCsv("a,b\n1,2\n").date1904).toBe(false);
 		expect((await openXlsb(await loadFixture("xlsb-basic.xlsb"))).date1904).toBe(false);
+	});
+
+	it("reads BrtWbProp.f1904 from an .xlsb (F11.13)", async () => {
+		expect((await openXlsb(await loadFixture("xlsb-date1904.xlsb"))).date1904).toBe(true);
 	});
 });

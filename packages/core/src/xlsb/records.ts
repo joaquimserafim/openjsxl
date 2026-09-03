@@ -21,6 +21,9 @@ export const SHEETDATA_END = 0x0192;
 
 // Workbook records.
 export const SHEET = 0x019c; // BrtBundleSh — one sheet's state/id/rel/name
+// BrtWbProp (MS-XLSB §2.4.866, record type 0x0099 → varint bytes 99 01): flags(u32) whose bit 0 is
+// f1904 (the 1904 date system), then dwThemeVersion(u32) and strName (the workbook code name).
+export const WB_PROP = 0x0199;
 export const WORKBOOK_END = 0x0184;
 
 // Shared-strings records.

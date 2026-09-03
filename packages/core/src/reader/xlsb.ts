@@ -283,7 +283,8 @@ export async function openXlsb(
 		}
 	}
 
-	// The parsed BrtWbProp flag (always false until F11.13 reads it) — surfaced as Workbook.date1904.
+	// The parsed BrtWbProp.f1904 flag — the epoch every sheet above was decoded on — surfaced as
+	// Workbook.date1904 so the formula engine and the bridge see the same calendar.
 	return new Workbook(infos, byName, undefined, [], undefined, false, date1904);
 }
 

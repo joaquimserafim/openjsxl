@@ -116,7 +116,8 @@ behavior can differ for this case.
 Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
 `Workbook`, and `detectSpreadsheetFormat(bytes)` routes by content (`'xlsx' | 'xlsb' | 'ods' |
 'csv' | undefined`; `.xlsm`/`.xltx` read as `'xlsx'`). Accessors a format can't express degrade,
-never throw — `.xlsb`/`.ods` carry values, dates, merges (ods) and hyperlinks; `.csv` infers
+never throw — `.xlsb`/`.ods` carry values, dates (an `.xlsb` on the epoch its `BrtWbProp` 1904
+flag selects), merges (ods) and hyperlinks; `.csv` infers
 numbers & booleans only (never dates). So "a user uploaded a spreadsheet" is one code path, and any
 reader converts to `.xlsx` through the bridge.
 
@@ -198,7 +199,7 @@ Returned by every reader. ([01](https://github.com/joaquimserafim/openjsxl/blob/
 | `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
 | `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
 | `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
-| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (always `false` for ods/csv; `.xlsb` reports `false` until its `BrtWbProp` flag is read). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
+| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
 | `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
 | `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
 | `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |

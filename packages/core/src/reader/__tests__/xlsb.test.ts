@@ -88,6 +88,36 @@ describe("openXlsb — xlsb-basic.xlsb (values cross-checked vs calamine/pyxlsb)
 	});
 });
 
+// The flag bit is cross-checked against calamine's reader (bit 0 of record 0x0099's first byte); its
+// Python binding does not date-type this minimal styles part, so the dates below are ours alone.
+describe("openXlsb — xlsb-date1904.xlsb (BrtWbProp.f1904, MS-XLSB §2.4.866)", () => {
+	it("reports date1904 and decodes date-styled serials on the 1904 epoch", async () => {
+		const wb = await openXlsb(await loadFixture("xlsb-date1904.xlsb"));
+		expect(wb.date1904).toBe(true);
+		const s = wb.sheet("Sheet1");
+		// Serial 0 is 1904-01-01 on this epoch (it would be 1899-12-30 on the 1900 one — the
+		// 1,462-day shift the flag exists to prevent).
+		expect(s.cell("A1")).toEqual({
+			ref: "A1",
+			type: "date",
+			value: new Date(Date.UTC(1904, 0, 1)),
+		});
+		expect(s.cell("B1")).toEqual({
+			ref: "B1",
+			type: "date",
+			value: new Date(Date.UTC(2024, 0, 2)),
+		});
+	});
+
+	it("carries the epoch through the bridge: the .xlsx rewrite is a 1904 workbook, dates intact", async () => {
+		const wb = await openXlsb(await loadFixture("xlsb-date1904.xlsb"));
+		const out = await openXlsx(await writeXlsx(await workbookToInput(wb)));
+		expect(out.date1904).toBe(true);
+		expect(out.sheet("Sheet1").cell("A1").value).toEqual(new Date(Date.UTC(1904, 0, 1)));
+		expect(out.sheet("Sheet1").cell("B1").value).toEqual(new Date(Date.UTC(2024, 0, 2)));
+	});
+});
+
 describe("openXlsb — typed failures", () => {
 	it("throws not-a-zip on non-ZIP bytes", async () => {
 		await expect(openXlsb(new Uint8Array([1, 2, 3, 4]))).rejects.toMatchObject({

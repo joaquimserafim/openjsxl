@@ -19,11 +19,19 @@ export interface XlsbWorkbookMeta {
 	readonly date1904: boolean;
 }
 
-/** Parse workbook.bin → the sheet list (BrtBundleSh). */
+/** Parse workbook.bin → the sheet list (BrtBundleSh) and the date system (BrtWbProp.f1904). */
 export function parseXlsbWorkbook(bytes: Uint8Array): XlsbWorkbookMeta {
 	const sheets: XlsbSheetEntry[] = [];
+	let date1904 = false;
 	for (const rec of readRecords(bytes)) {
-		if (rec.id === R.SHEET) {
+		if (rec.id === R.WB_PROP) {
+			// f1904 is bit 0 of the leading flags word; every other bit (reserved, fFilterPrivacy,
+			// grbitUpdateLinks, …) is unrelated and must not enable it. A record too short to carry
+			// the whole word reads 0 (the cursor's degrade contract) → the 1900 default. The record
+			// precedes the sheet list in Excel's output, but the scan is order-independent.
+			const flags = new RecordData(rec.data).u32();
+			date1904 = (flags & 0x01) === 1;
+		} else if (rec.id === R.SHEET) {
 			const d = new RecordData(rec.data);
 			const hsState = d.u32(); // 0 = visible, 1 = hidden, 2 = veryHidden
 			d.u32(); // iTabID
@@ -36,10 +44,7 @@ export function parseXlsbWorkbook(bytes: Uint8Array): XlsbWorkbookMeta {
 			break;
 		}
 	}
-	// The 1904 date system (BrtWbProp) is not read: its flag bit couldn't be verified against an
-	// independent oracle (see F7.2 notes), and reading the wrong bit would risk mis-dating the far
-	// more common 1900 files. So .xlsb dates use the 1900 epoch; 1904 is a documented follow-up.
-	return { sheets, date1904: false };
+	return { sheets, date1904 };
 }
 
 /** Parse sharedStrings.bin → the string table (BrtSSTItem text; rich runs/phonetics dropped). */

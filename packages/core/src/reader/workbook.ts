@@ -504,8 +504,8 @@ export class Workbook {
 	 * The workbook's date system (F11.10): `true` when `<workbookPr date1904>` selects the legacy
 	 * Mac 1904 epoch (serial 0 = 1904-01-01), `false` for the default 1900 system. The reader already
 	 * honours it when typing date cells; the formula evaluator uses it for every serial ↔ date
-	 * conversion. Always `false` for `.ods`/`.csv`; `.xlsb` reports the parsed `BrtWbProp` flag
-	 * once F11.13 lands (until then `false`).
+	 * conversion. Always `false` for `.ods`/`.csv`; `.xlsb` reports its `BrtWbProp` `f1904` flag
+	 * (absent or truncated → `false`).
 	 */
 	readonly date1904: boolean;
 	readonly #byName: Map<string, Worksheet>;

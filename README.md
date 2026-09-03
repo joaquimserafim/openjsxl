@@ -362,7 +362,7 @@ Each reader returns the shared model; features a format can't express **degrade*
 | Format | Reads | Not carried (degrades) |
 | --- | --- | --- |
 | **`.xlsx` / `.xlsm` / `.xltx`** | everything in the round-trip table above | — |
-| **`.xlsb`** | values & types, dates (style-driven), number formats, hyperlinks, dimension, sheet visibility | merges, formula text (cached values kept), styles, comments, geometry, images |
+| **`.xlsb`** | values & types, dates (style-driven, on the epoch `BrtWbProp`'s 1904 flag selects), number formats, hyperlinks, dimension, sheet visibility | merges, formula text (cached values kept), styles, comments, geometry, images |
 | **`.ods`** | values & types, dates, merges, in-cell hyperlinks, sheet names/order | styles & number formats, formula text (cached values kept), visibility, comments, geometry, images |
 | **`.csv` / `.tsv`** | values with conservative type inference (numbers & booleans; **never dates**), one sheet, auto-detected delimiter | everything structural — CSV carries none |
 
@@ -566,7 +566,7 @@ Returned by every reader. ([01](./examples/01-read-cells.mjs),
 | `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
 | `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
 | `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
-| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (always `false` for ods/csv; `.xlsb` reports `false` until its `BrtWbProp` flag is read). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
+| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
 | `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
 | `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
 | `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |

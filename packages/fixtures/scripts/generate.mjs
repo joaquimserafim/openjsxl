@@ -468,6 +468,7 @@ const B = {
 	HL: 0x03ee,
 	WB: 0x0183,
 	WB_E: 0x0184,
+	WBPROP: 0x0199, // BrtWbProp — flags(u32, bit 0 = f1904) + dwThemeVersion(u32) + strName
 	SHS: 0x018f,
 	SHS_E: 0x0190,
 	SH: 0x019c,
@@ -561,6 +562,30 @@ const xlsbWorkbook = Buffer.concat([
 	brec(B.WB_E),
 ]);
 const XLSB_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet2.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/worksheets/sheet3.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/sharedStrings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/><Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>`;
+// A 1904-date-system .xlsb (F11.13): workbook.bin carries BrtWbProp with f1904 set (flags bit 0),
+// exactly where Excel writes it (right after BrtBeginBook, before the sheet list). One sheet with
+// two date-styled RK serials (style 1 → builtin numFmt 14): A1 = 0 (1904-01-01 on this epoch;
+// 1899-12-30 on the 1900 one) and B1 = 43831 (2024-01-02 here; 2020-01-01 under 1900). Validated
+// against python-calamine, which honors the same flag bit; pyxlsb does not read BrtWbProp.
+const xlsb1904Workbook = Buffer.concat([
+	brec(B.WB),
+	brec(B.WBPROP, Buffer.concat([bu32(0x01), bu32(0), bwstr("ThisWorkbook")])),
+	brec(B.SHS),
+	brec(B.SH, Buffer.concat([bu32(0), bu32(1), bwstr("rId1"), bwstr("Sheet1")])),
+	brec(B.SHS_E),
+	brec(B.WB_E),
+]);
+const xlsb1904Sheet = Buffer.concat([
+	brec(B.WS),
+	bdim(0, 0, 0, 1),
+	brec(B.SD),
+	brow(0),
+	bcell(B.NUM, 0, 1, brkInt(0)),
+	bcell(B.NUM, 1, 1, brkInt(43831)),
+	brec(B.SD_E),
+	brec(B.WS_E),
+]);
+const XLSB_1904_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>`;
 // The xlsb lane of the cross-format equivalence table (F7.4) — same logical rows as equiv.{xlsx,ods,
 // csv}: three shared strings, two RK ints, two booleans. One sheet "Data", no styles (no dates).
 const xlsbEquivSheet = Buffer.concat([
@@ -639,6 +664,23 @@ const xlsb = [
 			{ name: "xl/worksheets/sheet2.bin", data: xlsbSheet2 },
 			{ name: "xl/worksheets/sheet3.bin", data: xlsbSheet3 },
 			{ name: "xl/sharedStrings.bin", data: xlsbSst },
+			{ name: "xl/styles.bin", data: xlsbStyles },
+		],
+	},
+	{
+		file: "xlsb-date1904.xlsb",
+		parts: [
+			{ name: "[Content_Types].xml", xml: XLSB_1904_CT },
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.bin"/></Relationships>`,
+			},
+			{ name: "xl/workbook.bin", data: xlsb1904Workbook },
+			{
+				name: "xl/_rels/workbook.bin.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${R_NS}/worksheet" Target="worksheets/sheet1.bin"/><Relationship Id="rId6" Type="${R_NS}/styles" Target="styles.bin"/></Relationships>`,
+			},
+			{ name: "xl/worksheets/sheet1.bin", data: xlsb1904Sheet },
 			{ name: "xl/styles.bin", data: xlsbStyles },
 		],
 	},

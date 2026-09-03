@@ -81,6 +81,22 @@ so they are safe to commit and diff.
   welcome upgrade — Excel isn't available here to author one. `reader/__tests__/xlsb.test.ts`
   asserts values, style-driven date detection, the hyperlink, visibility, and the bridge to xlsx.
 
+- **`xlsb-date1904.xlsb`** — the same hand-crafted container on the **1904 date system** (F11.13):
+  `workbook.bin` carries `BrtWbProp` (record type `0x0099`, varint bytes `99 01`) with `f1904` —
+  bit 0 of its leading flags word (MS-XLSB §2.4.866) — set, placed where Excel writes it (after
+  `BrtBeginBook`, before the sheet list). One sheet with two date-styled RK serials (builtin numFmt
+  14): `A1` = 0 (1904-01-01 on this epoch; 1899-12-30 under 1900) and `B1` = 43831 (2024-01-02
+  here; 2020-01-01 under 1900) — the 1,462-day shift the flag exists to prevent. **Flag-bit
+  evidence, independently:** calamine 0.36 (python-calamine 0.8.2) derives `is_1904` from bit 0 of
+  the first byte of record `0x0099` (`src/xlsb/mod.rs`), and handed this fixture with an emptied
+  `BrtWbProp` payload it indexes that byte (panics), proving it recognizes the record framing as
+  written here; its Python binding does not date-type cells styled by this minimal `styles.bin`, so
+  the epoch is validated at the flag level rather than through calamine's date conversion. pyxlsb
+  has no `BrtWbProp` handler. A real desktop-Excel-authored 1904 `.xlsb` remains a welcome upgrade.
+  `reader/__tests__/xlsb.test.ts` asserts `Workbook.date1904`, both cell dates, and that the bridge
+  rewrites it as a 1904 `.xlsx`; `xlsb/__tests__/parts.test.ts` pins the record-level contract
+  (absent, clear, set, unrelated bits, truncated payloads, placement, duplicates).
+
 ## Real-producer fixtures
 
 Files exported by actual applications, committed directly here. These catch quirks the
