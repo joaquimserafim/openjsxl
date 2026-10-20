@@ -2031,18 +2031,19 @@ function sheetRelPlumbing(
 
 /**
  * Build the worksheet XML for one sheet, interning cell styles into the shared registry.
+ * `rows` is the reference captured during workbook validation, also used for table-header lookup.
  * `sheetIndex` (0-based) names the sheet's own extra parts (comments, VML) so their rel targets and
  * package paths agree.
  */
 export function worksheetXml(
-	sheet: SheetInput,
+	sheet: Omit<SheetInput, "rows">,
+	rows: SheetInput["rows"],
 	sheetIndex: number,
 	date1904: boolean,
 	styles: StyleRegistry,
 	media: MediaRegistry,
 	tableCtx: TableContext,
 ): WorksheetResult {
-	const rows = sheet.rows;
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
 	// column/row/freeze/merge/hyperlink/comment/image spec must surface before any cell work.
 	const cols = colsXml(sheet.name, sheet.columns);
@@ -2273,9 +2274,11 @@ async function* streamRowChunks(
  * Prepare a streamed worksheet: validate geometry/metadata and build the header/footer + rel/comment
  * parts upfront, returning a chunk generator that streams the rows on demand. Styles intern into the
  * shared registry as the generator is consumed, so styles.xml must be emitted only after it drains.
+ * `rows` is the iterable captured during workbook validation; preparation never consumes it.
  */
 export function streamWorksheet(
-	sheet: StreamSheetInput,
+	sheet: Omit<StreamSheetInput, "rows">,
+	rows: StreamSheetInput["rows"],
 	sheetIndex: number,
 	date1904: boolean,
 	styles: StyleRegistry,
@@ -2314,15 +2317,7 @@ export function streamWorksheet(
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
 	const footer = `</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${printSetup}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
-	const chunks = streamRowChunks(
-		sheet.name,
-		sheet.rows,
-		header,
-		footer,
-		rowAttrs,
-		date1904,
-		styles,
-	);
+	const chunks = streamRowChunks(sheet.name, rows, header, footer, rowAttrs, date1904, styles);
 	return {
 		chunks,
 		rels,

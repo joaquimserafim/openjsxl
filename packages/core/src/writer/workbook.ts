@@ -40,16 +40,23 @@ import { writeZip, type ZipInput } from "./zip";
 
 // Validate the workbook's sheets (already read once by the caller): shared name/state checks
 // (parts.ts) plus the buffered writer's own requirement that each sheet's `rows` is a materialized
-// array (the streaming writer accepts an iterable instead). Returns the resolved names + visibility
-// states for single-read emission.
-function validate(sheets: readonly SheetInput[]): { states: SheetState[]; names: string[] } {
+// array (the streaming writer accepts an iterable instead). Returns the resolved names, visibility
+// states, and captured row arrays for single-read emission.
+function validate(sheets: readonly SheetInput[]): {
+	states: SheetState[];
+	names: string[];
+	rows: SheetInput["rows"][];
+} {
 	const { states, names } = validateSheetMeta(sheets);
+	const rows: SheetInput["rows"][] = [];
 	for (let i = 0; i < sheets.length; i++) {
-		if (!Array.isArray((sheets[i] as SheetInput).rows)) {
+		const sheetRows = (sheets[i] as SheetInput).rows;
+		if (!Array.isArray(sheetRows)) {
 			throw new XlsxError("invalid-input", `sheet "${names[i]}": rows must be an array`);
 		}
+		rows.push(sheetRows);
 	}
-	return { states, names };
+	return { states, names, rows };
 }
 
 /**
@@ -67,7 +74,7 @@ export async function writeXlsx(
 	// validate that single array, and emit from it and the resolved names/states.
 	requireWorkbookObject(workbook);
 	const sheets = workbook.sheets;
-	const { states, names } = validate(sheets);
+	const { states, names, rows } = validate(sheets);
 	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
 	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
 	const inputDate1904 = workbook.date1904;
@@ -95,7 +102,8 @@ export async function writeXlsx(
 	// context threads through every sheet.
 	const tableCtx = createTableContext();
 	const worksheets = sheets.map((sheet, i) =>
-		worksheetXml(sheet, i, date1904, styles, media, tableCtx),
+		// One captured row array per validated sheet, in the same order.
+		worksheetXml(sheet, rows[i] as SheetInput["rows"], i, date1904, styles, media, tableCtx),
 	);
 	const needStyles = styles.needed();
 	const needTheme = styles.usesTheme();

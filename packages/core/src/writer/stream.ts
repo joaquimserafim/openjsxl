@@ -48,13 +48,17 @@ async function* buildStreamParts(
 	requireWorkbookObject(workbook);
 	const sheets = workbook.sheets;
 	const { states, names } = validateSheetMeta(sheets);
+	const rows: StreamSheetInput["rows"][] = [];
 	for (let i = 0; i < sheets.length; i++) {
-		if (!isIterableRows((sheets[i] as StreamSheetInput).rows)) {
+		const sheetRows = (sheets[i] as StreamSheetInput).rows;
+		if (!isIterableRows(sheetRows)) {
 			throw new XlsxError(
 				"invalid-input",
 				`sheet "${names[i]}": rows must be an iterable of row arrays`,
 			);
 		}
+		// Capture the iterable itself; validation must not start a one-shot source.
+		rows.push(sheetRows);
 	}
 	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
 	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
@@ -77,7 +81,16 @@ async function* buildStreamParts(
 	// rel/comment/drawing parts (interning any image bytes into `media`) — while the rows stay lazy
 	// inside each `chunks` generator. So `media` is fully populated before any byte streams.
 	const prepared = sheets.map((sheet, i) =>
-		streamWorksheet(sheet, i, date1904, styles, media, tableCtx),
+		// One captured iterable per validated sheet, in the same order.
+		streamWorksheet(
+			sheet,
+			rows[i] as StreamSheetInput["rows"],
+			i,
+			date1904,
+			styles,
+			media,
+			tableCtx,
+		),
 	);
 
 	// Which sheets carry comments / drawings — derived upfront from the prepared results, so the
