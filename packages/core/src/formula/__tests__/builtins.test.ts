@@ -480,7 +480,7 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		expect(g("B5")).toBe(2); // the two blank cells
 		expect(g("C5")).toBe(90); // B2+B3+B4 (blank-A rows included)
 		expect(g("D5")).toBe(3); // COUNTIFS with a blank-excluding companion criterion
-		expect(g("E5")).toBe(90); // single-criterion SUMIFS delegates to the blank-aware path
+		expect(g("E5")).toBe(90); // single-criterion SUMIFS also includes blank matches
 	});
 
 	it("SUMIF/AVERAGEIF reshape a larger value range, while SUMIFS requires equal shapes", async () => {
@@ -500,7 +500,7 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		]);
 		expect(g("A6")).toBe(60); // B1+B2+B3, NOT B1:B5 (=150)
 		expect(g("B6")).toBe(20); // (10+20+30)/3, not inflated
-		expect(g("C6")).toEqual(err("#VALUE!")); // SUMIFS must reject before the single-pair shortcut
+		expect(g("C6")).toEqual(err("#VALUE!")); // SUMIFS rejects mismatched shapes even for one pair
 	});
 
 	it("VALUE accepts percent, thousands separators and a currency sign", async () => {

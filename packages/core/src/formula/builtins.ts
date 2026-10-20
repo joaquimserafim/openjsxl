@@ -13,6 +13,7 @@ import {
 	type FormulaErrorValue,
 	isErrorValue,
 	isRangeView,
+	populatedRangePositions,
 	type RangeView,
 	type ScalarValue,
 } from "./value";
@@ -1256,6 +1257,38 @@ function rangeShape(value: EvalValue): { width: number; height: number } {
 		: { width: 1, height: 1 };
 }
 
+// Candidate offsets only: do not evaluate a populated formula until its position is needed.
+function* populatedOffsets(range: EvalValue): Generator<{ ro: number; co: number }> {
+	if (isRangeView(range)) {
+		for (const [col, row] of populatedRangePositions(range)) {
+			yield { ro: row - range.startRow, co: col - range.startCol };
+		}
+	} else {
+		yield { ro: 0, co: 0 };
+	}
+}
+
+type CriteriaPair = { range: EvalValue; crit: Criteria };
+
+function allCriteriaMatch(
+	pairs: readonly CriteriaPair[],
+	ro: number,
+	co: number,
+	skipIndex = -1,
+): boolean {
+	for (let i = 0; i < pairs.length; i++) {
+		if (i === skipIndex) continue;
+		const pair = pairs[i];
+		if (
+			pair !== undefined &&
+			!matchesCriteria(alignedValue(pair.range, null, ro, co), pair.crit)
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function conditionalAggregateS(
 	args: readonly EvalValue[],
 	mode: "sum" | "avg" | "count",
@@ -1277,56 +1310,62 @@ function conditionalAggregateS(
 			return errorValue("#VALUE!");
 		}
 	}
-	// A single criterion pair: delegate to the blank-aware single-criterion path so COUNTIFS/SUMIFS/
-	// AVERAGEIFS agree with COUNTIF/SUMIF/AVERAGEIF on blank-satisfying criteria.
-	if (mode === "count" && args.length === 2) {
-		return conditionalAggregate(args[0], args[1], undefined, "count");
-	}
-	if (mode !== "count" && args.length === 3) {
-		return conditionalAggregate(args[1], args[2], args[0], mode);
-	}
-	const pairs: { range: EvalValue; crit: Criteria }[] = [];
+	const pairs: CriteriaPair[] = [];
 	for (let i = pairStart; i + 1 < args.length; i += 2) {
 		const crit = parseCriteria(args[i + 1] ?? null);
 		if (isErrorValue(crit)) return crit;
 		pairs.push({ range: args[i] ?? null, crit });
 	}
 	if (pairs.length === 0) return errorValue("#VALUE!");
-	// Choose a driver whose criterion EXCLUDES blanks: then every matching position is populated in that
-	// range, so iterating its used cells (bounded) visits every match. If every criterion matches blank
-	// (rare — e.g. all "<>x"), fall back to the first pair; blank positions may then be under-counted (a
-	// documented v0.8 edge — the exact fix would scan the whole rectangle, which is unbounded).
-	let driverIdx = pairs.findIndex((p) => !matchesBlank(p.crit));
-	if (driverIdx < 0) driverIdx = 0;
+	const driverIdx = pairs.findIndex((p) => !matchesBlank(p.crit));
 	const driver = pairs[driverIdx];
-	if (driver === undefined) return errorValue("#VALUE!");
-	let sum = 0;
-	let count = 0;
-	for (const { value, ro, co } of critCells(driver.range)) {
-		if (!matchesCriteria(value, driver.crit)) continue;
-		let all = true;
-		for (let k = 0; k < pairs.length; k++) {
-			if (k === driverIdx) continue;
-			const p = pairs[k];
-			if (p === undefined) continue;
-			if (!matchesCriteria(alignedValue(p.range, null, ro, co), p.crit)) {
-				all = false;
-				break;
+	if (mode === "count") {
+		// A blank-excluding criterion guarantees every match is populated in that range.
+		if (driver !== undefined) {
+			let count = 0;
+			for (const { ro, co } of populatedOffsets(driver.range)) {
+				if (!matchesCriteria(alignedValue(driver.range, null, ro, co), driver.crit))
+					continue;
+				if (allCriteriaMatch(pairs, ro, co, driverIdx)) count++;
+			}
+			return count;
+		}
+		// Every criterion accepts blank. Count fully implicit positions arithmetically, then
+		// inspect only the union of populated offsets. Offset keys fit exactly in a JS number:
+		// even the entire Excel grid has only 2^34 cells. Never allocate by rectangle area.
+		const populated = new Set<number>();
+		for (const pair of pairs) {
+			for (const { ro, co } of populatedOffsets(pair.range)) {
+				populated.add(ro * shape.width + co);
 			}
 		}
-		if (!all) continue;
-		if (mode === "count") {
-			count++;
+		let count = shape.width * shape.height - populated.size;
+		for (const offset of populated) {
+			if (allCriteriaMatch(pairs, Math.floor(offset / shape.width), offset % shape.width))
+				count++;
+		}
+		return count;
+	}
+	// Only populated value positions can contribute a number or a matching error. Test all
+	// aligned criteria first, so excluded value formulas retain their lazy/fuel behavior.
+	let sum = 0;
+	let count = 0;
+	for (const { ro, co } of populatedOffsets(valueRange ?? null)) {
+		// Preserve the previous blank-excluding driver's short-circuit order for criteria too.
+		if (
+			driver !== undefined &&
+			!matchesCriteria(alignedValue(driver.range, null, ro, co), driver.crit)
+		) {
 			continue;
 		}
-		const sv = alignedValue(valueRange, value, ro, co);
+		if (!allCriteriaMatch(pairs, ro, co, driverIdx)) continue;
+		const sv = alignedValue(valueRange, null, ro, co);
 		if (isErrorValue(sv)) return sv;
 		if (typeof sv === "number") {
 			sum += sv;
 			count++;
 		}
 	}
-	if (mode === "count") return count;
 	if (mode === "avg") return count === 0 ? errorValue("#DIV/0!") : sum / count;
 	return sum;
 }

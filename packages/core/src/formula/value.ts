@@ -93,6 +93,15 @@ export interface RangeEntry {
 	readonly value: EvalValue;
 }
 
+// Keep coordinate-only traversal internal: conditional aggregates must check criteria before
+// resolving a candidate value. Public entries() retains its existing evaluation timing.
+let rangePositions: (range: RangeView) => Iterable<readonly [number, number]>;
+
+/** @internal Populated coordinates without evaluating cells; not part of the public entry point. */
+export function populatedRangePositions(range: RangeView): Iterable<readonly [number, number]> {
+	return rangePositions(range);
+}
+
 /**
  * A lazy view over the cells of a reference. It never materializes the rectangle: `width`/`height`
  * are computed from the bounds (so `A:A` reports 1 048 576 rows for free), and iteration visits only
@@ -101,6 +110,12 @@ export interface RangeEntry {
  * arithmetic `cellCount - populatedCount()`.
  */
 export class RangeView {
+	static {
+		// A module-private accessor keeps populated coordinates out of the public class API.
+		// Use the same receiver as entries(), including for caller-provided Proxy wrappers.
+		rangePositions = (range) => range.populated();
+	}
+
 	constructor(
 		/** Resolved sheet name the range lives on. */
 		readonly sheet: string,

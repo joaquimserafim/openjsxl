@@ -99,7 +99,7 @@ describe("conditional aggregates require aligned *IFS shapes (F11.11)", () => {
 		]);
 	});
 
-	it("validates shape before the single-pair SUMIFS and AVERAGEIFS shortcuts", async () => {
+	it("requires equal shapes for single-pair SUMIFS and AVERAGEIFS", async () => {
 		await expectShapeErrors([
 			'SUMIFS(Data!B1:B5,Data!A1:A3,">0")',
 			'AVERAGEIFS(Data!B1:B5,Data!A1:A3,">0")',
