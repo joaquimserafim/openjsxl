@@ -483,7 +483,7 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		expect(g("E5")).toBe(90); // single-criterion SUMIFS delegates to the blank-aware path
 	});
 
-	it("blank-aware SUMIF reshapes a larger value range to the criteria range (no over-count)", async () => {
+	it("SUMIF/AVERAGEIF reshape a larger value range, while SUMIFS requires equal shapes", async () => {
 		// Second-pass-review regression: the blank pass must clip the value range to the criteria
 		// rectangle. Excel reshapes B1:B5 → B1:B3 (anchored top-left), so B4/B5 never participate.
 		const g = await evalSheet([
@@ -500,7 +500,7 @@ describe("builtins — adversarial-review regressions (F8.3)", () => {
 		]);
 		expect(g("A6")).toBe(60); // B1+B2+B3, NOT B1:B5 (=150)
 		expect(g("B6")).toBe(20); // (10+20+30)/3, not inflated
-		expect(g("C6")).toBe(60); // single-pair SUMIFS delegates to the same reshaped path
+		expect(g("C6")).toEqual(err("#VALUE!")); // SUMIFS must reject before the single-pair shortcut
 	});
 
 	it("VALUE accepts percent, thousands separators and a currency sign", async () => {

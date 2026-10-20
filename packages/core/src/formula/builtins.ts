@@ -1248,6 +1248,14 @@ function conditionalAggregate(
 	return sum;
 }
 
+// Dimensions are metadata, even for whole-column/row ranges: never visit cells to compare shapes.
+// Single-cell references arrive as scalars or 1×1 RangeViews; both have the same shape.
+function rangeShape(value: EvalValue): { width: number; height: number } {
+	return isRangeView(value)
+		? { width: value.width, height: value.height }
+		: { width: 1, height: 1 };
+}
+
 function conditionalAggregateS(
 	args: readonly EvalValue[],
 	mode: "sum" | "avg" | "count",
@@ -1256,6 +1264,19 @@ function conditionalAggregateS(
 	// COUNTIFS: no leading range, just (critRange, criterion) pairs.
 	const valueRange = mode === "count" ? undefined : args[0];
 	const pairStart = mode === "count" ? 0 : 1;
+	if (args.length < pairStart + 2 || (args.length - pairStart) % 2 !== 0) {
+		return errorValue("#VALUE!");
+	}
+	// COUNTIFS aligns every criteria range with the first; SUMIFS/AVERAGEIFS align them with
+	// the value range. Check both dimensions before parsing criteria or taking the single-pair
+	// shortcut: unlike SUMIF/AVERAGEIF, these functions must never reshape mismatched ranges.
+	const shape = rangeShape(args[0] ?? null);
+	for (let i = pairStart; i < args.length; i += 2) {
+		const other = rangeShape(args[i] ?? null);
+		if (other.width !== shape.width || other.height !== shape.height) {
+			return errorValue("#VALUE!");
+		}
+	}
 	// A single criterion pair: delegate to the blank-aware single-criterion path so COUNTIFS/SUMIFS/
 	// AVERAGEIFS agree with COUNTIF/SUMIF/AVERAGEIF on blank-satisfying criteria.
 	if (mode === "count" && args.length === 2) {
