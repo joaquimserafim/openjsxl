@@ -6,9 +6,9 @@ import { columnToIndex, indexToColumn, MAX_COL, MAX_ROW } from "./a1";
 // A SHARED formula stores its text once on the master cell (`<f t="shared" ref si>text</f>`); every
 // dependent cell carries only `<f t="shared" si/>` and is understood to be the master's text with
 // its RELATIVE references shifted by the dependent's offset from the master. To hand a caller the
-// real formula for a dependent, we translate: shift the relative parts of each same-sheet reference
+// real formula for a dependent, we translate: shift the relative parts of each cell reference
 // by (Δrow, Δcol), leave `$`-absolute parts pinned, and leave everything else — strings, function
-// names, cross-sheet references, defined names, structured references — exactly as written. This is
+// names, sheet qualifiers, defined names, structured references — exactly as written. This is
 // openpyxl's `Translator` behavior. Correctness rests on TOKENIZING rather than blind regex
 // replacement: a naive search-and-replace would corrupt `"A1"` inside a string, `LOG10(` as a
 // function, `Sheet1!A1`, or the `A1` column name inside `Table1[A1]`.
@@ -19,8 +19,9 @@ import { columnToIndex, indexToColumn, MAX_COL, MAX_ROW } from "./a1";
 // (`[1]Sheet1!A1`) — is OPAQUE: it is copied verbatim, so A1-looking column names never shift.
 // Inside brackets a `'` escapes the next character (`[Col'[1']]`), and nesting is tracked. An
 // unbalanced `[` is ambiguous text: from that point on the formula is copied unchanged (never a
-// partial rewrite, never a throw). A reference must start at a formula boundary (`2e5` is a number,
-// `ñA1` a name) and its row is 1-based (`A0`, `0:0`, `A01` are names, as in Excel/openpyxl).
+// partial rewrite, never a throw). A reference must have complete identifier boundaries (`2e5` is a
+// number, `ñA1` and `a1é` are names) and its row is 1-based (`A0`, `0:0`, `A01` are names).
+// Sheet qualifiers are opaque too: in `1:2!A1` only the final cell reference may shift.
 // Translation is a single left-to-right pass — linear in the text.
 
 /** Excel's hard ceiling on formula text length (characters). The writer refuses anything longer. */
@@ -32,20 +33,22 @@ export const MAX_FORMULA_LEN = 8192;
 // (they only exist adjacent to `:`); a single reference is tried before a bare identifier so `A1`
 // reads as a cell, not a name; the final `[\s\S]` guarantees progress on any operator/paren/comma.
 // A trailing boundary keeps `A1` in `A1B`, `A1_x`, or `A1.5` — or `A:A` in `A:A10` — part of the
-// larger token. `[` is handled by the scanner before this regex runs, so it never reaches it as the
-// start of a token.
+// larger token. Name continuations include non-ASCII code units, backslash and `?` (MS-XLSX §2.2.2);
+// consume the full name so an embedded reference-shaped suffix cannot be matched separately.
+// `[` and unquoted sheet qualifiers are handled before this regex runs.
 const TOKEN =
-	/("(?:[^"]|"")*")|('(?:[^']|'')*')|(\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3})(?![0-9A-Za-z_.])|(\$?[1-9][0-9]{0,6}:\$?[1-9][0-9]{0,6})(?![0-9A-Za-z_.])|(\$?[A-Za-z]{1,3}\$?[1-9][0-9]{0,6})(?![0-9A-Za-z_.])|([A-Za-z_][A-Za-z0-9_.]*)|(\s+)|([\s\S])/gy;
+	/("(?:[^"]|"")*")|('(?:[^']|'')*')|(\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3})(?![0-9A-Za-z_.?\\\u0080-\uFFFF])|(\$?[1-9][0-9]{0,6}:\$?[1-9][0-9]{0,6})(?![0-9A-Za-z_.?\\\u0080-\uFFFF])|(\$?[A-Za-z]{1,3}\$?[1-9][0-9]{0,6})(?![0-9A-Za-z_.?\\\u0080-\uFFFF])|([A-Za-z_\\\u0080-\uFFFF][A-Za-z0-9_.?\\\u0080-\uFFFF]*)|(\s+)|([\s\S])/gy;
 
 const REF = /^(\$?)([A-Za-z]{1,3})(\$?)([1-9][0-9]{0,6})$/;
 const COL_RANGE = /^(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})$/;
 const ROW_RANGE = /^(\$?)([1-9][0-9]{0,6}):(\$?)([1-9][0-9]{0,6})$/;
+const BANG_ERRORS = ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NUM!"];
 
 // A reference can only START at a formula boundary. The sticky TOKEN regex carries a trailing
 // boundary, but after a one-char fallback token (`2` of `2e5`, the `ñ` of a Unicode-prefixed name)
 // the scanner restarts at the next position, where `e5` / `A1` would otherwise match as a cell.
 // So a col-range/row-range/ref token is only a reference when the character before it is absent or
-// is not identifier-ish: not a digit, ASCII letter, `_`, `.`, or any non-ASCII code unit. (`$` is
+// is not identifier-ish: not a digit, ASCII letter, `_`, `.`, `\`, `?`, or any non-ASCII code unit. (`$` is
 // part of the token itself, so `$A1` is judged by the character before the `$`.)
 /** @internal Exported for direct unit tests only — not part of the public API. */
 export function refCanStartAfter(code: number): boolean {
@@ -54,7 +57,33 @@ export function refCanStartAfter(code: number): boolean {
 	if (code >= 0x30 && code <= 0x39) return false; // 0-9
 	if (code >= 0x41 && code <= 0x5a) return false; // A-Z
 	if (code >= 0x61 && code <= 0x7a) return false; // a-z
-	return code !== 0x5f && code !== 0x2e; // _ .
+	return code !== 0x5f && code !== 0x2e && code !== 0x5c && code !== 0x3f; // _ . \ ?
+}
+
+// Scan a possible unquoted sheet qualifier, allowing `:` between sheet names. Operators, whitespace,
+// quoted/bracketed material, and expression delimiters end the run. A terminating `!` makes the
+// prefix opaque; otherwise the normal tokenizer handles its references. Return the run's end even
+// on a miss so the caller can avoid rescanning its suffixes (e.g. a million digits without `!`).
+/** @internal Exported for direct unit tests only — not part of the public API. */
+export function sheetQualifierRunEnd(formula: string, start: number): number {
+	let end = start;
+	while (end < formula.length) {
+		const c = formula[end] as string; // bounds-checked code unit
+		if ("!\"'[]\\?^*/+-&=<>%,;(){}".includes(c) || /\s/.test(c)) break;
+		// `A1:#REF!` is a range ending in an error, not a sheet span. Other `#` characters
+		// remain valid in producer sheet names; only complete error literals stop this scan.
+		if (
+			c === "#" &&
+			(end === start || formula[end - 1] === ":") &&
+			BANG_ERRORS.some(
+				(error) => formula.slice(end, end + error.length).toUpperCase() === error,
+			)
+		) {
+			break;
+		}
+		end++;
+	}
+	return end;
 }
 
 // Shift one already-matched reference by the delta, honoring `$` pins. Returns the rewritten ref in
@@ -139,6 +168,7 @@ export function translateFormula(formula: string, dRow: number, dCol: number): s
 	if (dRow === 0 && dCol === 0) return formula;
 	let out = "";
 	let pos = 0;
+	let qualifierRunEnd = 0;
 	while (pos < formula.length) {
 		if (formula[pos] === "[") {
 			const end = bracketSpanEnd(formula, pos);
@@ -146,6 +176,17 @@ export function translateFormula(formula: string, dRow: number, dCol: number): s
 			out += formula.slice(pos, end);
 			pos = end;
 			continue;
+		}
+		// Immediately after `!` comes a reference/name, not another sheet qualifier. In
+		// `S!A1:S!B2`, swallowing `A1:S!` as a 3-D span would leave the first endpoint unshifted.
+		if (pos >= qualifierRunEnd && formula[pos - 1] !== "!") {
+			qualifierRunEnd = sheetQualifierRunEnd(formula, pos);
+			if (qualifierRunEnd > pos && formula[qualifierRunEnd] === "!") {
+				// Includes both names in a 3-D span (`a1:b2!`, `1:2!`), never their following refs.
+				out += formula.slice(pos, qualifierRunEnd + 1);
+				pos = qualifierRunEnd + 1;
+				continue;
+			}
 		}
 		TOKEN.lastIndex = pos;
 		const m = TOKEN.exec(formula);

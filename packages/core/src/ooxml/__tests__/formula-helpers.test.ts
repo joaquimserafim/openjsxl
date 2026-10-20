@@ -3,6 +3,7 @@ import { MAX_COL, MAX_ROW } from "../a1";
 import {
 	bracketSpanEnd,
 	refCanStartAfter,
+	sheetQualifierRunEnd,
 	shiftColRange,
 	shiftRef,
 	shiftRowRange,
@@ -51,14 +52,73 @@ describe("refCanStartAfter — a reference may only start at a formula boundary"
 		}
 	});
 
-	it("forbids identifier-ish predecessors: digits, ASCII letters, `_`, `.`, and any non-ASCII unit", () => {
-		for (const ch of ["0", "5", "9", "A", "Z", "a", "z", "_", "."]) {
+	it("forbids every name continuation and any non-ASCII code unit", () => {
+		for (const ch of ["0", "5", "9", "A", "Z", "a", "z", "_", ".", "\\", "?"]) {
 			expect(refCanStartAfter(code(ch)), JSON.stringify(ch)).toBe(false);
 		}
 		expect(refCanStartAfter(0x80)).toBe(false); // first non-ASCII code unit
 		expect(refCanStartAfter(code("ñ"))).toBe(false);
 		expect(refCanStartAfter(code("日"))).toBe(false);
 		expect(refCanStartAfter(0xd83d)).toBe(false); // a surrogate half
+	});
+});
+
+describe("sheetQualifierRunEnd — a single scan of a possible unquoted qualifier", () => {
+	it("keeps numeric, cell-shaped, Unicode and punctuation-bearing sheet spans whole", () => {
+		for (const qualifier of ["1:2", "a1:b2", "a1é:b2日", "a1~:b2`"]) {
+			expect(sheetQualifierRunEnd(`${qualifier}!A1`, 0)).toBe(qualifier.length);
+			expect(sheetQualifierRunEnd(`SUM(${qualifier}!A1)`, 4)).toBe(qualifier.length + 4);
+		}
+	});
+
+	it("stops at expression boundaries, quotes and brackets", () => {
+		for (const delimiter of [
+			"!",
+			'"',
+			"'",
+			"[",
+			"]",
+			"\\",
+			"?",
+			"^",
+			"*",
+			"/",
+			"+",
+			"-",
+			"&",
+			"=",
+			"<",
+			">",
+			"%",
+			",",
+			";",
+			"(",
+			")",
+			"{",
+			"}",
+			" ",
+			"\t",
+			"\r",
+			"\n",
+		]) {
+			expect(sheetQualifierRunEnd(`A1${delimiter}1:2!A1`, 0), delimiter).toBe(2);
+			expect(sheetQualifierRunEnd(`${delimiter}A1`, 0), delimiter).toBe(0);
+		}
+	});
+
+	it("returns the end of an unsuccessful run so its suffixes need no rescan", () => {
+		expect(sheetQualifierRunEnd("A1:B2", 0)).toBe(5);
+		expect(sheetQualifierRunEnd("999999", 0)).toBe(6);
+		expect(sheetQualifierRunEnd("", 0)).toBe(0);
+	});
+
+	it("distinguishes error endpoints from sheet names containing a hash", () => {
+		for (const error of ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NUM!", "#ref!", "#ReF!"]) {
+			expect(sheetQualifierRunEnd(`A1:${error}`, 0)).toBe(3);
+			expect(sheetQualifierRunEnd(error, 0)).toBe(0);
+		}
+		expect(sheetQualifierRunEnd("A1#Sheet:B2#Sheet!A1", 0)).toBe(17);
+		expect(sheetQualifierRunEnd("A1#REF!A1", 0)).toBe(6);
 	});
 });
 

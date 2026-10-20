@@ -94,6 +94,65 @@ const F119_VECTORS: [string, number, number, string][] = [
 	["A01+A1", 1, 0, "A01+A2"],
 ];
 
+// Reopened F11.9: names and complete sheet qualifiers are opaque, including reference-shaped parts.
+const IDENTIFIER_VECTORS: [string, number, number, string][] = [
+	["a1é+A1", 1, 1, "a1é+B2"],
+	["A1é+a1", 1, 1, "A1é+B2"],
+	["éa1+a1", 1, 1, "éa1+B2"],
+	["a1日本b2+A1", 1, 1, "a1日本b2+B2"],
+	["a1\u0301+A1", 1, 1, "a1\u0301+B2"],
+	["a1𐐀+A1", 1, 1, "a1𐐀+B2"],
+	["𐐀a1+A1", 1, 1, "𐐀a1+B2"],
+	["a1١+A1", 1, 1, "a1١+B2"],
+	["\\A1+a1\\b2+a1?b2+A1", 1, 1, "\\A1+a1\\b2+a1?b2+B2"],
+	["SUM(a1é[A1])+A1", 1, 1, "SUM(a1é[A1])+B2"],
+	["a1é!a1", 1, 1, "a1é!B2"],
+	["SUM(1:2!A1)", 1, 1, "SUM(1:2!B2)"],
+	["SUM(a1:b2!C3)", 1, 1, "SUM(a1:b2!D4)"],
+	["SUM(A1:B2!C3)", 1, 1, "SUM(A1:B2!D4)"],
+	["SUM(a1:Sheet2!C3)", 1, 1, "SUM(a1:Sheet2!D4)"],
+	["SUM(Sheet1:b2!C3)", 1, 1, "SUM(Sheet1:b2!D4)"],
+	["S!A1:S!B2", 1, 1, "S!B2:S!C3"],
+	["'S'!A1:S!B2", 1, 1, "'S'!B2:S!C3"],
+	["S!A1:'S'!B2", 1, 1, "S!B2:'S'!C3"],
+	["[1]S!A1:S!B2", 1, 1, "[1]S!B2:S!C3"],
+	["SUM(S!A1:S!B2)", 1, 1, "SUM(S!B2:S!C3)"],
+	["!A1:S!B2", 1, 1, "!B2:S!C3"],
+	// Error endpoints are not sheet qualifiers. openpyxl rejects the forward #REF! range.
+	["SUM(A1:#REF!)", 1, 1, "SUM(B2:#REF!)"],
+	["SUM(A1:#ref!)+A1:#ReF!", 1, 1, "SUM(B2:#ref!)+B2:#ReF!"],
+	["SUM(#REF!:A1)", 1, 1, "SUM(#REF!:B2)"],
+	["S!A1:#REF!", 1, 1, "S!B2:#REF!"],
+	// Other errors are not valid reference endpoints; preserve their tolerant handling too.
+	["A1:#VALUE!+A1:#NUM!+A1:#NULL!", 1, 1, "B2:#VALUE!+B2:#NUM!+B2:#NULL!"],
+	["A1:#DIV/0!", 1, 1, "B2:#DIV/0!"],
+	["A1#Sheet:B2#Sheet!A1", 1, 1, "A1#Sheet:B2#Sheet!B2"],
+	["A1#REF!A1", 1, 1, "A1#REF!B2"],
+	["a1#REF:b2#VALUE!A1", 1, 1, "a1#REF:b2#VALUE!B2"],
+	["SUM(a1é:b2日!C3)", 1, 1, "SUM(a1é:b2日!D4)"],
+	["A:B!a1", 1, 1, "A:B!B2"],
+	["1:2!A:A", 1, 1, "1:2!B:B"],
+	["1:2!1:3", 1, 1, "1:2!2:4"],
+	["1:2!$A$1+a1", 1, 1, "1:2!$A$1+B2"],
+	["[1]a1:b2!C3", 1, 1, "[1]a1:b2!D4"],
+	["[Book.xlsx]1:2!A1", 1, 1, "[Book.xlsx]1:2!B2"],
+	["'a1:b2'!C3", 1, 1, "'a1:b2'!D4"],
+	["'[Book.xlsx]a1:b2'!C3", 1, 1, "'[Book.xlsx]a1:b2'!D4"],
+	["'a1''é:b2'!C3", 1, 1, "'a1''é:b2'!D4"],
+	["a1~:b2`!C3", 1, 1, "a1~:b2`!D4"],
+	["SUM(A1:B2 Sheet1!C3)", 1, 1, "SUM(B2:C3 Sheet1!D4)"],
+	["SUM(A1:B2,1:2!C3)", 1, 1, "SUM(B2:C3,1:2!D4)"],
+	["A1;1:2!B2", 1, 1, "B2;1:2!C3"],
+	["A1\n1:2!B2", 1, 1, "B2\n1:2!C3"],
+	["IF(A1>0,1:2!B2,C3)", 1, 1, "IF(B2>0,1:2!C3,D4)"],
+	['"1:2!A1"&A1', 1, 1, '"1:2!A1"&B2'],
+	["T[[#Data],[1:2!A1]]+A1", 1, 1, "T[[#Data],[1:2!A1]]+B2"],
+	["LOG10(A1)+2e5+1E3", 1, 1, "LOG10(B2)+2e5+1E3"],
+	["a1é+A1+T[1:2!B1", 1, 1, "a1é+B2+T[1:2!B1"],
+	["a1é+SUM(1:2!A1)", 0, 0, "a1é+SUM(1:2!A1)"],
+	["a1é+SUM(1:2!A1)", -1, -1, "a1é+SUM(1:2!#REF!)"],
+];
+
 describe("translateFormula — matches openpyxl's Translator", () => {
 	it("reproduces every reference vector", () => {
 		for (const [formula, dRow, dCol, expected] of VECTORS) {
@@ -105,6 +164,12 @@ describe("translateFormula — matches openpyxl's Translator", () => {
 		for (const [formula, dRow, dCol, expected] of F119_VECTORS) {
 			expect(translateFormula(formula, dRow, dCol), formula).toBe(expected);
 		}
+	});
+
+	it.each(
+		IDENTIFIER_VECTORS,
+	)("preserves identifiers and sheet qualifiers in %s at offset (%i, %i)", (formula, dRow, dCol, expected) => {
+		expect(translateFormula(formula, dRow, dCol)).toBe(expected);
 	});
 
 	it("canonicalizes the WHOLE rewritten token to uppercase (deliberate divergence from openpyxl)", () => {
@@ -175,5 +240,20 @@ describe("translateFormula — matches openpyxl's Translator", () => {
 
 	it("exposes Excel's formula length ceiling", () => {
 		expect(MAX_FORMULA_LEN).toBe(8192);
+	});
+
+	it("bounds failed qualifier lookahead across long runs without a bang", () => {
+		// Each failed scan must be reused while the ordinary tokenizer walks the same run.
+		// Digits and dollar signs take its single-code-unit fallback, exposing quadratic rescans.
+		for (const prefix of ["9".repeat(500_000), "$".repeat(500_000), "a1é".repeat(170_000)]) {
+			const formula = `${prefix}+A1`;
+			const t0 = performance.now();
+			expect(translateFormula(formula, 1, 1)).toBe(`${prefix}+B2`);
+			expect(performance.now() - t0).toBeLessThan(2_000);
+		}
+		const formula = "SUM(1:2!a1)+".repeat(30_000);
+		const t0 = performance.now();
+		expect(translateFormula(formula, 1, 1)).toBe("SUM(1:2!B2)+".repeat(30_000));
+		expect(performance.now() - t0).toBeLessThan(2_000);
 	});
 });
