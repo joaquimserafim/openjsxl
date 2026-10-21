@@ -258,12 +258,37 @@ git-ignored [`../local/`](../local) directory and are never committed.
   (`reader/__tests__/documented-drops.test.ts`; the corpus property pins the value round-trip).
 
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
-  openpyxl fixtures — no local LibreOffice) to exercise the `.ods` value matrix (F7.1): string,
+  openpyxl fixtures — LibreOffice was unavailable then) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a
   formula cell (`of:=[.B1]*2`, cached `84`); an in-cell hyperlink (`<text:a>`); a 2×2 merge
-  (`A4:B5`); and a second sheet. A **real LibreOffice** `.ods` is a welcome future upgrade. Every
+  (`A4:B5`); and a second sheet. Every
   value is cross-checked against **python-calamine** (an independent ODF reader) in
   `reader/__tests__/ods.test.ts`.
+
+- **`libreoffice-negative-durations.ods`** — authored locally on 2026-10-21 by **LibreOfficeDev
+  26.8.0.0.alpha0**, build `2c87e51eeaa2b413ff4ae097b2705eea1995d8e5`, for F11.15. The
+  source was an openpyxl **3.1.5** workbook with sheet `Durations`, `Case` / `Duration` headers,
+  and Python `datetime.timedelta` values formatted as `[h]:mm:ss.000`. LibreOffice's headless
+  `--convert-to ods` saved this committed file; it is unmodified producer output, **not** a
+  synthetic fixture or an output of `generate.mjs`. All content was authored for this project.
+
+  | Cell | Duration in seconds | LibreOffice `office:time-value` |
+  | --- | --- | --- |
+  | B2 | -3600 | `-PT01H00M00S` |
+  | B3 | -183845.25 | `-PT51H04M05.25S` |
+  | B4 | -0.125 | `-PT00H00M00.125S` |
+  | B5 | 3600 | `PT01H00M00S` |
+  | B6 | 0 | `PT00H00M00S` |
+  | B7 | -86400 | `-PT24H00M00S` |
+  | B8 | 183845.25 | `PT51H04M05.25S` |
+
+  The reader exposes these as signed numeric days (seconds / 86400). LibreOffice normalizes
+  day components to hours; direct parser tests cover the ODF day-component spelling too.
+  `reader/__tests__/ods-duration.test.ts` reads these producer bytes verbatim;
+  `reader/__tests__/ods-duration-bridge.test.ts` pins the signs across both XLSX writer paths.
+  The same LibreOffice build reopened and exported the ODS successfully; raw XLSX values and
+  openpyxl 3.1.5 confirmed all seven durations, including negative signs and fractional seconds.
+  SHA-256: `2ba754fef96c8a4fa643d6c34940c1efa893e2a369651808716ccc19cb2a396d`.
 
 - **`excel-online-xstring-saveback.xlsx`** — saved and downloaded from **Microsoft Excel Online
   16.0300** on 2026-08-07 after changing only `Control!B12` from `BEFORE` to `AFTER` in the

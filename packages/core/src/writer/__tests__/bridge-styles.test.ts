@@ -311,6 +311,7 @@ describe("bridge — corpus property", () => {
 			"equiv.csv",
 			"xlsb-basic.xlsb",
 			"ods-edge.ods",
+			"libreoffice-negative-durations.ods",
 			"basic.csv",
 		]) {
 			expect(lossless, key).toContain(key);

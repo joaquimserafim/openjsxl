@@ -87,16 +87,18 @@ function parseOdsDate(value: string | undefined): Date | undefined {
 // from python-calamine (which yields a time object) — the shared model has no time type.
 function parseOdsTime(value: string | undefined): number | undefined {
 	if (value === undefined) return undefined;
-	const m = /^-?P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(value);
+	const m = /^(-?)P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(value);
 	if (m === null) return undefined;
-	const days = m[1] === undefined ? 0 : Number(m[1]);
-	const hours = m[2] === undefined ? 0 : Number(m[2]);
-	const mins = m[3] === undefined ? 0 : Number(m[3]);
-	const secs = m[4] === undefined ? 0 : Number(m[4]);
-	if (days === 0 && m[2] === undefined && m[3] === undefined && m[4] === undefined)
+	const days = m[2] === undefined ? 0 : Number(m[2]);
+	const hours = m[3] === undefined ? 0 : Number(m[3]);
+	const mins = m[4] === undefined ? 0 : Number(m[4]);
+	const secs = m[5] === undefined ? 0 : Number(m[5]);
+	if (days === 0 && m[3] === undefined && m[4] === undefined && m[5] === undefined)
 		return undefined;
 	const fraction = days + (hours * 3600 + mins * 60 + secs) / 86_400;
-	return Number.isFinite(fraction) ? fraction : undefined;
+	if (!Number.isFinite(fraction)) return undefined;
+	// The duration's sign applies to every component. Keep zero canonical, including underflow.
+	return m[1] === "-" && fraction !== 0 ? -fraction : fraction;
 }
 
 // Project an ODF cell onto the shared Cell model. Returns undefined for a cell with no representable
