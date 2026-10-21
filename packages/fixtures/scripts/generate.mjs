@@ -453,6 +453,7 @@ const brec = (c, p = Buffer.alloc(0)) => Buffer.concat([brid(c), brlen(p.length)
 // record ids (pyxlsb)
 const B = {
 	ROW: 0x0000,
+	BLANK: 0x0001,
 	NUM: 0x0002,
 	BOOLERR: 0x0003,
 	BOOL: 0x0004,
@@ -460,6 +461,9 @@ const B = {
 	STRING: 0x0007,
 	FSTR: 0x0008,
 	FFLOAT: 0x0009,
+	COL: 0x003c,
+	COLS: 0x0386, // MS-XLSB record 390, BrtBeginColInfos (varint bytes 86 03)
+	COLS_E: 0x0387, // MS-XLSB record 391, BrtEndColInfos
 	WS: 0x0181,
 	WS_E: 0x0182,
 	SD: 0x0191,
@@ -625,7 +629,107 @@ const xlsbEquivWorkbook = Buffer.concat([
 ]);
 const XLSB_EQUIV_CT = `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/worksheets/sheet1.bin" ContentType="application/vnd.ms-excel.worksheet"/><Override PartName="/xl/sharedStrings.bin" ContentType="application/vnd.ms-excel.sharedStrings"/></Types>`;
 
+// F11.16 — controlled BrtWsDim cases. This is synthetic BIFF12, not desktop-Excel output.
+// A zero range is ambiguous: an empty sheet and a genuine A1 cell use identical coordinates.
+// ZeroBounds deliberately contradicts a zero range with sparse values and a styled blank.
+// Default formatting also counts as used: BrtRowHdr applies ixfe only with fGhostDirty set;
+// BrtColInfo carries its default ixfe unconditionally, wrapped before sheetData.
+const bdefaultRow = (r) =>
+	brec(B.ROW, Buffer.concat([bu32(r), bu32(1), bu16(300), Buffer.from([0, 0x40, 0]), bu32(0)]));
+const bdefaultCol = (c) => [
+	brec(B.COLS),
+	brec(B.COL, Buffer.concat([bu32(c), bu32(c), bu32(8 * 256), bu32(1), bu16(0)])),
+	brec(B.COLS_E),
+];
+const xlsbDimensionSheets = [
+	{ name: "Empty", dimension: bdim(0, 0, 0, 0), records: [] },
+	{
+		name: "A1Value",
+		dimension: bdim(0, 0, 0, 0),
+		records: [brow(0), bcell(B.NUM, 0, 0, brkInt(42))],
+	},
+	{
+		name: "A1Blank",
+		dimension: bdim(0, 0, 0, 0),
+		records: [brow(0), bcell(B.BLANK, 0, 1, Buffer.alloc(0))],
+	},
+	{
+		name: "Ordinary",
+		dimension: bdim(3, 6, 1, 1),
+		records: [brow(3), bcell(B.NUM, 1, 0, brkInt(10)), brow(6), bcell(B.NUM, 1, 0, brkInt(20))],
+	},
+	{
+		name: "InvalidMax",
+		dimension: bdim(0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff),
+		records: [],
+	},
+	{
+		name: "ZeroBounds",
+		dimension: bdim(0, 0, 0, 0),
+		records: [
+			brow(3),
+			bcell(B.NUM, 1, 0, brkInt(10)),
+			brow(6),
+			bcell(B.NUM, 1, 0, brkInt(20)),
+			bcell(B.BLANK, 3, 1, Buffer.alloc(0)),
+		],
+	},
+	{ name: "RowDefault", dimension: bdim(0, 0, 0, 0), records: [bdefaultRow(0)] },
+	{
+		name: "ColumnDefault",
+		dimension: bdim(0, 0, 0, 0),
+		beforeData: bdefaultCol(0),
+		records: [],
+	},
+	{
+		name: "MixedDefaults",
+		dimension: bdim(0, 0, 0, 0),
+		beforeData: bdefaultCol(3),
+		records: [bdefaultRow(4)],
+	},
+];
+const xlsbDimensionsWorkbook = Buffer.concat([
+	brec(B.WB),
+	brec(B.SHS),
+	...xlsbDimensionSheets.map(({ name }, i) =>
+		brec(B.SH, Buffer.concat([bu32(0), bu32(i + 1), bwstr(`rId${i + 1}`), bwstr(name)])),
+	),
+	brec(B.SHS_E),
+	brec(B.WB_E),
+]);
+
 const xlsb = [
+	{
+		file: "xlsb-dimensions.xlsb",
+		parts: [
+			{
+				name: "[Content_Types].xml",
+				xml: `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/><Override PartName="/xl/workbook.bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/>${xlsbDimensionSheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.bin" ContentType="application/vnd.ms-excel.worksheet"/>`).join("")}<Override PartName="/xl/styles.bin" ContentType="application/vnd.ms-excel.styles"/></Types>`,
+			},
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.bin"/></Relationships>`,
+			},
+			{ name: "xl/workbook.bin", data: xlsbDimensionsWorkbook },
+			{
+				name: "xl/_rels/workbook.bin.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}">${xlsbDimensionSheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${R_NS}/worksheet" Target="worksheets/sheet${i + 1}.bin"/>`).join("")}<Relationship Id="rIdStyles" Type="${R_NS}/styles" Target="styles.bin"/></Relationships>`,
+			},
+			...xlsbDimensionSheets.map(({ dimension, beforeData = [], records }, i) => ({
+				name: `xl/worksheets/sheet${i + 1}.bin`,
+				data: Buffer.concat([
+					brec(B.WS),
+					dimension,
+					...beforeData,
+					brec(B.SD),
+					...records,
+					brec(B.SD_E),
+					brec(B.WS_E),
+				]),
+			})),
+			{ name: "xl/styles.bin", data: xlsbStyles },
+		],
+	},
 	{
 		file: "equiv.xlsb",
 		parts: [

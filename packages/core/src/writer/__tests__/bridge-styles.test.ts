@@ -310,6 +310,7 @@ describe("bridge — corpus property", () => {
 			"equiv.xlsb",
 			"equiv.csv",
 			"xlsb-basic.xlsb",
+			"xlsb-dimensions.xlsb",
 			"ods-edge.ods",
 			"libreoffice-negative-durations.ods",
 			"basic.csv",

@@ -65,12 +65,36 @@ export function parseXlsbSheet(
 	const cellStyles = new Map<string, number>();
 	const hyperlinks: XlsbHyperlinkRef[] = [];
 	let dimension: string | undefined;
+	let emptyDimension = false;
+	let firstUsedRow = Infinity;
+	let firstUsedCol = Infinity;
+	let lastUsedRow = 0;
+	let lastUsedCol = 0;
 	let row = 0; // current 0-based row, set by ROW records
 
 	for (const rec of readRecords(bytes)) {
 		switch (rec.id) {
 			case R.ROW: {
-				row = new RecordData(rec.data).u32();
+				const d = new RecordData(rec.data);
+				row = d.u32();
+				d.skip(7); // ixfe, height, first flags byte; fGhostDirty is bit 6 of byte 11
+				if ((d.u8() & 0x40) !== 0) {
+					firstUsedRow = Math.min(firstUsedRow, row);
+					lastUsedRow = Math.max(lastUsedRow, row);
+				}
+				break;
+			}
+			case R.COL_INFO: {
+				// An explicit column default applies even at XF index 0. Require its full fields
+				// (bounds, width, XF) so a truncated record cannot invent formatting evidence.
+				if (rec.data.length < 16) break;
+				const d = new RecordData(rec.data);
+				const first = d.u32();
+				const last = d.u32();
+				if (first <= last) {
+					firstUsedCol = Math.min(firstUsedCol, first);
+					lastUsedCol = Math.max(lastUsedCol, last);
+				}
 				break;
 			}
 			case R.DIMENSION: {
@@ -79,7 +103,16 @@ export function parseXlsbSheet(
 				const r2 = d.u32();
 				const c1 = d.u32();
 				const c2 = d.u32();
-				dimension = rangeOf(r1, c1, r2, c2);
+				// All-zero BrtWsDim can mean either an empty sheet or a genuine A1 used range.
+				// Resolve it after reading cells/default formats; other ranges keep their clamping.
+				emptyDimension = r1 === 0 && r2 === 0 && c1 === 0 && c2 === 0;
+				const invalidDimension =
+					r1 === 0xffffffff &&
+					r2 === 0xffffffff &&
+					c1 === 0xffffffff &&
+					c2 === 0xffffffff;
+				dimension =
+					emptyDimension || invalidDimension ? undefined : rangeOf(r1, c1, r2, c2);
 				break;
 			}
 			case R.HYPERLINK: {
@@ -99,6 +132,7 @@ export function parseXlsbSheet(
 			case R.BOOL:
 			case R.BOOLERR:
 			case R.FLOAT:
+			case R.INLINE_STRING:
 			case R.STRING:
 			case R.FORMULA_STRING:
 			case R.FORMULA_FLOAT:
@@ -106,6 +140,12 @@ export function parseXlsbSheet(
 			case R.FORMULA_BOOLERR: {
 				const d = new RecordData(rec.data);
 				const col = d.u32();
+				// Explicit cells count as used, including blanks and unsupported inline strings.
+				firstUsedRow = Math.min(firstUsedRow, row);
+				firstUsedCol = Math.min(firstUsedCol, col);
+				lastUsedRow = Math.max(lastUsedRow, row);
+				lastUsedCol = Math.max(lastUsedCol, col);
+				if (rec.id === R.INLINE_STRING) break; // preserve existing value/style degradation
 				// The cell's style field packs iStyleRef into the low 24 bits; bit 24 is fPhShow and
 				// bits 25–31 are reserved (MS-XLSB §2.5.9). Mask to 24 bits, or an fPhShow=1 cell (CJK
 				// phonetic workbooks) would carry a corrupted style index and lose date detection.
@@ -117,6 +157,17 @@ export function parseXlsbSheet(
 				break;
 			}
 		}
+	}
+
+	if (emptyDimension && (firstUsedRow !== Infinity || firstUsedCol !== Infinity)) {
+		// BrtWsDim counts row/column defaults only on their own axis. Supply A/1 for an
+		// otherwise missing axis after the scan, so record order cannot inflate the bounds.
+		dimension = rangeOf(
+			firstUsedRow === Infinity ? 0 : firstUsedRow,
+			firstUsedCol === Infinity ? 0 : firstUsedCol,
+			lastUsedRow,
+			lastUsedCol,
+		);
 	}
 
 	return { cells, cellStyles, dimension, hyperlinks };
