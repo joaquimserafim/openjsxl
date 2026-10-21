@@ -41,6 +41,7 @@ import {
 import { MAX_TABLE_NAME_LEN, type TableNameProblem, tableNameProblem } from "../ooxml/table";
 import { encodeXstring } from "../ooxml/xstring";
 import type {
+	CellStyle,
 	ColumnProps,
 	ConditionalFormatting,
 	DataValidation,
@@ -55,7 +56,7 @@ import { commentsParts } from "./comments";
 import type { MediaRegistry } from "./images";
 import { checkKeys, sheetInvalid, shortened } from "./sheet-validation";
 import { colorXml, type Fail, type StyleRegistry, validateColor } from "./styles";
-import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
+import type { CellInput, CellValue, SheetInput, StreamSheetInput } from "./types";
 import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, preserveAttr } from "./xml";
 
 const encoder = new TextEncoder();
@@ -80,25 +81,25 @@ function numberToXml(n: number): string {
 	return String(n);
 }
 
+// Caller properties captured for one cell occurrence. Style registration stays in row order;
+// buffered table headers may retain this record until their cells are emitted.
+interface CapturedCell {
+	readonly value: CellValue;
+	readonly formula: unknown;
+	readonly style: CellStyle | undefined;
+}
+
 // Split a CellInput into its value, (optional) style, and (optional) formula. Discrimination is
 // total: null/undefined are empty, Date instances are dates, primitives are bare values — any OTHER
 // object must be a StyledCell. An object with neither a `value` nor a `formula` property is some
 // stray object (the pre-F4.2 writer rejected every object; keeping that loudness catches typos like
 // { val: 1 } or a nested array). Each caller property is read exactly once (TOCTOU-safe).
-function splitInput(
-	col: number,
-	row: number,
-	input: CellInput,
-): {
-	readonly value: CellValue;
-	readonly styled: StyledCell | undefined;
-	readonly formula: unknown;
-} {
+function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 	if (input === null || input === undefined) {
-		return { value: input, styled: undefined, formula: undefined };
+		return { value: input, formula: undefined, style: undefined };
 	}
 	if (typeof input !== "object" || input instanceof Date) {
-		return { value: input, styled: undefined, formula: undefined };
+		return { value: input, formula: undefined, style: undefined };
 	}
 	const ref = formatRef({ col, row });
 	if (Array.isArray(input)) {
@@ -136,8 +137,8 @@ function splitInput(
 	}
 	return {
 		value,
-		styled: input,
 		formula: hasFormula ? input.formula : undefined,
+		style: input.style,
 	};
 }
 
@@ -148,20 +149,20 @@ function splitInput(
 function renderCell(
 	col: number,
 	row: number,
-	input: CellInput,
+	cell: CapturedCell,
 	date1904: boolean,
 	styles: StyleRegistry,
 ): string | undefined {
-	const { value, styled, formula } = splitInput(col, row, input);
+	const { value, style, formula } = cell;
 	const ref = formatRef({ col, row });
 
 	// Resolve the xf index. Bare non-date values never touch the registry (zero overhead on the
 	// unstyled path); a Date always does (it needs the date number format).
 	let xf = 0;
 	if (value instanceof Date) {
-		xf = styles.xfIndexFor(styled?.style, true, ref);
-	} else if (styled?.style !== undefined) {
-		xf = styles.xfIndexFor(styled.style, false, ref);
+		xf = styles.xfIndexFor(style, true, ref);
+	} else if (style !== undefined) {
+		xf = styles.xfIndexFor(style, false, ref);
 	}
 	const sAttr = xf === 0 ? "" : ` s="${xf}"`;
 
@@ -1455,14 +1456,6 @@ function validateTableName(sheetName: string, what: string, name: string): void 
 	sheetInvalid(sheetName, messages[problem]);
 }
 
-// The text value of a header cell: a bare string, or a `{ value: string }` / `{ value: string, style }`
-// object. Anything else (number, boolean, formula, blank) is not a valid header — `undefined` here.
-function headerCellText(cell: unknown): string | undefined {
-	if (typeof cell === "string") return cell;
-	if (isPlainRecord(cell) && typeof cell.value === "string") return cell.value;
-	return undefined;
-}
-
 function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): string {
 	if (raw === undefined) return "";
 	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what}.style must be an object`);
@@ -1500,7 +1493,7 @@ function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): strin
 
 /**
  * Validate and emit a sheet's tables (decision 8). Column names DERIVE from the header row when a
- * `headerCell` resolver is supplied (the buffered writer, which has all rows); the streaming writer
+ * `headerText` resolver is supplied (the buffered writer, which has all rows); the streaming writer
  * passes `undefined` and column names come from `tables[i].columns` instead (it can't read the header
  * upfront). `ctx` assigns workbook-global ids and enforces cross-sheet name uniqueness. Returns
  * `undefined` when the sheet has no tables so an unused feature emits nothing (byte-identity).
@@ -1508,7 +1501,7 @@ function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): strin
 export function buildTables(
 	sheetName: string,
 	tables: readonly TableInfo[] | undefined,
-	headerCell: ((row: number, col: number) => unknown) | undefined,
+	headerText: ((row: number, col: number) => string | undefined) | undefined,
 	ctx: TableContext,
 	styles: StyleRegistry,
 ): TablePart[] | undefined {
@@ -1577,8 +1570,8 @@ export function buildTables(
 			const rawColumn = columns !== undefined ? columns[c] : undefined;
 			const provided = isPlainRecord(rawColumn) ? rawColumn : undefined;
 			let columnName: string;
-			if (headerRow && headerCell !== undefined) {
-				const text = headerCellText(headerCell(from.row, from.col + c));
+			if (headerRow && headerText !== undefined) {
+				const text = headerText(from.row, from.col + c);
 				const provName = provided !== undefined ? provided.name : undefined;
 				if (text !== undefined && text !== "") {
 					// Header text is authoritative — Excel requires the column name to match the header cell.
@@ -2062,13 +2055,32 @@ export function worksheetXml(
 	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
 	const comments = commentsParts(sheet.name, sheet.comments);
 	const pictures = imageParts(sheet.name, sheet.images, media);
-	// Column names derive from the header row — the buffered writer has every row, so it reads them.
+	// Only table-header coordinates need to survive both metadata and cell emission. Cache by
+	// position, not object identity: callers can reuse one StyledCell at distinct coordinates.
+	const headerCells = new Map<
+		number,
+		Map<number, { readonly cell: CapturedCell; readonly text: string | undefined }>
+	>();
 	const tables = buildTables(
 		sheet.name,
 		sheet.tables,
 		(row, col) => {
+			let capturedRow = headerCells.get(row);
+			const captured = capturedRow?.get(col);
+			if (captured !== undefined) return captured.text;
 			const rowCells = rows[row - 1];
-			return Array.isArray(rowCells) ? rowCells[col - 1] : undefined;
+			const input: CellInput = Array.isArray(rowCells) ? rowCells[col - 1] : undefined;
+			// Preserve header policy: bare strings and plain records with a string value (including
+			// cached formula strings) infer names; other cells may use a provided column-name fallback.
+			const canInfer = typeof input === "string" || isPlainRecord(input);
+			const cell = splitInput(col, row, input);
+			const text = canInfer && typeof cell.value === "string" ? cell.value : undefined;
+			if (capturedRow === undefined) {
+				capturedRow = new Map();
+				headerCells.set(row, capturedRow);
+			}
+			capturedRow.set(col, { cell, text });
+			return text;
 		},
 		tableCtx,
 		styles,
@@ -2110,10 +2122,12 @@ export function worksheetXml(
 			);
 		}
 		const rowNum = r + 1;
+		const capturedRow = headerCells.get(rowNum);
 		const cellXmls: string[] = [];
 		for (let c = 0; c < cells.length; c++) {
 			const colNum = c + 1;
-			const rendered = renderCell(colNum, rowNum, cells[c], date1904, styles);
+			const cell = capturedRow?.get(colNum)?.cell ?? splitInput(colNum, rowNum, cells[c]);
+			const rendered = renderCell(colNum, rowNum, cell, date1904, styles);
 			if (rendered === undefined) continue;
 			if (minRow === 0 || rowNum < minRow) minRow = rowNum;
 			if (rowNum > maxRow) maxRow = rowNum;
@@ -2221,7 +2235,8 @@ function renderStreamRow(
 	}
 	const cellXmls: string[] = [];
 	for (let c = 0; c < cells.length; c++) {
-		const rendered = renderCell(c + 1, rowNum, cells[c], date1904, styles);
+		const cell = splitInput(c + 1, rowNum, cells[c]);
+		const rendered = renderCell(c + 1, rowNum, cell, date1904, styles);
 		if (rendered !== undefined) cellXmls.push(rendered);
 	}
 	if (cellXmls.length === 0) return attrs !== "" ? `<row r="${rowNum}"${attrs}/>` : "";
