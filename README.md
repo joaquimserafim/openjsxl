@@ -28,6 +28,10 @@ runtimes — Node, Deno, Bun, the browser, and edge.
 > read AND write — on a frozen, fully documented API.
 > Published on npm — see the [API reference](#api-reference) and [how it's built](./ARCHITECTURE.md).
 
+**Security:** use the [security policy](./SECURITY.md) for private vulnerability reporting,
+supported releases and untrusted-workbook limits. Per-part read guards are not a total CPU or
+memory budget; the policy also distinguishes published 1.0.0 from unreleased 1.0.1 protections.
+
 ## Quick start
 
 `.xlsx` → JSON, in well under 50 lines:

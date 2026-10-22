@@ -19,6 +19,10 @@ See the [full measurements and limitations](https://github.com/joaquimserafim/op
 npm install openjsxl
 ```
 
+**Security:** see the [security policy](https://github.com/joaquimserafim/openjsxl/blob/main/SECURITY.md)
+for private vulnerability reporting, supported releases and limits when processing untrusted files.
+It distinguishes published 1.0.0 behavior from protections on the unreleased 1.0.1 branch.
+
 ### Requirements
 
 **ESM-only** (there is no CommonJS build) and, on Node, **Node ≥ 24** — openjsxl relies only on

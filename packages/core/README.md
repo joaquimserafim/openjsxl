@@ -21,6 +21,10 @@ npm install @openjsxl/core
 unflagged from 24 on. `import` is the entry point; `require('@openjsxl/core')` also resolves on
 Node ≥ 24 via `require(esm)`.
 
+**Security:** see the [security policy](https://github.com/joaquimserafim/openjsxl/blob/main/SECURITY.md)
+for private vulnerability reporting, supported releases and limits when processing untrusted files.
+It distinguishes published 1.0.0 behavior from protections on the unreleased 1.0.1 branch.
+
 ## Usage
 
 ```ts

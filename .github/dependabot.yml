@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # pnpm workspaces share the root manifest, pnpm-workspace.yaml, and pnpm-lock.yaml.
+  # Upstream pnpm 11/multi-document support: dependabot/dependabot-core#15710 and #15968.
+  # Verify the first hosted update job after enabling this configuration.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
