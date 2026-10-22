@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FORMAT_READERS, FORMATS } from "./formats.mjs";
 import { machineLine } from "./machine.mjs";
+import { matchingPythonSnapshot, matchingSizeSnapshot, requireProvenance } from "./provenance.mjs";
+import { validateReadResults } from "./read-validation.mjs";
 import { fmtBytes, fmtMs } from "./stats.mjs";
 
 // Renders the collected results into docs/benchmarks.md. Every published number comes from an
@@ -20,7 +22,7 @@ function pick(results, op, workload, sizeKey, label) {
 	);
 }
 
-// A time·memory cell. Missing/failed → em dash (footnote explains the common case: SheetJS styles).
+// A time·memory cell. Missing/failed → em dash; the failure table explains each rejected cell.
 function cellTimeMem(res) {
 	if (!res?.ok) return "—";
 	return `${fmtMs(res.timeMs)} · ${fmtBytes(res.peakRss)}`;
@@ -31,6 +33,26 @@ function table(header, rows) {
 	const sep = `| ${header.map(() => "---").join(" | ")} |`;
 	const body = rows.map((r) => `| ${r.join(" | ")} |`).join("\n");
 	return `${head}\n${sep}\n${body}`;
+}
+
+function failureSection(results) {
+	const failed = results.filter((result) => !result.ok);
+	if (failed.length === 0) return "";
+	const text = (value) =>
+		String(value ?? "unknown")
+			.replace(/\|/g, "\\|")
+			.replace(/[\r\n]+/g, " ");
+	const rows = failed.map((result) =>
+		[
+			result.label ?? result.lib,
+			result.op,
+			result.workload,
+			result.format ?? "xlsx",
+			result.sizeKey,
+			result.reason,
+		].map(text),
+	);
+	return `\n## Failed or unsupported measurements\n\nThese cells are shown as — above; their timing and memory measurements are excluded.\n\n${table(["Library", "Operation", "Workload", "Format", "Cells", "Reason"], rows)}\n`;
 }
 
 // The streamed column's op is write-stream; every other write-side label is a plain write; on the
@@ -99,10 +121,10 @@ function formatSection(results) {
 // The library size matrix — a clean production install of each library, from ../.cache/sizes.json
 // (populated out-of-band by sizes.mjs, since it does real npm installs). Speed is one axis; the cost
 // of the dependency footprint is the other, and the one openjsxl's zero-dep design targets.
-function sizesSection() {
-	if (!existsSync(SIZES_CACHE)) {
+function sizesSection(data) {
+	if (!data) {
 		return [
-			"\nMeasured out-of-band by a clean `npm install` per library. Populate with:",
+			"\nNo matching size measurements. Legacy or differently sourced results are omitted. Populate with:",
 			"",
 			"```sh",
 			"node packages/bench/src/sizes.mjs   # writes packages/bench/.cache/sizes.json",
@@ -111,13 +133,11 @@ function sizesSection() {
 			"",
 		].join("\n");
 	}
-	const data = JSON.parse(readFileSync(SIZES_CACHE, "utf8"));
-	const version = (spec) => spec.slice(spec.lastIndexOf("@") + 1);
 	// Sub-1-MB installs show 2 decimals so a ~0.45 MB library doesn't read as a lossy "0.4 MB".
 	const fmtInstalled = (kb) => `${(kb / 1024).toFixed(kb < 1024 ? 2 : 1)} MB`;
 	const rows = data.libs.map((l) => [
 		`**${l.name}**`,
-		`\`${version(l.spec)}\``,
+		`\`${l.version}\``,
 		String(l.totalDeps),
 		fmtBytes(l.ownBytes),
 		fmtInstalled(l.installKB),
@@ -127,42 +147,45 @@ function sizesSection() {
 		.map((l) => `\n_${l.name}: ${l.note}_\n`)
 		.join("");
 	return `
-A clean production install (\`npm install --omit=dev\`) of each library — measured ${data.date} on
+A clean production install (\`npm install --omit=dev --ignore-scripts\`) of each exact artifact — measured ${data.date} on
 Node ${data.node.replace(/^v/, "")}. **Deps** counts the runtime packages the library pulls in
 (transitive, excluding the library itself); **Own size** is the package's own unpacked tarball;
 **Installed** is the library plus every runtime dependency on disk.
+Comparator tarball bytes and npm metadata must match the artifact integrity in the recorded lockfile.
 
 ${table(["Library", "Version", "Deps", "Own size", "Installed"], rows)}
 ${notes}
 openjsxl ships **zero third-party runtime dependencies** (both its packages are pure TypeScript over
-platform Web APIs). ExcelJS and SheetJS pull in a tree of runtime packages, which is what the
-*Installed* column reflects.
+platform Web APIs). The dependency counts above describe the measured distributions; SheetJS
+0.20.3 also declares no runtime dependencies. *Installed* includes the library itself.
 `;
 }
 
-function pythonSection() {
-	if (!existsSync(PYTHON_CACHE)) {
+function pythonSection(data) {
+	if (!data) {
 		return [
-			"\nReference numbers for Python readers/writers are gathered out-of-band (they need a",
+			"\nNo matching Python reference measurements. Legacy or different-fixture results are omitted.",
+			"Reference numbers for Python readers/writers are gathered out-of-band (they need a",
 			"Python environment, not npm). Run the companion script to populate this section:",
 			"",
 			"```sh",
 			"python3 packages/bench/py/bench_py.py   # writes packages/bench/.cache/python.json",
-			"pnpm bench                              # re-render with the Python column filled in",
+			"pnpm bench --render-only                 # preserve the JS measurement date and versions",
 			"```",
 			"",
 		].join("\n");
 	}
-	const data = JSON.parse(readFileSync(PYTHON_CACHE, "utf8"));
 	const cols = ["openpyxl", "python-calamine"];
+	const versions = cols
+		.map((name) => `${name} ${data.libraries?.[name] ?? "(version not recorded)"}`)
+		.join("; ");
 	let md = `\nMeasured out-of-band on: ${data.machine ?? "unknown"} · ${data.date ?? ""}\n
+Libraries: ${versions}. Python CSV uses the recorded Python runtime's standard library.
 
 > Reference only — **not** directly comparable to the JS numbers above. The Python runtime has a
 > much lower baseline RSS than Node, openpyxl runs in its streaming \`read_only\`/\`write_only\` modes
 > (tiny memory, unlike the in-memory JS APIs benchmarked above), and \`python-calamine\` is a native
-> Rust binding — the cross-language *speed bar* openjsxl targets, not a same-runtime peer. The point:
-> openjsxl is the fastest pure-JS option here and lands within ~1.3–1.6× of native calamine on read
-> (workload-dependent; measured against the versions stamped above).
+> Rust binding. These are cross-language reference measurements, not same-runtime peers.
 `;
 	for (const op of ["read", "write"]) {
 		const workloads = [
@@ -200,7 +223,7 @@ function pythonSection() {
 		const formats = [...new Set(formatRes.map((r) => r.format))];
 		const sizeKeys = [...new Set(formatRes.map((r) => r.sizeKey))];
 		md +=
-			"\n**Read by format** — calamine (xlsx/xlsb) · stdlib `csv` (csv). calamine rejects SheetJS's `.ods` output, so ods has no reference row here.\n\n";
+			"\n**Read by format** — successful measurements on the matching fixtures: calamine (container formats) · stdlib `csv` (csv).\n\n";
 		const rows = sizeKeys.map((sk) => [
 			`\`${sk}\``,
 			...formats.map((f) => {
@@ -213,9 +236,29 @@ function pythonSection() {
 	return md;
 }
 
-/** Write docs/benchmarks.md from the collected results; returns the path written. */
-export function writeReport(results, { sizes, workloads, ops }) {
-	const date = new Date().toISOString().slice(0, 10);
+/** Render recorded measurements without changing their date, machine, or library identity. */
+export function renderReport(recordedResults, meta, supplemental = {}) {
+	const results = validateReadResults(recordedResults);
+	const { sizes, workloads, ops } = meta;
+	const provenance = requireProvenance(meta.provenance);
+	const date = provenance.measuredAt.slice(0, 10);
+	const libraries = provenance.libraries
+		.map((lib) => {
+			const source = lib.source.startsWith("https://")
+				? `[official distribution](${lib.source})`
+				: `\`${lib.source}\``;
+			const overrides = Object.entries(lib.overrides ?? {})
+				.map(([name, version]) => `${name} ${version}`)
+				.join(", ");
+			return `**${lib.name}** \`${lib.version}\` (${source}${overrides ? `; override ${overrides}` : ""})`;
+		})
+		.join("; ");
+	const sizesData = matchingSizeSnapshot(supplemental.sizes, provenance)
+		? supplemental.sizes
+		: undefined;
+	const pythonData = matchingPythonSnapshot(supplemental.python, meta)
+		? supplemental.python
+		: undefined;
 	// The cross-format read results are tagged separately so they don't leak into the main xlsx matrix
 	// (which shares op/workload/label with the format phase's xlsx lane).
 	const matrix = results.filter((r) => r.section !== "format-read");
@@ -226,9 +269,9 @@ export function writeReport(results, { sizes, workloads, ops }) {
 
 	const md = `# openjsxl benchmarks
 
-_Generated by \`pnpm bench\` on ${date}. Reproducible end-to-end on a clean checkout._
+_Measured by \`pnpm bench\` on ${date}. Re-rendering preserves this measurement date._
 
-**Machine:** ${machineLine()}
+**Machine:** ${machineLine(provenance.machine)}
 
 Each number is the **median wall-time** (over warmed iterations) and the **peak process RSS of a
 single cold call** (library load + one operation), measured in a **fresh, isolated Node process per
@@ -237,18 +280,21 @@ cell** so no library colours another's timing or memory. Workloads are 10 column
 strings + a styles table) and read by all three JS readers. Full methodology and the fairness
 caveats are at the bottom.
 
-Libraries: **openjsxl** (this project), **ExcelJS** \`4.4.0\`, **SheetJS** \`xlsx@0.18.5\` (the last
-version on the public npm registry). Peak RSS is absolute and includes loading the library — the
-working set one call actually costs.
+Libraries: ${libraries}. Peak RSS is absolute and includes loading the library.
+
+**Source snapshot:** lockfile SHA-256 \`${provenance.lockfileSha256}\`; core bundle SHA-256
+\`${provenance.bundles.core}\`. The raw result cache also records locked comparator artifact
+integrities and fixture hashes.
 
 ## Library size
-${sizesSection()}
+${sizesSection(sizesData)}
 ${ops.includes("read") ? `\n## Read\n\nParse a real \`.xlsx\` and materialize every cell value.\n${section(matrix, "read", sizes, workloads)}` : ""}
 ${ops.includes("write") ? `\n## Write\n\nSerialize N cells to \`.xlsx\` bytes. openjsxl's *streamed* column is fed a lazy row source (a\ngenerator) — the honest streaming case, where the full row array never exists in memory.\n${section(matrix, "write", sizes, workloads)}\n### Output file size\n${sizeSection(matrix, sizes, workloads)}` : ""}
-${formatReads.length ? `\n## Read by format\n\nThe same \`numbers\` data authored in four container formats, each read by the libraries that support\nit and materialized cell-by-cell. xlsx reuses the ExcelJS-authored fixture; \`.xlsb\`/\`.ods\` are\nauthored by **SheetJS** (a real producer that writes those containers — the same author-then-read\nshape ExcelJS→xlsx already uses); \`.csv\` is written directly (plain text, no producer). ExcelJS reads\nonly xlsx/csv. python-calamine (below) independently anchors xlsx and xlsb; it **rejects SheetJS's\n\`.ods\` output** with a parse error, while openjsxl and SheetJS both read it — so the \`.ods\` lane has no\ncalamine anchor (an openjsxl-tolerance data point, not a benchmark gap).\n${formatSection(formatReads)}` : ""}
+${formatReads.length ? `\n## Read by format\n\nThe same \`numbers\` data authored in four container formats, each read by the libraries that support\nit and materialized cell-by-cell. xlsx reuses the ExcelJS-authored fixture; \`.xlsb\`/\`.ods\` are\nauthored by **SheetJS** (a real producer that writes those containers — the same author-then-read\nshape ExcelJS→xlsx already uses); \`.csv\` is written directly (plain text, no producer). ExcelJS reads\nonly xlsx/csv. Python reference rows, when available below, use the exact same fixture hashes.\nFormat compatibility is measured with the recorded producer version; old producer results are not reused.\n${formatSection(formatReads)}` : ""}
+${failureSection(results)}
 
 ## Reference: Python
-${pythonSection()}
+${pythonSection(pythonData)}
 
 ## Methodology
 
@@ -263,9 +309,12 @@ ${pythonSection()}
   to the OS, so later iterations carry earlier ones' residue. The cold figure is what a single call
   costs; it is absolute, so it includes loading the library.
 - **Equal work.** Every writer is handed the identical dataset; every reader parses the identical
-  ExcelJS-authored file and materializes every cell into JS values (a checksum sink prevents
-  dead-code elimination). SheetJS writes with \`compression: true\` so its output is deflated like the
-  others'.${anyStyledWriteGap ? "\n- **SheetJS styled write** is shown as —: emitting cell styles is a SheetJS Pro feature, absent from the npm build, so measuring it would compare unequal work." : ""}
+  ExcelJS-authored file and materializes every cell into JS values. Outside worker timing, the
+  harness compares each returned read checksum with the deterministic workload's expected sum,
+  requiring a finite value within max(1e-9, 32 × Number.EPSILON × |expected|). Mismatches are excluded
+  and listed above; this checksum is a sanity check, not proof of complete semantic equivalence.
+  SheetJS writes with \`compression: true\` so its output is deflated like the
+  others'.${anyStyledWriteGap ? "\n- **SheetJS styled write** is shown as —: emitting cell styles is a SheetJS Pro feature, absent from this community build, so measuring it would compare unequal work." : ""}
 - **Not measured here.** CI-run benchmarks (too noisy) and internal micro-benchmarks. Python numbers
   are gathered out-of-band with a companion script and clearly marked as reference.
 
@@ -273,6 +322,23 @@ Regenerate with \`pnpm bench\` (add \`--quick\` for a fast smoke run). See
 [\`packages/bench\`](../packages/bench) for the harness.
 `;
 
+	return md;
+}
+
+function readSupplement(path) {
+	try {
+		return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Write docs/benchmarks.md from the collected results; returns the path written. */
+export function writeReport(results, meta) {
+	const md = renderReport(results, meta, {
+		sizes: readSupplement(SIZES_CACHE),
+		python: readSupplement(PYTHON_CACHE),
+	});
 	mkdirSync(fileURLToPath(new URL("../../../docs/", import.meta.url)), { recursive: true });
 	writeFileSync(DOCS, md);
 	return DOCS;

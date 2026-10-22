@@ -11,6 +11,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ensureFormatFixture, FORMAT_READERS, FORMAT_WORKLOAD, FORMATS } from "./formats.mjs";
+import { captureProvenance, ensureCachedFixture, fixtureIdentity, sha256 } from "./provenance.mjs";
+import { validateReadResult } from "./read-validation.mjs";
 import { writeReport } from "./report.mjs";
 import { COLS, SIZES, WORKLOADS } from "./workloads.mjs";
 
@@ -92,16 +94,24 @@ function runCell(cfg) {
 
 // Author the canonical read fixture for (workload, size) with ExcelJS — a neutral, realistic
 // producer (shared strings, a styles table), so every JS reader parses the exact same real file.
-// Cached; regenerated only when absent.
-async function ensureFixture(workload, size) {
+// Cached only while the producer/source, dependency resolution, and fixture bytes still match.
+async function ensureFixture(workload, size, provenance) {
 	const path = `${CACHE}read-${workload}-${size.key}.xlsx`;
-	if (existsSync(path)) return path;
-	const { buildDataset } = await import("./workloads.mjs");
-	const exceljs = await import("./adapters/exceljs.mjs");
-	process.stdout.write(`  · authoring fixture ${workload}/${size.key} (ExcelJS) …\n`);
-	const bytes = await exceljs.write(buildDataset(workload, size.rows), workload);
-	writeFileSync(path, bytes);
-	return path;
+	return ensureCachedFixture(
+		path,
+		fixtureIdentity(provenance, "exceljs", {
+			workload,
+			rows: size.rows,
+			columns: COLS,
+			format: "xlsx",
+		}),
+		async () => {
+			const { buildDataset } = await import("./workloads.mjs");
+			const exceljs = await import("./adapters/exceljs.mjs");
+			process.stdout.write(`  · authoring fixture ${workload}/${size.key} (ExcelJS) …\n`);
+			return exceljs.write(buildDataset(workload, size.rows), workload);
+		},
+	);
 }
 
 async function main() {
@@ -122,6 +132,8 @@ async function main() {
 	const sizes = SIZES.filter((s) => sizeKeys.includes(s.key));
 	const workloads = opts.workloads ?? WORKLOADS;
 	const ops = opts.ops ?? ["read", "write"];
+	const provenance = captureProvenance();
+	const fixturePaths = new Set();
 
 	const results = [];
 	for (const size of sizes) {
@@ -132,7 +144,8 @@ async function main() {
 		for (const workload of workloads) {
 			// READ cells (each needs the shared fixture authored first).
 			if (ops.includes("read")) {
-				const fixture = await ensureFixture(workload, size);
+				const fixture = await ensureFixture(workload, size, provenance);
+				fixturePaths.add(fixture);
 				for (const r of READ_RUNNERS) {
 					const cfg = {
 						lib: r.id,
@@ -146,7 +159,7 @@ async function main() {
 					process.stdout.write(
 						`▶ read  · ${workload.padEnd(7)} · ${size.key.padEnd(4)} · ${r.label} … `,
 					);
-					const res = await runCell(cfg);
+					const res = validateReadResult(await runCell(cfg));
 					res.label = r.label;
 					res.sizeKey = size.key;
 					results.push(res);
@@ -160,7 +173,7 @@ async function main() {
 					process.stdout.write(
 						`▶ write · ${workload.padEnd(7)} · ${size.key.padEnd(4)} · ${r.label} … `,
 					);
-					const res = await runCell(cfg);
+					const res = validateReadResult(await runCell(cfg));
 					res.label = r.label;
 					res.sizeKey = size.key;
 					results.push(res);
@@ -178,9 +191,16 @@ async function main() {
 			const policy = ITER_POLICY[size.key] ?? { warmup: 1, iters: 3 };
 			const iters = opts.quick ? 1 : (opts.iters ?? policy.iters);
 			const warmup = opts.quick ? 0 : (opts.warmup ?? policy.warmup);
-			const xlsxFixture = await ensureFixture(FORMAT_WORKLOAD, size);
+			const xlsxFixture = await ensureFixture(FORMAT_WORKLOAD, size, provenance);
 			for (const format of FORMATS) {
-				const fixture = await ensureFormatFixture(CACHE, size, format, xlsxFixture);
+				const fixture = await ensureFormatFixture(
+					CACHE,
+					size,
+					format,
+					xlsxFixture,
+					provenance,
+				);
+				fixturePaths.add(fixture);
 				for (const r of FORMAT_READERS[format]) {
 					const cfg = {
 						lib: r.id,
@@ -195,7 +215,7 @@ async function main() {
 					process.stdout.write(
 						`▶ read· ${format.padEnd(4)} · ${size.key.padEnd(4)} · ${r.label} … `,
 					);
-					const res = await runCell(cfg);
+					const res = validateReadResult(await runCell(cfg));
 					res.label = r.label;
 					res.sizeKey = size.key;
 					res.format = format;
@@ -207,7 +227,11 @@ async function main() {
 		}
 	}
 
-	const meta = { cols: COLS, sizes, workloads, ops };
+	const fixtures = [...fixturePaths].sort().map((path) => ({
+		name: path.slice(CACHE.length),
+		sha256: sha256(readFileSync(path)),
+	}));
+	const meta = { cols: COLS, sizes, workloads, ops, provenance, fixtures };
 	writeFileSync(JS_RESULTS, JSON.stringify({ meta, results }, null, 2));
 	const outPath = writeReport(results, meta);
 	process.stdout.write(`\nWrote ${outPath}\n`);

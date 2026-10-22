@@ -704,33 +704,36 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 ## Performance
 
-"Fast" is measured, not asserted. Against the JS incumbents on an Apple M2 Pro (Node 24), a
-**1-million-cell** sheet (median wall-time · peak RSS, each library in an isolated process):
+On an Apple M2 Pro (Node 24.21.0), this workspace build processes a **1-million-cell numeric
+sheet** as follows (median wall-time · peak RSS, each library in an isolated process):
 
-| 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
+| 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
-| **read** | **0.70 s · 203 MB** | 1.6 s · 806 MB | 2.2 s · 543 MB |
-| **write** | **0.75 s · 393 MB** | 3.2 s · 1.4 GB | 1.9 s · 564 MB |
+| **read** | **769 ms · 208.0 MB** | 1.56 s · 812.3 MB | 2.49 s · 542.6 MB |
+| **write** | **686 ms · 390.7 MB** | 3.16 s · 1.43 GB | 2.37 s · 523.9 MB |
 
-Writing with `streamXlsx` from a lazy row source holds memory roughly **flat (~100 MB)** no matter
-the row count (flat in *rows* — embedded images, when present, stay resident until the stream ends).
+The streamed writer measured **668 ms · 100.6 MB** for the same million
+cells from a lazy row source. Embedded images, when present, remain resident until the stream ends.
 
-**Reads more than `.xlsx`.** The same million cells as `.xlsb`, `.ods`, and `.csv`, each parsed and
-materialized cell-by-cell — openjsxl leads every format (e.g. `.xlsb` in **0.19 s** vs SheetJS's
-1.63 s; ExcelJS reads neither `.xlsb` nor `.ods`).
+The full report also measures `.ods` and `.csv`. **XLSB timings for openjsxl are excluded:**
+the SheetJS 0.20.3 fixtures use undocumented short cell variants that the current parser drops,
+so their read checksums fail. A separate parser fix is required before those timings can be included.
 
-**And it stays small** — a clean production install (`npm install --omit=dev`), the library plus every
-runtime dependency on disk:
+A clean production install (lifecycle scripts disabled) gives these footprints:
 
-| | openjsxl | ExcelJS `4.4.0` | SheetJS `0.18.5` |
+| | openjsxl `1.0.0` | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
-| runtime deps | **0 third-party** (1 pkg — its own core) | 96 packages | 8 packages |
-| installed | **~0.52 MB** | 34 MB | 14 MB |
+| runtime deps | **0 third-party** (1 package — its own core) | 192 packages | 0 packages |
+| installed | **0.52 MB** | 50.5 MB | 7.8 MB |
 
-The full matrix (10k / 100k / 1M cells, numbers / strings / styled, read + write), the four-format
-read lanes, the library-size table, the methodology, and out-of-band **openpyxl** /
-**python-calamine** reference numbers are in [`docs/benchmarks.md`](./docs/benchmarks.md) — reproduce
-it end-to-end with `pnpm bench`. _(Measured 2026-07-17; every "fast" in these docs traces back here.)_
+Timing uses the workspace build; openjsxl's footprint uses published 1.0.0. ExcelJS uses the
+reviewed uuid 11.1.1 override, and SheetJS uses its official integrity-pinned distribution.
+Other install-size transitives resolve during the dated clean install.
+
+The full matrix (10k / 100k / 1M cells; numbers / strings / styled; read + write), format lanes,
+source hashes, failed checks and methodology are in [`docs/benchmarks.md`](./docs/benchmarks.md).
+Run `pnpm bench` to reproduce it. Python reference results are omitted until remeasured against
+these fixtures. _(Measured 2026-10-21.)_
 
 ## Approach
 

@@ -11,13 +11,15 @@ Run AFTER `pnpm bench` (or `pnpm bench --quick`) has authored the read fixtures 
     python3 -m venv .venv && . .venv/bin/activate
     pip install -r packages/bench/py/requirements.txt
     python3 packages/bench/py/bench_py.py            # -> packages/bench/.cache/python.json
-    pnpm bench                                        # re-render docs with the Python column filled
+    pnpm bench --render-only                          # merge without rerunning the JS matrix
 
 Each (library, op, workload, size) cell runs in its own subprocess (mirroring the JS harness), so
 `ru_maxrss` is that operation's peak, uncontaminated by the others.
 """
 
 import argparse
+import hashlib
+import importlib.metadata
 import json
 import os
 import resource
@@ -57,6 +59,36 @@ def dataset(kind, rows):
 
 def fixture_path(workload, size_key):
     return os.path.join(CACHE, f"read-{workload}-{size_key}.xlsx")
+
+
+def benchmark_provenance():
+    """Bind references to a recorded JS run and verify its exact fixture bytes before measuring."""
+    with open(os.path.join(CACHE, "js-results.json")) as f:
+        meta = json.load(f).get("meta", {})
+    provenance = meta.get("provenance", {})
+    if provenance.get("schemaVersion") != 1 or not provenance.get("measuredAt"):
+        raise RuntimeError("JS results lack provenance; run pnpm bench before the Python reference")
+    fixtures = meta.get("fixtures")
+    if not isinstance(fixtures, list):
+        raise RuntimeError("JS results lack fixture hashes; run pnpm bench first")
+    for fixture in fixtures:
+        name = fixture["name"]
+        if os.path.basename(name) != name:
+            raise RuntimeError("Invalid fixture name in benchmark metadata")
+        with open(os.path.join(CACHE, name), "rb") as f:
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != fixture["sha256"]:
+            raise RuntimeError(f"Fixture changed since JS measurement: {name}")
+    return {"schemaVersion": 1, "benchmarkMeasuredAt": provenance["measuredAt"], "fixtures": fixtures}
+
+
+def package_version(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 # --- operations -----------------------------------------------------------------------------
@@ -182,6 +214,8 @@ def run_worker(cfg):
 
 
 def orchestrate(size_keys, workloads):
+    provenance = benchmark_provenance()
+    fixture_names = {fixture["name"] for fixture in provenance["fixtures"]}
     runners = [("read", "openpyxl"), ("read", "python-calamine"), ("write", "openpyxl")]
     results = []
     for size_key, rows in SIZES:
@@ -190,7 +224,7 @@ def orchestrate(size_keys, workloads):
         iters = 5 if size_key == "10k" else 3 if size_key == "100k" else 2
         for workload in workloads:
             for op, lib in runners:
-                if op == "read" and not os.path.exists(fixture_path(workload, size_key)):
+                if op == "read" and os.path.basename(fixture_path(workload, size_key)) not in fixture_names:
                     print(f"  · skip {op}/{lib}/{workload}/{size_key} — no fixture (run `pnpm bench` first)")
                     continue
                 cfg = {"op": op, "lib": lib, "workload": workload, "sizeKey": size_key,
@@ -218,7 +252,7 @@ def orchestrate(size_keys, workloads):
             continue
         iters = 5 if size_key == "10k" else 3 if size_key == "100k" else 2
         for fmt, lib in FORMAT_READERS_PY.items():
-            if not os.path.exists(os.path.join(CACHE, f"read-numbers-{size_key}.{fmt}")):
+            if f"read-numbers-{size_key}.{fmt}" not in fixture_names:
                 print(f"  · skip read-format/{lib}/{fmt}/{size_key} — no fixture (run `pnpm bench` first)")
                 continue
             cfg = {"op": "read-format", "lib": lib, "workload": "numbers", "sizeKey": size_key,
@@ -240,7 +274,11 @@ def orchestrate(size_keys, workloads):
             else:
                 print(f"n/a ({res.get('reason')})")
 
-    out = {"machine": f"{sys.platform} · Python {sys.version.split()[0]}", "date": date.today().isoformat(), "results": results}
+    if benchmark_provenance() != provenance:
+        raise RuntimeError("JS results or fixtures changed during the Python measurement; rerun")
+    out = {**provenance, "machine": f"{sys.platform} · Python {sys.version.split()[0]}",
+           "date": date.today().isoformat(), "results": results,
+           "libraries": {"openpyxl": package_version("openpyxl"), "python-calamine": package_version("python-calamine")}}
     os.makedirs(CACHE, exist_ok=True)
     with open(os.path.join(CACHE, "python.json"), "w") as f:
         json.dump(out, f, indent=2)

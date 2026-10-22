@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 
-// SheetJS adapter (xlsx@0.18.5 — the last version published to the public npm registry). Reading
+// SheetJS adapter (the reviewed official 0.20.3 distribution pinned in package.json). Reading
 // materializes every row via sheet_to_json; writing deflates (compression:true) so its output size
 // is comparable. Cell styling is a SheetJS Pro feature absent from this build, so styled write is
 // declared unsupported rather than measured doing less work than the others.

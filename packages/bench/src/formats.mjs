@@ -6,12 +6,11 @@
 // the same file" rule: xlsx reuses the ExcelJS-authored fixture; xlsb/ods are authored by SheetJS
 // (a real producer that can WRITE those binary/ODF containers); csv is authored directly (it is just
 // text — no producer bias). The SheetJS-reads-a-SheetJS-file caveat is the same one ExcelJS→xlsx
-// already carries, and python-calamine (independent) anchors the xlsb numbers. The ods lane has NO
-// independent anchor: calamine rejects SheetJS-authored .ods with a parse error (openjsxl and
-// SheetJS both read it) — stated in the report rather than hidden.
+// already carries. Independent Python reference results are included only when their fixture
+// provenance matches the JS run; format support is reported from that run rather than assumed.
 
-import { existsSync, writeFileSync } from "node:fs";
-import { buildDataset } from "./workloads.mjs";
+import { ensureCachedFixture, fixtureIdentity } from "./provenance.mjs";
+import { buildDataset, COLS } from "./workloads.mjs";
 
 // The one workload used across formats. `numbers` is the cleanest: identical IEEE doubles in every
 // container (a 2-decimal value round-trips through xlsx/xlsb/ods binary AND csv's decimal text), so
@@ -46,24 +45,30 @@ export const FORMATS = Object.keys(FORMAT_READERS);
 /**
  * Author (once, cached) the cross-format read fixture for `format` at `size`, returning its path.
  * xlsx returns the ExcelJS-authored path the main matrix already cached; csv is written directly;
- * xlsb/ods are written by SheetJS. Regenerated only when absent.
+ * xlsb/ods are written by SheetJS. Producer/source and fixture-byte changes invalidate the cache.
  */
-export async function ensureFormatFixture(cache, size, format, xlsxPath) {
+export async function ensureFormatFixture(cache, size, format, xlsxPath, provenance) {
 	if (format === "xlsx") return xlsxPath;
 	const path = `${cache}read-${FORMAT_WORKLOAD}-${size.key}.${format}`;
-	if (existsSync(path)) return path;
-	const dataset = buildDataset(FORMAT_WORKLOAD, size.rows);
-	if (format === "csv") {
-		writeFileSync(path, datasetToCsv(dataset));
-		return path;
-	}
-	const XLSX = await import("xlsx");
-	const ws = XLSX.utils.aoa_to_sheet(dataset);
-	const wb = XLSX.utils.book_new();
-	XLSX.utils.book_append_sheet(wb, ws, "Bench");
-	const out = XLSX.write(wb, { type: "buffer", bookType: format, compression: true });
-	writeFileSync(path, new Uint8Array(out));
-	return path;
+	return ensureCachedFixture(
+		path,
+		fixtureIdentity(provenance, format === "csv" ? "csv" : "xlsx", {
+			workload: FORMAT_WORKLOAD,
+			rows: size.rows,
+			columns: COLS,
+			format,
+		}),
+		async () => {
+			const dataset = buildDataset(FORMAT_WORKLOAD, size.rows);
+			if (format === "csv") return datasetToCsv(dataset);
+			const XLSX = await import("xlsx");
+			const ws = XLSX.utils.aoa_to_sheet(dataset);
+			const wb = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(wb, ws, "Bench");
+			const out = XLSX.write(wb, { type: "buffer", bookType: format, compression: true });
+			return new Uint8Array(out);
+		},
+	);
 }
 
 // Serialize the `numbers` dataset as CSV. Plain numbers need no quoting (RFC 4180), so a bare join is

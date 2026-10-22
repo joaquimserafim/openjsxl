@@ -3,3 +3,7 @@ packages:
   - examples
 allowBuilds:
   esbuild: true
+overrides:
+  # Reviewed security backports; compatibility evidence and removal criteria: docs/dependency-audit.md.
+  "tsup@8.5.1>esbuild": 0.28.2
+  "exceljs@4.4.0>uuid": 11.1.1
