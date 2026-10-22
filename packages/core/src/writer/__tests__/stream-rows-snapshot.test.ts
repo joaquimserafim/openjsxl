@@ -83,24 +83,21 @@ describe("streamXlsx — sheet.rows snapshot", () => {
 		expect(workbook.sheet("S1").cell("A1")?.value).toBe(84);
 	});
 
-	it.each([
-		null,
-		undefined,
-		42,
-		"rows",
-		{},
-	])("rejects first rows value %j with a typed error without a second read", async (first) => {
-		let reads = 0;
-		const sheet = sheetWithRows(() => {
-			reads++;
-			return reads === 1 ? first : [[42]];
-		});
-		const result = drain(streamXlsx({ sheets: [sheet] }));
+	it.each([null, undefined, 42, "rows", {}])(
+		"rejects first rows value %j with a typed error without a second read",
+		async (first) => {
+			let reads = 0;
+			const sheet = sheetWithRows(() => {
+				reads++;
+				return reads === 1 ? first : [[42]];
+			});
+			const result = drain(streamXlsx({ sheets: [sheet] }));
 
-		await expect(result).rejects.toBeInstanceOf(XlsxError);
-		await expect(result).rejects.toMatchObject({ code: "invalid-input" });
-		expect(reads).toBe(1);
-	});
+			await expect(result).rejects.toBeInstanceOf(XlsxError);
+			await expect(result).rejects.toMatchObject({ code: "invalid-input" });
+			expect(reads).toBe(1);
+		},
+	);
 
 	for (const mode of ["sync", "async"]) {
 		it(`keeps a one-shot ${mode} generator untouched during preparation`, async () => {

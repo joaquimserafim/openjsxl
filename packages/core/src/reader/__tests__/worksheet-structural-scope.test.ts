@@ -303,43 +303,50 @@ describe("worksheet style structural scope — public accessors", () => {
 					'<c r="B3" s="1"><v>44100</v>',
 				),
 		},
-	])("keeps cell, rows, style, and numberFormat aligned: $name", async ({
-		mutate,
-		ref,
-		type,
-		format,
-		styleFormat,
-		expectedValue,
-		absentRefs,
-		presentSentinels,
-		absentSentinels,
-	}) => {
-		const bytes = await rewriteWorksheet(mutate, presentSentinels, absentSentinels);
-		const sheet = (await openXlsx(bytes)).sheet("Sheet1");
+	])(
+		"keeps cell, rows, style, and numberFormat aligned: $name",
+		async ({
+			mutate,
+			ref,
+			type,
+			format,
+			styleFormat,
+			expectedValue,
+			absentRefs,
+			presentSentinels,
+			absentSentinels,
+		}) => {
+			const bytes = await rewriteWorksheet(mutate, presentSentinels, absentSentinels);
+			const sheet = (await openXlsx(bytes)).sheet("Sheet1");
 
-		const direct = sheet.cell(ref);
-		expect(direct.type).toBe(type);
-		if (typeof expectedValue === "number") expect(direct.value).toBe(expectedValue);
-		else {
-			expect(direct.value).toBeInstanceOf(Date);
-			if (direct.value instanceof Date)
-				expect(direct.value.toISOString()).toBe(expectedValue);
-		}
-		const style = sheet.style(ref);
-		if (styleFormat === undefined) expect(style).toBeUndefined();
-		else expect(style?.numberFormat).toBe(styleFormat);
-		expect(sheet.numberFormat(ref)).toBe(format);
+			const direct = sheet.cell(ref);
+			expect(direct.type).toBe(type);
+			if (typeof expectedValue === "number") expect(direct.value).toBe(expectedValue);
+			else {
+				expect(direct.value).toBeInstanceOf(Date);
+				if (direct.value instanceof Date)
+					expect(direct.value.toISOString()).toBe(expectedValue);
+			}
+			const style = sheet.style(ref);
+			if (styleFormat === undefined) expect(style).toBeUndefined();
+			else expect(style?.numberFormat).toBe(styleFormat);
+			expect(sheet.numberFormat(ref)).toBe(format);
 
-		const buffered = await collectRows(sheet.rows());
-		const streamed = await collectRows(streamSheetRows(bytes));
-		expect(buffered).toEqual(streamed);
-		const cells = buffered.flatMap((row) => row.cells);
-		expect(cells.find((cell) => cell.ref === ref)).toEqual(direct);
-		expect(cells.filter((cell) => absentRefs.includes(cell.ref))).toEqual([]);
-		for (const absentRef of absentRefs) {
-			expect(sheet.cell(absentRef)).toEqual({ ref: absentRef, type: "empty", value: null });
-			expect(sheet.style(absentRef)).toBeUndefined();
-			expect(sheet.numberFormat(absentRef)).toBe("General");
-		}
-	});
+			const buffered = await collectRows(sheet.rows());
+			const streamed = await collectRows(streamSheetRows(bytes));
+			expect(buffered).toEqual(streamed);
+			const cells = buffered.flatMap((row) => row.cells);
+			expect(cells.find((cell) => cell.ref === ref)).toEqual(direct);
+			expect(cells.filter((cell) => absentRefs.includes(cell.ref))).toEqual([]);
+			for (const absentRef of absentRefs) {
+				expect(sheet.cell(absentRef)).toEqual({
+					ref: absentRef,
+					type: "empty",
+					value: null,
+				});
+				expect(sheet.style(absentRef)).toBeUndefined();
+				expect(sheet.numberFormat(absentRef)).toBe("General");
+			}
+		},
+	);
 });

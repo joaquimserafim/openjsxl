@@ -42,19 +42,19 @@ const modes: readonly [string, number][] = [
 ];
 
 describe("multi-criterion blank matching stays sparse (F11.12)", () => {
-	it.each([
-		1,
-		MAX_COL,
-	])("counts an empty %i-column rectangle arithmetically without resolving blank cells", (width) => {
-		const first = sparseRange(width);
-		const second = sparseRange(width);
-		expect(invoke("COUNTIFS", [first.range, "", second.range, ""])).toBe(width * MAX_ROW);
-		expect(first.resolve).not.toHaveBeenCalled();
-		expect(second.resolve).not.toHaveBeenCalled();
-		expect(
-			first.populated.mock.calls.length + second.populated.mock.calls.length,
-		).toBeLessThanOrEqual(4);
-	});
+	it.each([1, MAX_COL])(
+		"counts an empty %i-column rectangle arithmetically without resolving blank cells",
+		(width) => {
+			const first = sparseRange(width);
+			const second = sparseRange(width);
+			expect(invoke("COUNTIFS", [first.range, "", second.range, ""])).toBe(width * MAX_ROW);
+			expect(first.resolve).not.toHaveBeenCalled();
+			expect(second.resolve).not.toHaveBeenCalled();
+			expect(
+				first.populated.mock.calls.length + second.populated.mock.calls.length,
+			).toBeLessThanOrEqual(4);
+		},
+	);
 
 	it("deduplicates overlapping populated offsets while preserving exact full-grid counts", () => {
 		const first = sparseRange(MAX_COL, [
@@ -90,50 +90,51 @@ describe("multi-criterion blank matching stays sparse (F11.12)", () => {
 		).toBeLessThanOrEqual(8);
 	});
 
-	it.each(
-		modes,
-	)("%s visits populated values even when both criteria rectangles are entirely blank", (name, expected) => {
-		const values = sparseRange(MAX_COL, [
-			[1, 1, 3],
-			[MAX_COL, MAX_ROW, 4],
-		]);
-		const first = sparseRange(MAX_COL);
-		const second = sparseRange(MAX_COL);
-		for (const criterion of [first, second]) {
-			criterion.populated.mockImplementation(() => {
-				throw new Error("value-driven aggregation must not enumerate criteria ranges");
-			});
-		}
-		expect(invoke(name, [values.range, first.range, "", second.range, ""])).toBe(expected);
-		expect(first.populated).not.toHaveBeenCalled();
-		expect(second.populated).not.toHaveBeenCalled();
-		expect(values.populated.mock.calls.length).toBeLessThanOrEqual(4);
-		expect(
-			values.resolve.mock.calls.length +
-				first.resolve.mock.calls.length +
-				second.resolve.mock.calls.length,
-		).toBeLessThanOrEqual(16);
-	});
-
-	it.each([
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s never resolves a populated value excluded by its criteria", (name) => {
-		const values = sparseRange(MAX_COL, [
-			[1, 1, 3],
-			[MAX_COL, MAX_ROW, 4],
-		]);
-		values.resolve.mockImplementation((col, row) => {
-			if (col === MAX_COL && row === MAX_ROW) {
-				throw new Error("an excluded value must remain unevaluated");
+	it.each(modes)(
+		"%s visits populated values even when both criteria rectangles are entirely blank",
+		(name, expected) => {
+			const values = sparseRange(MAX_COL, [
+				[1, 1, 3],
+				[MAX_COL, MAX_ROW, 4],
+			]);
+			const first = sparseRange(MAX_COL);
+			const second = sparseRange(MAX_COL);
+			for (const criterion of [first, second]) {
+				criterion.populated.mockImplementation(() => {
+					throw new Error("value-driven aggregation must not enumerate criteria ranges");
+				});
 			}
-			return 3;
-		});
-		const first = sparseRange(MAX_COL, [[MAX_COL, MAX_ROW, "excluded"]]);
-		const second = sparseRange(MAX_COL);
-		expect(invoke(name, [values.range, first.range, "", second.range, ""])).toBe(3);
-		expect(values.resolve.mock.calls).not.toContainEqual([MAX_COL, MAX_ROW]);
-	});
+			expect(invoke(name, [values.range, first.range, "", second.range, ""])).toBe(expected);
+			expect(first.populated).not.toHaveBeenCalled();
+			expect(second.populated).not.toHaveBeenCalled();
+			expect(values.populated.mock.calls.length).toBeLessThanOrEqual(4);
+			expect(
+				values.resolve.mock.calls.length +
+					first.resolve.mock.calls.length +
+					second.resolve.mock.calls.length,
+			).toBeLessThanOrEqual(16);
+		},
+	);
+
+	it.each(["SUMIFS", "AVERAGEIFS"])(
+		"%s never resolves a populated value excluded by its criteria",
+		(name) => {
+			const values = sparseRange(MAX_COL, [
+				[1, 1, 3],
+				[MAX_COL, MAX_ROW, 4],
+			]);
+			values.resolve.mockImplementation((col, row) => {
+				if (col === MAX_COL && row === MAX_ROW) {
+					throw new Error("an excluded value must remain unevaluated");
+				}
+				return 3;
+			});
+			const first = sparseRange(MAX_COL, [[MAX_COL, MAX_ROW, "excluded"]]);
+			const second = sparseRange(MAX_COL);
+			expect(invoke(name, [values.range, first.range, "", second.range, ""])).toBe(3);
+			expect(values.resolve.mock.calls).not.toContainEqual([MAX_COL, MAX_ROW]);
+		},
+	);
 
 	it("collects COUNTIFS union positions without evaluating an already-excluded companion", () => {
 		const first = sparseRange(MAX_COL, [[1, 1, "excluded"]]);
@@ -145,43 +146,44 @@ describe("multi-criterion blank matching stays sparse (F11.12)", () => {
 		expect(second.resolve).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s checks a later blank-excluding criterion before an earlier unreadable criterion", (name) => {
-		const values = sparseRange(MAX_COL, [[1, 1, 3]]);
-		const earlier = sparseRange(MAX_COL);
-		earlier.resolve.mockImplementation(() => {
-			throw new Error("the blank-excluding criterion must reject this position first");
-		});
-		const driver = sparseRange(MAX_COL);
-		expect(invoke(name, [values.range, earlier.range, "", driver.range, ">0"])).toEqual(
-			name === "SUMIFS" ? 0 : errorValue("#DIV/0!"),
-		);
-		expect(earlier.resolve).not.toHaveBeenCalled();
-		expect(values.resolve).not.toHaveBeenCalled();
-	});
+	it.each(["SUMIFS", "AVERAGEIFS"])(
+		"%s checks a later blank-excluding criterion before an earlier unreadable criterion",
+		(name) => {
+			const values = sparseRange(MAX_COL, [[1, 1, 3]]);
+			const earlier = sparseRange(MAX_COL);
+			earlier.resolve.mockImplementation(() => {
+				throw new Error("the blank-excluding criterion must reject this position first");
+			});
+			const driver = sparseRange(MAX_COL);
+			expect(invoke(name, [values.range, earlier.range, "", driver.range, ">0"])).toEqual(
+				name === "SUMIFS" ? 0 : errorValue("#DIV/0!"),
+			);
+			expect(earlier.resolve).not.toHaveBeenCalled();
+			expect(values.resolve).not.toHaveBeenCalled();
+		},
+	);
 
-	it.each([
-		"COUNTIFS",
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s preserves the RangeView receiver of a populated-coordinate callback", (name) => {
-		const range = new RangeView(
-			"S",
-			2,
-			3,
-			2,
-			MAX_ROW,
-			function (this: RangeView): Iterable<readonly [number, number]> {
-				return [[this.startCol, this.startRow]];
-			},
-			() => 7,
-		);
-		const args =
-			name === "COUNTIFS" ? [range, ">0", range, ">0"] : [range, range, ">0", range, ">0"];
-		expect(invoke(name, args)).toBe(name === "COUNTIFS" ? 1 : 7);
-	});
+	it.each(["COUNTIFS", "SUMIFS", "AVERAGEIFS"])(
+		"%s preserves the RangeView receiver of a populated-coordinate callback",
+		(name) => {
+			const range = new RangeView(
+				"S",
+				2,
+				3,
+				2,
+				MAX_ROW,
+				function (this: RangeView): Iterable<readonly [number, number]> {
+					return [[this.startCol, this.startRow]];
+				},
+				() => 7,
+			);
+			const args =
+				name === "COUNTIFS"
+					? [range, ">0", range, ">0"]
+					: [range, range, ">0", range, ">0"];
+			expect(invoke(name, args)).toBe(name === "COUNTIFS" ? 1 : 7);
+		},
+	);
 
 	it("keeps public entries evaluation attached to pulling an entry", () => {
 		const values = sparseRange(MAX_COL, [[1, 1, 3]]);
@@ -192,116 +194,114 @@ describe("multi-criterion blank matching stays sparse (F11.12)", () => {
 		expect(first).toEqual({ done: false, value: { col: 1, row: 1, value: 3 } });
 	});
 
-	it.each([
-		"COUNTIFS",
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s accepts a transparent RangeView proxy returned by a caller function", async (name) => {
-		const raw = new RangeView(
-			"Data",
-			1,
-			1,
-			1,
-			2,
-			() => [[1, 1]],
-			() => 1,
-		);
-		const proxy = new Proxy(raw, {});
-		const formula =
-			name === "COUNTIFS"
-				? 'COUNTIFS(PROXY(),">0",PROXY(),">0")'
-				: `${name}(PROXY(),PROXY(),">0",PROXY(),">0")`;
-		const book = await openXlsx(
-			await writeXlsx({
-				sheets: [{ name: "Results", rows: [[{ formula, value: 1 }]] }],
-			}),
-		);
-		await expect(
-			evaluateCell(book, "Results", "A1", {
-				functions: { PROXY: { minArgs: 0, maxArgs: 0, evaluate: () => proxy } },
-			}),
-		).resolves.toBe(1);
-	});
+	it.each(["COUNTIFS", "SUMIFS", "AVERAGEIFS"])(
+		"%s accepts a transparent RangeView proxy returned by a caller function",
+		async (name) => {
+			const raw = new RangeView(
+				"Data",
+				1,
+				1,
+				1,
+				2,
+				() => [[1, 1]],
+				() => 1,
+			);
+			const proxy = new Proxy(raw, {});
+			const formula =
+				name === "COUNTIFS"
+					? 'COUNTIFS(PROXY(),">0",PROXY(),">0")'
+					: `${name}(PROXY(),PROXY(),">0",PROXY(),">0")`;
+			const book = await openXlsx(
+				await writeXlsx({
+					sheets: [{ name: "Results", rows: [[{ formula, value: 1 }]] }],
+				}),
+			);
+			await expect(
+				evaluateCell(book, "Results", "A1", {
+					functions: { PROXY: { minArgs: 0, maxArgs: 0, evaluate: () => proxy } },
+				}),
+			).resolves.toBe(1);
+		},
+	);
 
-	it.each([
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s handles an empty value rectangle without resolving all-blank criteria", (name) => {
-		const values = sparseRange(MAX_COL);
-		const first = sparseRange(MAX_COL);
-		const second = sparseRange(MAX_COL);
-		expect(invoke(name, [values.range, first.range, "", second.range, ""])).toEqual(
-			name === "SUMIFS" ? 0 : errorValue("#DIV/0!"),
-		);
-		expect(values.resolve).not.toHaveBeenCalled();
-		expect(first.resolve).not.toHaveBeenCalled();
-		expect(second.resolve).not.toHaveBeenCalled();
-	});
+	it.each(["SUMIFS", "AVERAGEIFS"])(
+		"%s handles an empty value rectangle without resolving all-blank criteria",
+		(name) => {
+			const values = sparseRange(MAX_COL);
+			const first = sparseRange(MAX_COL);
+			const second = sparseRange(MAX_COL);
+			expect(invoke(name, [values.range, first.range, "", second.range, ""])).toEqual(
+				name === "SUMIFS" ? 0 : errorValue("#DIV/0!"),
+			);
+			expect(values.resolve).not.toHaveBeenCalled();
+			expect(first.resolve).not.toHaveBeenCalled();
+			expect(second.resolve).not.toHaveBeenCalled();
+		},
+	);
 
-	it.each([
-		"COUNTIFS",
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s still enforces evaluator fuel when its sparse path visits formula cells", async (name) => {
-		const rows: CellInput[][] = Array.from({ length: 5 }, (_, index) =>
-			name === "COUNTIFS"
-				? [{ formula: '""', value: "" }]
-				: [null, null, { formula: `${index}+1`, value: index + 1 }],
-		);
-		const formula =
-			name === "COUNTIFS"
-				? 'COUNTIFS(Data!A:A,"",Data!B:B,"")'
-				: `${name}(Data!C:C,Data!A:A,"",Data!B:B,"")`;
-		const book = await openXlsx(
-			await writeXlsx({
-				sheets: [
-					{ name: "Data", rows },
-					{ name: "Results", rows: [[{ formula, value: 0 }]] },
-				],
-			}),
-		);
-		await expect(
-			evaluateCell(book, "Results", "A1", { maxCellVisits: 2 }),
-		).rejects.toMatchObject({ name: "FormulaError", code: "budget-exceeded" });
-		await expect(evaluateCell(book, "Results", "A1", { maxCellVisits: 64 })).resolves.toBe(
-			name === "COUNTIFS" ? MAX_ROW : name === "SUMIFS" ? 15 : 3,
-		);
-	});
-
-	it.each([
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s preserves lazy exclusion of formula values under a one-visit fuel budget", async (name) => {
-		for (const excludedFormula of ["NOW()", "2+2"]) {
+	it.each(["COUNTIFS", "SUMIFS", "AVERAGEIFS"])(
+		"%s still enforces evaluator fuel when its sparse path visits formula cells",
+		async (name) => {
+			const rows: CellInput[][] = Array.from({ length: 5 }, (_, index) =>
+				name === "COUNTIFS"
+					? [{ formula: '""', value: "" }]
+					: [null, null, { formula: `${index}+1`, value: index + 1 }],
+			);
+			const formula =
+				name === "COUNTIFS"
+					? 'COUNTIFS(Data!A:A,"",Data!B:B,"")'
+					: `${name}(Data!C:C,Data!A:A,"",Data!B:B,"")`;
 			const book = await openXlsx(
 				await writeXlsx({
 					sheets: [
-						{
-							name: "Data",
-							rows: [
-								[1, 3],
-								[0, { formula: excludedFormula, value: 0 }],
-							],
-						},
-						{
-							name: "Results",
-							rows: [
-								[
-									{
-										formula: `${name}(Data!B:B,Data!A:A,">0",Data!A:A,">0")`,
-										value: 3,
-									},
-								],
-							],
-						},
+						{ name: "Data", rows },
+						{ name: "Results", rows: [[{ formula, value: 0 }]] },
 					],
 				}),
 			);
-			// NOW is deliberately unconfigured. Neither it nor the excluded arithmetic formula
-			// may run: only the Results cell itself consumes the available formula-visit fuel.
-			await expect(evaluateCell(book, "Results", "A1", { maxCellVisits: 1 })).resolves.toBe(
-				3,
+			await expect(
+				evaluateCell(book, "Results", "A1", { maxCellVisits: 2 }),
+			).rejects.toMatchObject({ name: "FormulaError", code: "budget-exceeded" });
+			await expect(evaluateCell(book, "Results", "A1", { maxCellVisits: 64 })).resolves.toBe(
+				name === "COUNTIFS" ? MAX_ROW : name === "SUMIFS" ? 15 : 3,
 			);
-		}
-	});
+		},
+	);
+
+	it.each(["SUMIFS", "AVERAGEIFS"])(
+		"%s preserves lazy exclusion of formula values under a one-visit fuel budget",
+		async (name) => {
+			for (const excludedFormula of ["NOW()", "2+2"]) {
+				const book = await openXlsx(
+					await writeXlsx({
+						sheets: [
+							{
+								name: "Data",
+								rows: [
+									[1, 3],
+									[0, { formula: excludedFormula, value: 0 }],
+								],
+							},
+							{
+								name: "Results",
+								rows: [
+									[
+										{
+											formula: `${name}(Data!B:B,Data!A:A,">0",Data!A:A,">0")`,
+											value: 3,
+										},
+									],
+								],
+							},
+						],
+					}),
+				);
+				// NOW is deliberately unconfigured. Neither it nor the excluded arithmetic formula
+				// may run: only the Results cell itself consumes the available formula-visit fuel.
+				await expect(
+					evaluateCell(book, "Results", "A1", { maxCellVisits: 1 }),
+				).resolves.toBe(3);
+			}
+		},
+	);
 });

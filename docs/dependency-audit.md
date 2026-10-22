@@ -5,6 +5,9 @@ this review: **Codex, implementing the owner's F11.17 authorization**. Future de
 maintenance remains a repository maintenance task. This is a dated assessment, not a
 promise that future audits will remain clean.
 
+For the subsequent compatible dependency refresh, retained major-version decisions,
+and release snapshot validation, see [F11.19's dependency refresh](dependency-refresh.md).
+
 The initial full workspace audit reported **27 findings: 2 critical, 16 high, 8 moderate,
 1 low** (21 distinct GHSA IDs). The production audit reported **3 high**, all in pnpm's
 bootstrap dependency graph. They were tooling findings, but they still required remediation.
@@ -191,3 +194,10 @@ was remeasured: **93 cells, 90 valid measurements, 3 unsupported SheetJS styled 
 every read checksum matching its recipe. All three openjsxl XLSB checksums match exactly.
 Root/facade README claims and [the full report](benchmarks.md) now use this new dated run;
 the parser compatibility gap described above is resolved without changing dependencies.
+
+**F11.19 follow-up (2026-10-22):** a subsequent compatible tooling/transitive refresh remains
+clean in both audits. The ExcelJS dependency graph changed, so the full matrix and installed
+sizes were measured again; all 57 read checksums match exactly (90 valid measurements and
+3 expected unsupported styled writes). The current report and README figures use that later
+snapshot. [The refresh record](dependency-refresh.md) documents versions, retained majors,
+fuzz/package validation and the exact dependency freeze.

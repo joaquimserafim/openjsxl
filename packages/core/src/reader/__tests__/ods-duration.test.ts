@@ -47,21 +47,21 @@ describe("openOds — signed time durations", () => {
 		{ duration: "PT49H", days: 49 / 24 },
 		{ duration: "PT90M", days: 1 / 16 },
 		{ duration: "PT120.5S", days: 120.5 / 86_400 },
-	])("applies the sign to all of $duration and leaves the positive value unchanged", async ({
-		duration,
-		days,
-	}) => {
-		const sheet = await readDurations([`-${duration}`, duration]);
+	])(
+		"applies the sign to all of $duration and leaves the positive value unchanged",
+		async ({ duration, days }) => {
+			const sheet = await readDurations([`-${duration}`, duration]);
 
-		expect(sheet.cell("A1").type).toBe("number");
-		expect(sheet.cell("A1").value).toBeCloseTo(-days, 12);
-		expect(sheet.cell("A2").type).toBe("number");
-		expect(sheet.cell("A2").value).toBeCloseTo(days, 12);
-		expect(sheet.dimension).toBe("A1:A2");
-		const values = [];
-		for await (const row of sheet.rows()) values.push(row.cells[0]?.value);
-		expect(values).toEqual([sheet.cell("A1").value, sheet.cell("A2").value]);
-	});
+			expect(sheet.cell("A1").type).toBe("number");
+			expect(sheet.cell("A1").value).toBeCloseTo(-days, 12);
+			expect(sheet.cell("A2").type).toBe("number");
+			expect(sheet.cell("A2").value).toBeCloseTo(days, 12);
+			expect(sheet.dimension).toBe("A1:A2");
+			const values = [];
+			for await (const row of sheet.rows()) values.push(row.cells[0]?.value);
+			expect(values).toEqual([sheet.cell("A1").value, sheet.cell("A2").value]);
+		},
+	);
 
 	it("normalizes positive and negative zero durations to ordinary zero", async () => {
 		const values = [

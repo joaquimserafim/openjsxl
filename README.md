@@ -719,15 +719,15 @@ sheet** as follows (median wall-time · peak RSS, each library in an isolated pr
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
-| **read** | **799 ms · 208.1 MB** | 1.63 s · 815.6 MB | 2.58 s · 539.1 MB |
-| **write** | **748 ms · 393.6 MB** | 3.37 s · 1.31 GB | 2.64 s · 531.5 MB |
+| **read** | **805 ms · 208.1 MB** | 1.69 s · 819.0 MB | 2.62 s · 528.1 MB |
+| **write** | **729 ms · 369.3 MB** | 3.36 s · 1.51 GB | 2.38 s · 524.0 MB |
 
-The streamed writer measured **839 ms · 101.4 MB** for the same million
+The streamed writer measured **754 ms · 100.2 MB** for the same million
 cells from a lazy row source. Embedded images, when present, remain resident until the stream ends.
 
 The 2026-10-22 report also measures `.xlsb`, `.ods`, and `.csv`. XLSB reads now pass the
 expected checksum at all three sizes, including the SheetJS 0.20.3 compact cell records.
-The million-cell XLSB read measured **949 ms · 513.0 MB**.
+The million-cell XLSB read measured **990 ms · 491.1 MB**.
 
 A clean production install (lifecycle scripts disabled) gives these footprints:
 
@@ -743,7 +743,7 @@ Other install-size transitives resolve during the dated clean install.
 The full matrix (10k / 100k / 1M cells; numbers / strings / styled; read + write), format lanes,
 source hashes, failed checks and methodology are in [`docs/benchmarks.md`](./docs/benchmarks.md).
 Run `pnpm bench` to reproduce it. Python reference results are omitted until remeasured against
-these fixtures. _(Measured 2026-10-21.)_
+these fixtures. _(Measured 2026-10-22.)_
 
 ## Approach
 

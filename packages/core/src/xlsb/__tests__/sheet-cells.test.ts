@@ -68,19 +68,22 @@ const variants = [
 ];
 
 describe("parseXlsbSheet — full and short cell records", () => {
-	it.each(variants)("decodes short $name after an explicit cell", ({
-		shortId,
-		payload,
-		type,
-		value,
-	}) => {
-		const sheet = parse(dimension(), row(2), full(0x04, 3, [0]), short(shortId, payload, 7));
-		expect(sheet.cellStyles.get("E3")).toBe(7);
-		expect(sheet.dimension).toBe("D3:E3");
-		expect(sheet.cells.get("E3")).toEqual(
-			type === undefined ? undefined : { ref: "E3", type, value },
-		);
-	});
+	it.each(variants)(
+		"decodes short $name after an explicit cell",
+		({ shortId, payload, type, value }) => {
+			const sheet = parse(
+				dimension(),
+				row(2),
+				full(0x04, 3, [0]),
+				short(shortId, payload, 7),
+			);
+			expect(sheet.cellStyles.get("E3")).toBe(7);
+			expect(sheet.dimension).toBe("D3:E3");
+			expect(sheet.cells.get("E3")).toEqual(
+				type === undefined ? undefined : { ref: "E3", type, value },
+			);
+		},
+	);
 
 	it.each(["", "inline", "漢字 🌍", "a".repeat(80)])("decodes full inline string %j", (value) => {
 		const sheet = parse(full(0x06, 0, wide(value), 3));
@@ -218,44 +221,50 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		expect(parse(short(0x0d, payload)).cells.get("A1")?.value).toBe(expected);
 	});
 
-	it.each([
-		false,
-		true,
-	])("shares date conversion for full and short numeric forms (1904=%s)", (date1904) => {
-		const styles: XlsbStyleTable = {
-			isDateStyle: (style) => style === 1,
-			formatCode: (style) => (style === 1 ? "yyyy-mm-dd" : undefined),
-		};
-		const bytes = Uint8Array.from([
-			...full(0x02, 0, u32((50 << 2) | 3), 0x01000001),
-			...short(0x0d, u32((50 << 2) | 3), 0xff000001),
-			...full(0x05, 2, real(0.5), 0x80000001),
-			...short(0x10, real(0.5), 0x7f000001),
-			...full(0x09, 4, real(0.5), 1),
-			...short(0x10, real(0.5), 0xff000000),
-		]);
-		const sheet = parseXlsbSheet(bytes, [], styles, date1904);
-		const expected = new Date(
-			date1904 ? "1904-01-01T12:00:00.000Z" : "1899-12-30T12:00:00.000Z",
-		);
-		for (const ref of ["A1", "B1", "C1", "D1", "E1"]) {
-			expect(sheet.cells.get(ref)).toEqual({ ref, type: "date", value: expected });
-			expect(sheet.cellStyles.get(ref)).toBe(1);
-		}
-		expect(sheet.cells.get("F1")).toEqual({ ref: "F1", type: "number", value: 0.5 });
-		expect(sheet.cellStyles.get("F1")).toBe(0);
-	});
+	it.each([false, true])(
+		"shares date conversion for full and short numeric forms (1904=%s)",
+		(date1904) => {
+			const styles: XlsbStyleTable = {
+				isDateStyle: (style) => style === 1,
+				formatCode: (style) => (style === 1 ? "yyyy-mm-dd" : undefined),
+			};
+			const bytes = Uint8Array.from([
+				...full(0x02, 0, u32((50 << 2) | 3), 0x01000001),
+				...short(0x0d, u32((50 << 2) | 3), 0xff000001),
+				...full(0x05, 2, real(0.5), 0x80000001),
+				...short(0x10, real(0.5), 0x7f000001),
+				...full(0x09, 4, real(0.5), 1),
+				...short(0x10, real(0.5), 0xff000000),
+			]);
+			const sheet = parseXlsbSheet(bytes, [], styles, date1904);
+			const expected = new Date(
+				date1904 ? "1904-01-01T12:00:00.000Z" : "1899-12-30T12:00:00.000Z",
+			);
+			for (const ref of ["A1", "B1", "C1", "D1", "E1"]) {
+				expect(sheet.cells.get(ref)).toEqual({ ref, type: "date", value: expected });
+				expect(sheet.cellStyles.get(ref)).toBe(1);
+			}
+			expect(sheet.cells.get("F1")).toEqual({ ref: "F1", type: "number", value: 0.5 });
+			expect(sheet.cellStyles.get("F1")).toBe(0);
+		},
+	);
 
-	it.each([
-		1e308,
-		Infinity,
-		-Infinity,
-		NaN,
-	])("preserves a numeric value outside Date range: %s", (value) => {
-		const styles: XlsbStyleTable = { isDateStyle: () => true, formatCode: () => "yyyy-mm-dd" };
-		const sheet = parseXlsbSheet(Uint8Array.from(short(0x10, real(value))), [], styles, false);
-		expect(sheet.cells.get("A1")).toEqual({ ref: "A1", type: "number", value });
-	});
+	it.each([1e308, Infinity, -Infinity, NaN])(
+		"preserves a numeric value outside Date range: %s",
+		(value) => {
+			const styles: XlsbStyleTable = {
+				isDateStyle: () => true,
+				formatCode: () => "yyyy-mm-dd",
+			};
+			const sheet = parseXlsbSheet(
+				Uint8Array.from(short(0x10, real(value))),
+				[],
+				styles,
+				false,
+			);
+			expect(sheet.cells.get("A1")).toEqual({ ref: "A1", type: "number", value });
+		},
+	);
 
 	it.each([
 		[0, "#NULL!"],
@@ -298,29 +307,28 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		expect(sheet.cellStyles.get("A1")).toBe(0xffffff);
 	});
 
-	it.each(variants)("keeps full/short $name truncation fallbacks equivalent and advances once", ({
-		fullId,
-		shortId,
-		payload,
-	}) => {
-		const body = [...u32(0xff000007), ...payload];
-		for (let length = 0; length <= body.length; length++) {
-			const truncated = body.slice(0, length);
-			const explicit = parse(record(fullId, [...u32(0), ...truncated]));
-			const implicit = parse(record(shortId, truncated), short(0x0f, [1]));
-			expect(implicit.cells.get("A1"), `payload length ${length}`).toEqual(
-				explicit.cells.get("A1"),
-			);
-			expect(implicit.cellStyles.get("A1"), `payload length ${length}`).toBe(
-				explicit.cellStyles.get("A1"),
-			);
-			expect(implicit.cells.get("B1"), `payload length ${length}`).toEqual({
-				ref: "B1",
-				type: "boolean",
-				value: true,
-			});
-		}
-	});
+	it.each(variants)(
+		"keeps full/short $name truncation fallbacks equivalent and advances once",
+		({ fullId, shortId, payload }) => {
+			const body = [...u32(0xff000007), ...payload];
+			for (let length = 0; length <= body.length; length++) {
+				const truncated = body.slice(0, length);
+				const explicit = parse(record(fullId, [...u32(0), ...truncated]));
+				const implicit = parse(record(shortId, truncated), short(0x0f, [1]));
+				expect(implicit.cells.get("A1"), `payload length ${length}`).toEqual(
+					explicit.cells.get("A1"),
+				);
+				expect(implicit.cellStyles.get("A1"), `payload length ${length}`).toBe(
+					explicit.cellStyles.get("A1"),
+				);
+				expect(implicit.cells.get("B1"), `payload length ${length}`).toEqual({
+					ref: "B1",
+					type: "boolean",
+					value: true,
+				});
+			}
+		},
+	);
 
 	it("bounds declared inline lengths to the actual record and keeps following records intact", () => {
 		const sheet = parse(short(0x11, [...u32(0xfffffffe), 65, 0, 66]), short(0x0f, [1]));

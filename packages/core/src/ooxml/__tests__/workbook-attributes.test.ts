@@ -45,17 +45,12 @@ describe("workbook protection attributes", () => {
 		});
 	});
 
-	it.each([
-		"",
-		"-1",
-		"1.5",
-		"1e3",
-		" 1",
-		"+1",
-		"4294967296",
-	])("drops malformed or out-of-range spin count %j", (workbookSpinCount) => {
-		expect(workbookProtectionFromAttributes({ workbookSpinCount })).toBeUndefined();
-	});
+	it.each(["", "-1", "1.5", "1e3", " 1", "+1", "4294967296"])(
+		"drops malformed or out-of-range spin count %j",
+		(workbookSpinCount) => {
+			expect(workbookProtectionFromAttributes({ workbookSpinCount })).toBeUndefined();
+		},
+	);
 
 	it("drops malformed booleans while keeping other valid fields", () => {
 		expect(

@@ -64,48 +64,48 @@ describe("XLSB dimensions — committed fixture", () => {
 		{ name: "RowDefault", dimension: "A1" },
 		{ name: "ColumnDefault", dimension: "A1" },
 		{ name: "MixedDefaults", dimension: "D5" },
-	])("counts default formatting in $name without inventing a cell", async ({
-		name,
-		dimension,
-	}) => {
-		const sheet = (await fixture()).sheet(name);
-		expect(sheet.dimension).toBe(dimension);
-		expect(sheet.cell(dimension).type).toBe("empty");
-		const rows = [];
-		for await (const row of sheet.rows()) rows.push(row);
-		expect(rows).toEqual([]);
-	});
-
-	it.each([
-		"buffered",
-		"streaming",
-	])("preserves empty sheets and values through the %s bridge", async (mode) => {
-		const input = await workbookToInput(await fixture());
-		const bytes =
-			mode === "buffered"
-				? await writeXlsx(input)
-				: new Uint8Array(await new Response(streamXlsx(input)).arrayBuffer());
-		const rewritten = await openXlsx(bytes);
-		for (const name of ["Empty", "InvalidMax"]) {
-			const sheet = rewritten.sheet(name);
-			// The buffered XLSX writer's existing empty-sheet convention is dimension A1;
-			// streaming omits dimensions. Neither convention creates a cell or row.
-			expect(sheet.dimension).toBe(mode === "buffered" ? "A1" : undefined);
-			expect(sheet.cell("A1").type).toBe("empty");
+	])(
+		"counts default formatting in $name without inventing a cell",
+		async ({ name, dimension }) => {
+			const sheet = (await fixture()).sheet(name);
+			expect(sheet.dimension).toBe(dimension);
+			expect(sheet.cell(dimension).type).toBe("empty");
 			const rows = [];
 			for await (const row of sheet.rows()) rows.push(row);
 			expect(rows).toEqual([]);
-		}
-		expect(rewritten.sheet("A1Value").cell("A1").value).toBe(42);
-		for (const name of ["Ordinary", "ZeroBounds"]) {
-			expect(rewritten.sheet(name).cell("B4").value).toBe(10);
-			expect(rewritten.sheet(name).cell("B7").value).toBe(20);
-		}
-		// Streaming omits dimensions; XLSB styled blanks are not surfaced in rows(), so their
-		// styles/bounds are not carried by the existing bridge. Only populated buffered bounds apply.
-		if (mode === "buffered") {
-			expect(rewritten.sheet("A1Value").dimension).toBe("A1");
-			expect(rewritten.sheet("Ordinary").dimension).toBe("B4:B7");
-		}
-	});
+		},
+	);
+
+	it.each(["buffered", "streaming"])(
+		"preserves empty sheets and values through the %s bridge",
+		async (mode) => {
+			const input = await workbookToInput(await fixture());
+			const bytes =
+				mode === "buffered"
+					? await writeXlsx(input)
+					: new Uint8Array(await new Response(streamXlsx(input)).arrayBuffer());
+			const rewritten = await openXlsx(bytes);
+			for (const name of ["Empty", "InvalidMax"]) {
+				const sheet = rewritten.sheet(name);
+				// The buffered XLSX writer's existing empty-sheet convention is dimension A1;
+				// streaming omits dimensions. Neither convention creates a cell or row.
+				expect(sheet.dimension).toBe(mode === "buffered" ? "A1" : undefined);
+				expect(sheet.cell("A1").type).toBe("empty");
+				const rows = [];
+				for await (const row of sheet.rows()) rows.push(row);
+				expect(rows).toEqual([]);
+			}
+			expect(rewritten.sheet("A1Value").cell("A1").value).toBe(42);
+			for (const name of ["Ordinary", "ZeroBounds"]) {
+				expect(rewritten.sheet(name).cell("B4").value).toBe(10);
+				expect(rewritten.sheet(name).cell("B7").value).toBe(20);
+			}
+			// Streaming omits dimensions; XLSB styled blanks are not surfaced in rows(), so their
+			// styles/bounds are not carried by the existing bridge. Only populated buffered bounds apply.
+			if (mode === "buffered") {
+				expect(rewritten.sheet("A1Value").dimension).toBe("A1");
+				expect(rewritten.sheet("Ordinary").dimension).toBe("B4:B7");
+			}
+		},
+	);
 });

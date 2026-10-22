@@ -659,30 +659,29 @@ describe("openZip — completed-entry integrity (F11.3)", () => {
 	it.each([
 		{ kind: "stored", method: 0, flipOffset: 0 },
 		{ kind: "deflated", method: 8, flipOffset: 5 },
-	])("detects a bit-flipped $kind payload only when CRC verification is enabled", async ({
-		kind,
-		method,
-		flipOffset,
-	}) => {
-		const enc = new TextEncoder();
-		const name = `${kind}.txt`;
-		const content = `${kind} payload`;
-		const raw = enc.encode(content);
-		const bytes = await buildZip({
-			name,
-			content,
-			method,
-			...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
-		});
-		const damaged = flipEntryPayloadByte(bytes, flipOffset);
+	])(
+		"detects a bit-flipped $kind payload only when CRC verification is enabled",
+		async ({ kind, method, flipOffset }) => {
+			const enc = new TextEncoder();
+			const name = `${kind}.txt`;
+			const content = `${kind} payload`;
+			const raw = enc.encode(content);
+			const bytes = await buildZip({
+				name,
+				content,
+				method,
+				...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
+			});
+			const damaged = flipEntryPayloadByte(bytes, flipOffset);
 
-		// CRC verification is deliberately opt-in for 1.0.1: the same-size corruption remains
-		// readable by default, preserving the previous behavior.
-		expect(await openZip(damaged).read(name)).not.toEqual(raw);
-		expect(await collectChunks(openZip(damaged).readStream(name))).not.toEqual(raw);
+			// CRC verification is deliberately opt-in for 1.0.1: the same-size corruption remains
+			// readable by default, preserving the previous behavior.
+			expect(await openZip(damaged).read(name)).not.toEqual(raw);
+			expect(await collectChunks(openZip(damaged).readStream(name))).not.toEqual(raw);
 
-		await expectReadAndStreamError(damaged, name, { verifyChecksums: true }, "corrupt-zip");
-	});
+			await expectReadAndStreamError(damaged, name, { verifyChecksums: true }, "corrupt-zip");
+		},
+	);
 
 	it("does not treat an expected CRC of zero as verification being disabled", async () => {
 		const name = "zero-crc.txt";
@@ -739,28 +738,27 @@ describe("openZip — completed-entry integrity (F11.3)", () => {
 	it.each([
 		{ kind: "stored", method: 0, flipOffset: 0 },
 		{ kind: "deflated", method: 8, flipOffset: 5 },
-	])("makes no checksum claim when a $kind stream is cancelled before EOF", async ({
-		kind,
-		method,
-		flipOffset,
-	}) => {
-		const name = `cancel-${kind}.txt`;
-		const content = `cancel ${kind}`;
-		const raw = new TextEncoder().encode(content);
-		const valid = await buildZip({
-			name,
-			content,
-			method,
-			...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
-		});
-		const damaged = flipEntryPayloadByte(valid, flipOffset);
-		expect(() => openZip(damaged, { verifyChecksums: true })).not.toThrow();
+	])(
+		"makes no checksum claim when a $kind stream is cancelled before EOF",
+		async ({ kind, method, flipOffset }) => {
+			const name = `cancel-${kind}.txt`;
+			const content = `cancel ${kind}`;
+			const raw = new TextEncoder().encode(content);
+			const valid = await buildZip({
+				name,
+				content,
+				method,
+				...(method === 8 ? { payloadOverride: rawStoredDeflate(raw) } : {}),
+			});
+			const damaged = flipEntryPayloadByte(valid, flipOffset);
+			expect(() => openZip(damaged, { verifyChecksums: true })).not.toThrow();
 
-		const stream = openZip(damaged, { verifyChecksums: true }).readStream(name);
-		const first = await stream.next();
-		expect(first.done).toBe(false);
-		await expect(stream.return(undefined)).resolves.toMatchObject({ done: true });
-	});
+			const stream = openZip(damaged, { verifyChecksums: true }).readStream(name);
+			const first = await stream.next();
+			expect(first.done).toBe(false);
+			await expect(stream.return(undefined)).resolves.toMatchObject({ done: true });
+		},
+	);
 });
 
 // F9.7 — the zip-bomb guards are ON BY DEFAULT (no opt-in): an absolute per-part ceiling plus a

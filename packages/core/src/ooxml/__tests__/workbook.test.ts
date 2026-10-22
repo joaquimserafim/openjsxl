@@ -179,15 +179,15 @@ describe("parseWorkbook — defined names (F10.1)", () => {
 		expect(parseWorkbook(xml).definedNames).toEqual([]);
 	});
 
-	it.each([
-		"&#1;",
-		"_x0001_",
-	])("drops a refersTo that decodes %s to an XML-illegal control character", (escapedControl) => {
-		// Validate after both XML-entity and ST_Xstring decoding so the writer can re-emit every
-		// surviving logical value safely.
-		const xml = wrap(`<definedName name="Ctrl">Sheet1!$A$1${escapedControl}</definedName>`);
-		expect(parseWorkbook(xml).definedNames).toEqual([]);
-	});
+	it.each(["&#1;", "_x0001_"])(
+		"drops a refersTo that decodes %s to an XML-illegal control character",
+		(escapedControl) => {
+			// Validate after both XML-entity and ST_Xstring decoding so the writer can re-emit every
+			// surviving logical value safely.
+			const xml = wrap(`<definedName name="Ctrl">Sheet1!$A$1${escapedControl}</definedName>`);
+			expect(parseWorkbook(xml).definedNames).toEqual([]);
+		},
+	);
 
 	it("is empty when the workbook declares no names", () => {
 		expect(

@@ -122,24 +122,25 @@ for (const { name, write } of writers) {
 			{ label: "an array", style: [] },
 			{ label: "an unknown key", style: { typo: true } },
 			{ label: "an invalid font field", style: { font: { bold: "yes" } } },
-		])("rejects $label as the first style even if a later style is valid", async ({
-			style,
-		}) => {
-			let reads = 0;
-			const cell: StyledCell = { value: 7 };
-			Object.defineProperty(cell, "style", {
-				get() {
-					reads++;
-					return reads === 1 ? style : { font: { bold: true } };
-				},
-			});
+		])(
+			"rejects $label as the first style even if a later style is valid",
+			async ({ style }) => {
+				let reads = 0;
+				const cell: StyledCell = { value: 7 };
+				Object.defineProperty(cell, "style", {
+					get() {
+						reads++;
+						return reads === 1 ? style : { font: { bold: true } };
+					},
+				});
 
-			const result = write({ sheets: [{ name: "S", rows: [[cell]] }] });
+				const result = write({ sheets: [{ name: "S", rows: [[cell]] }] });
 
-			await expect(result).rejects.toBeInstanceOf(XlsxError);
-			await expect(result).rejects.toMatchObject({ code: "invalid-input" });
-			expect(reads).toBe(1);
-		});
+				await expect(result).rejects.toBeInstanceOf(XlsxError);
+				await expect(result).rejects.toMatchObject({ code: "invalid-input" });
+				expect(reads).toBe(1);
+			},
+		);
 
 		it("preserves a styled blank and an uncached formula cell", async () => {
 			const reads = [0, 0];

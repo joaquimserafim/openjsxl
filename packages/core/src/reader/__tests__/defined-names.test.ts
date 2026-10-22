@@ -223,23 +223,23 @@ describe("reader — decoded ST_Xstring sheet-name collisions (F11.4)", () => {
 		expect(streamedValue).toBe(2);
 	});
 
-	it.each([
-		"missing",
-		"external",
-	] as const)("does not reserve a decoded name for a %s worksheet relationship", async (relationshipMode) => {
-		const bytes = await encodedSheetCollisionWorkbook(
-			new Set(),
-			new Map([[0, relationshipMode]]),
-		);
-		const wb = await openXlsx(bytes);
-		expect(wb.sheets.map((sheet) => sheet.name)).toEqual(["A", "_x0041_", "Tail"]);
-		expect(wb.sheet("A").cell("A1").value).toBe(2);
-		expect(wb.definedNames).toContainEqual({
-			name: "DroppedExactScope",
-			refersTo: "A!A1",
-			localSheetId: 0,
-		});
-	});
+	it.each(["missing", "external"] as const)(
+		"does not reserve a decoded name for a %s worksheet relationship",
+		async (relationshipMode) => {
+			const bytes = await encodedSheetCollisionWorkbook(
+				new Set(),
+				new Map([[0, relationshipMode]]),
+			);
+			const wb = await openXlsx(bytes);
+			expect(wb.sheets.map((sheet) => sheet.name)).toEqual(["A", "_x0041_", "Tail"]);
+			expect(wb.sheet("A").cell("A1").value).toBe(2);
+			expect(wb.definedNames).toContainEqual({
+				name: "DroppedExactScope",
+				refersTo: "A!A1",
+				localSheetId: 0,
+			});
+		},
+	);
 
 	it("bridges only the writer-legal survivors without losing the reconciled scopes", async () => {
 		const before = await openXlsx(await encodedSheetCollisionWorkbook());

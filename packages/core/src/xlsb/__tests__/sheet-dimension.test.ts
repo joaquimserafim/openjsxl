@@ -114,15 +114,16 @@ describe("parseXlsbSheet — used dimensions", () => {
 		expect(parse(dimension(3, 6, 1, 1), ...inline).dimension).toBe("B4:B7");
 	});
 
-	it.each([
-		0, 7, 0x01000001,
-	])("counts an A1 blank with packed style %i as used without inventing a value", (style) => {
-		const sheet = parse(dimension(), row(0), cell(R.BLANK, 0, style));
+	it.each([0, 7, 0x01000001])(
+		"counts an A1 blank with packed style %i as used without inventing a value",
+		(style) => {
+			const sheet = parse(dimension(), row(0), cell(R.BLANK, 0, style));
 
-		expect(sheet.dimension).toBe("A1");
-		expect(sheet.cells.size).toBe(0);
-		expect(sheet.cellStyles.get("A1")).toBe(style & 0xffffff);
-	});
+			expect(sheet.dimension).toBe("A1");
+			expect(sheet.cells.size).toBe(0);
+			expect(sheet.cellStyles.get("A1")).toBe(style & 0xffffff);
+		},
+	);
 
 	it.each([
 		{ name: "RK number", id: R.NUM, payload: u32((7 << 2) | 2), type: "number", value: 7 },
@@ -217,17 +218,17 @@ describe("parseXlsbSheet — used dimensions", () => {
 		expect(sheet.cells.get("B4")?.value).toBe(true);
 	});
 
-	it.each([
-		false,
-		true,
-	])("keeps the invalid all-max sentinel absent (cells present: %s)", (withCells) => {
-		const records = [INVALID_DIMENSION];
-		if (withCells) records.push(row(3), cell(R.BOOL, 1, 0, [1]));
-		const sheet = parse(...records);
+	it.each([false, true])(
+		"keeps the invalid all-max sentinel absent (cells present: %s)",
+		(withCells) => {
+			const records = [INVALID_DIMENSION];
+			if (withCells) records.push(row(3), cell(R.BOOL, 1, 0, [1]));
+			const sheet = parse(...records);
 
-		expect(sheet.dimension).toBeUndefined();
-		expect(sheet.cells.size).toBe(withCells ? 1 : 0);
-	});
+			expect(sheet.dimension).toBeUndefined();
+			expect(sheet.cells.size).toBe(withCells ? 1 : 0);
+		},
+	);
 
 	it.each([
 		{ name: "ordinary", fields: [3, 6, 1, 1], expected: "B4:B7" },
@@ -387,17 +388,19 @@ describe("parseXlsbSheet — used dimensions", () => {
 		expect(sheet.cellStyles.size).toBe(0);
 	});
 
-	it.each([
-		0, 1, 8, 0x10, 0x20, 0x80,
-	])("does not count row flags %i without the applied-format bit", (flags) => {
-		expect(parse(dimension(), formattedRow(4, 1, flags)).dimension).toBeUndefined();
-	});
+	it.each([0, 1, 8, 0x10, 0x20, 0x80])(
+		"does not count row flags %i without the applied-format bit",
+		(flags) => {
+			expect(parse(dimension(), formattedRow(4, 1, flags)).dimension).toBeUndefined();
+		},
+	);
 
-	it.each([
-		0x40, 0x41, 0x50, 0x60, 0xc0,
-	])("counts the applied row format alongside unrelated flags %i", (flags) => {
-		expect(parse(dimension(), formattedRow(4, 1, flags)).dimension).toBe("A5");
-	});
+	it.each([0x40, 0x41, 0x50, 0x60, 0xc0])(
+		"counts the applied row format alongside unrelated flags %i",
+		(flags) => {
+			expect(parse(dimension(), formattedRow(4, 1, flags)).dimension).toBe("A5");
+		},
+	);
 
 	it("reads the applied row-format flag only from its complete byte", () => {
 		const payload = [...u32(4), ...u32(1), 0x2c, 0x01, 0, 0x40, 0, ...u32(0)];

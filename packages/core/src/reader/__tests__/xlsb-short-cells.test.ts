@@ -101,15 +101,15 @@ describe.each(files)("XLSB short cells — real SheetJS producer: %s", (file) =>
 		expect(sheet.style("I2")).toBeUndefined();
 	});
 
-	it.each([
-		"buffered",
-		"streaming",
-	])("preserves every value through the %s XLSX bridge", async (mode) => {
-		const input = await workbookToInput(await openXlsb(await loadFixture(file)));
-		const bytes =
-			mode === "buffered"
-				? await writeXlsx(input)
-				: new Uint8Array(await new Response(streamXlsx(input)).arrayBuffer());
-		await expectValues(await openXlsx(bytes), true);
-	});
+	it.each(["buffered", "streaming"])(
+		"preserves every value through the %s XLSX bridge",
+		async (mode) => {
+			const input = await workbookToInput(await openXlsb(await loadFixture(file)));
+			const bytes =
+				mode === "buffered"
+					? await writeXlsx(input)
+					: new Uint8Array(await new Response(streamXlsx(input)).arrayBuffer());
+			await expectValues(await openXlsx(bytes), true);
+		},
+	);
 });

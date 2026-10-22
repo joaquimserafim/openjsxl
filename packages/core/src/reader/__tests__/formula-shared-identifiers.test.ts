@@ -113,14 +113,17 @@ describe("shared formulas preserve identifiers and sheet qualifiers (F11.9)", ()
 	it.each([
 		["1", "2"],
 		["a1", "b2"],
-	])("preserves the 3-D sheet span %s:%s while shifting only its cell reference", async (from, to) => {
-		const master = `SUM(${from}:${to}!A1)+A1`;
-		const dependent = `SUM(${from}:${to}!A2)+A2`;
-		const book = await sharedWorkbook(master, [
-			{ name: from, rows: [[3], [4]] },
-			{ name: to, rows: [[5], [6]] },
-		]);
-		// The evaluator deliberately does not support 3-D references; this pins reader/bridge fidelity.
-		await assertFormulaRoundTrip(book, master, dependent);
-	});
+	])(
+		"preserves the 3-D sheet span %s:%s while shifting only its cell reference",
+		async (from, to) => {
+			const master = `SUM(${from}:${to}!A1)+A1`;
+			const dependent = `SUM(${from}:${to}!A2)+A2`;
+			const book = await sharedWorkbook(master, [
+				{ name: from, rows: [[3], [4]] },
+				{ name: to, rows: [[5], [6]] },
+			]);
+			// The evaluator deliberately does not support 3-D references; this pins reader/bridge fidelity.
+			await assertFormulaRoundTrip(book, master, dependent);
+		},
+	);
 });

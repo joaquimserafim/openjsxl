@@ -185,26 +185,25 @@ describe("writeXlsx — table header value snapshot", () => {
 		expect(reads).toBe(1);
 	});
 
-	it.each(
-		nonText,
-	)("retains the captured $label cell while using provided column-name fallback", async ({
-		value,
-	}) => {
-		let reads = 0;
-		const header: StyledCell = {
-			get value() {
-				return ++reads === 1 ? value : "LaterText";
-			},
-		};
-		const sheet = await roundTrip(
-			[[header], [42]],
-			[{ ...table(), columns: [{ name: "Fallback" }] }],
-		);
+	it.each(nonText)(
+		"retains the captured $label cell while using provided column-name fallback",
+		async ({ value }) => {
+			let reads = 0;
+			const header: StyledCell = {
+				get value() {
+					return ++reads === 1 ? value : "LaterText";
+				},
+			};
+			const sheet = await roundTrip(
+				[[header], [42]],
+				[{ ...table(), columns: [{ name: "Fallback" }] }],
+			);
 
-		expect(sheet.tables[0]?.columns[0]?.name).toBe("Fallback");
-		expect(sheet.cell("A1").value).toBe(value ?? null);
-		expect(reads).toBe(1);
-	});
+			expect(sheet.tables[0]?.columns[0]?.name).toBe("Fallback");
+			expect(sheet.cell("A1").value).toBe(value ?? null);
+			expect(reads).toBe(1);
+		},
+	);
 
 	it.each([
 		{ label: "numeric", value: 42 },

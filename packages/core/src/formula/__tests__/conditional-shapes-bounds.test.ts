@@ -51,39 +51,37 @@ function unreadableRange(width: number, height: number) {
 }
 
 describe("conditional multi-range shape checks stay bounded", () => {
-	it.each([
-		"COUNTIFS",
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s rejects whole-column mismatches without reading cells", (name) => {
-		for (const [width, height] of mismatchedShapes) {
-			const expected = unreadableRange(1, MAX_ROW);
-			const mismatch = unreadableRange(width, height);
+	it.each(["COUNTIFS", "SUMIFS", "AVERAGEIFS"])(
+		"%s rejects whole-column mismatches without reading cells",
+		(name) => {
+			for (const [width, height] of mismatchedShapes) {
+				const expected = unreadableRange(1, MAX_ROW);
+				const mismatch = unreadableRange(width, height);
+				const args =
+					name === "COUNTIFS"
+						? [expected.range, ">0", mismatch.range, ">0"]
+						: [expected.range, mismatch.range, ">0"];
+				expect(invoke(name, args)).toEqual(errorValue("#VALUE!"));
+				for (const reader of [...expected.readers, ...mismatch.readers]) {
+					expect(reader).not.toHaveBeenCalled();
+				}
+			}
+		},
+	);
+
+	it.each(["COUNTIFS", "SUMIFS", "AVERAGEIFS"])(
+		"%s rejects malformed argument counts before touching range values",
+		(name) => {
+			const guarded = unreadableRange(1, MAX_ROW);
 			const args =
 				name === "COUNTIFS"
-					? [expected.range, ">0", mismatch.range, ">0"]
-					: [expected.range, mismatch.range, ">0"];
+					? [guarded.range, ">0", guarded.range]
+					: [guarded.range, guarded.range, ">0", guarded.range];
 			expect(invoke(name, args)).toEqual(errorValue("#VALUE!"));
-			for (const reader of [...expected.readers, ...mismatch.readers]) {
-				expect(reader).not.toHaveBeenCalled();
-			}
-		}
-	});
-
-	it.each([
-		"COUNTIFS",
-		"SUMIFS",
-		"AVERAGEIFS",
-	])("%s rejects malformed argument counts before touching range values", (name) => {
-		const guarded = unreadableRange(1, MAX_ROW);
-		const args =
-			name === "COUNTIFS"
-				? [guarded.range, ">0", guarded.range]
-				: [guarded.range, guarded.range, ">0", guarded.range];
-		expect(invoke(name, args)).toEqual(errorValue("#VALUE!"));
-		expect(invoke(name, [])).toEqual(errorValue("#VALUE!"));
-		for (const reader of guarded.readers) expect(reader).not.toHaveBeenCalled();
-	});
+			expect(invoke(name, [])).toEqual(errorValue("#VALUE!"));
+			for (const reader of guarded.readers) expect(reader).not.toHaveBeenCalled();
+		},
+	);
 
 	it.each(alignedCases)("%s still handles aligned sparse whole columns", (name, expected) => {
 		const populated = vi.fn(

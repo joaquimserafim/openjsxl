@@ -166,11 +166,12 @@ describe("translateFormula — matches openpyxl's Translator", () => {
 		}
 	});
 
-	it.each(
-		IDENTIFIER_VECTORS,
-	)("preserves identifiers and sheet qualifiers in %s at offset (%i, %i)", (formula, dRow, dCol, expected) => {
-		expect(translateFormula(formula, dRow, dCol)).toBe(expected);
-	});
+	it.each(IDENTIFIER_VECTORS)(
+		"preserves identifiers and sheet qualifiers in %s at offset (%i, %i)",
+		(formula, dRow, dCol, expected) => {
+			expect(translateFormula(formula, dRow, dCol)).toBe(expected);
+		},
+	);
 
 	it("canonicalizes the WHOLE rewritten token to uppercase (deliberate divergence from openpyxl)", () => {
 		// openpyxl leaves a fully pinned `$a$1` lowercase and only uppercases the parts it moves; we

@@ -10,9 +10,9 @@ runtimes — Node, Deno, Bun, the browser, and edge. This is the package to inst
 the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
 On the 2026-10-22 benchmark, this workspace build reads a 1M-cell numeric XLSX sheet
-in **799 ms** (ExcelJS: 1.63 s; SheetJS: 2.58 s).
+in **805 ms** (ExcelJS: 1.69 s; SheetJS: 2.62 s).
 Published 1.0.0 installs in **0.52 MB with zero third-party dependencies**. XLSB reads now pass
-the expected checksum at all three benchmark sizes; the 1M-cell XLSB read takes **949 ms**.
+the expected checksum at all three benchmark sizes; the 1M-cell XLSB read takes **990 ms**.
 See the [full measurements and limitations](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md).
 
 ```sh
