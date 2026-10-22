@@ -5,9 +5,10 @@ import type { XlsbStyleTable } from "./parts";
 import * as R from "./records";
 
 // Parse one worksheet part (sheetN.bin) into the shared cell model. BIFF12 sheet data is a flat run
-// of records: a ROW record sets the current 0-based row, then each cell record carries its 0-based
-// column, a style index, and a typed value. Rows/columns convert to the 1-based public A1 model and
-// clamp to the shared grid bounds (a corrupt record can't place a cell off-grid or throw).
+// of records: a ROW record sets the current 0-based row; full cells carry their 0-based column,
+// while short cells use the previous column + 1. Both carry a style index and a typed value.
+// Rows/columns convert to the 1-based public A1 model and clamp to the shared grid bounds
+// (a corrupt record can't place a cell off-grid or throw).
 
 /** A hyperlink as it appears in sheetN.bin: a covered range plus the rel id of its target. */
 interface XlsbHyperlinkRef {
@@ -71,12 +72,14 @@ export function parseXlsbSheet(
 	let lastUsedRow = 0;
 	let lastUsedCol = 0;
 	let row = 0; // current 0-based row, set by ROW records
+	let col = -1; // raw previous column; clamp only when converting to a public ref
 
 	for (const rec of readRecords(bytes)) {
 		switch (rec.id) {
 			case R.ROW: {
 				const d = new RecordData(rec.data);
 				row = d.u32();
+				col = -1;
 				d.skip(7); // ixfe, height, first flags byte; fGhostDirty is bit 6 of byte 11
 				if ((d.u8() & 0x40) !== 0) {
 					firstUsedRow = Math.min(firstUsedRow, row);
@@ -137,17 +140,29 @@ export function parseXlsbSheet(
 			case R.FORMULA_STRING:
 			case R.FORMULA_FLOAT:
 			case R.FORMULA_BOOL:
-			case R.FORMULA_BOOLERR: {
+			case R.FORMULA_BOOLERR:
+			case R.RICH_STRING:
+			case R.SHORT_BLANK:
+			case R.SHORT_NUM:
+			case R.SHORT_BOOLERR:
+			case R.SHORT_BOOL:
+			case R.SHORT_FLOAT:
+			case R.SHORT_INLINE_STRING:
+			case R.SHORT_STRING: {
 				const d = new RecordData(rec.data);
-				const col = d.u32();
-				// Explicit cells count as used, including blanks and unsupported inline strings.
+				// Short cells omit only the column field. Every cell, even a blank or truncated
+				// record, establishes the position for the next short cell in this row.
+				col = rec.id >= R.SHORT_BLANK && rec.id <= R.SHORT_STRING ? col + 1 : d.u32();
+				// All cell records count as used, including styled blanks.
 				firstUsedRow = Math.min(firstUsedRow, row);
 				firstUsedCol = Math.min(firstUsedCol, col);
 				lastUsedRow = Math.max(lastUsedRow, row);
 				lastUsedCol = Math.max(lastUsedCol, col);
-				if (rec.id === R.INLINE_STRING) break; // preserve existing value/style degradation
+				// Recognize the full rich-string anchor so a following short cell stays in place.
+				// Its RichStr payload and style remain outside the supported value model.
+				if (rec.id === R.RICH_STRING) break;
 				// The cell's style field packs iStyleRef into the low 24 bits; bit 24 is fPhShow and
-				// bits 25–31 are reserved (MS-XLSB §2.5.9). Mask to 24 bits, or an fPhShow=1 cell (CJK
+				// bits 25–31 are reserved (MS-XLSB Cell). Mask to 24 bits, or an fPhShow=1 cell (CJK
 				// phonetic workbooks) would carry a corrupted style index and lose date detection.
 				const styleRef = d.u32() & 0xffffff;
 				const ref = refOf(row, col);
@@ -184,23 +199,30 @@ function decodeCell(
 ): Cell | undefined {
 	switch (id) {
 		case R.NUM:
+		case R.SHORT_NUM:
 			return numericCell(ref, d.rk(), styleRef, styles, date1904);
 		case R.FLOAT:
+		case R.SHORT_FLOAT:
 		case R.FORMULA_FLOAT:
 			return numericCell(ref, d.f64(), styleRef, styles, date1904);
-		case R.STRING: {
+		case R.STRING:
+		case R.SHORT_STRING: {
 			const idx = d.u32();
 			return { ref, type: "string", value: sharedStrings[idx] ?? "" };
 		}
 		case R.FORMULA_STRING:
+		case R.INLINE_STRING:
+		case R.SHORT_INLINE_STRING:
 			return { ref, type: "string", value: d.wideString() ?? "" };
 		case R.BOOL:
+		case R.SHORT_BOOL:
 		case R.FORMULA_BOOL:
 			return { ref, type: "boolean", value: d.u8() !== 0 };
 		case R.BOOLERR:
+		case R.SHORT_BOOLERR:
 		case R.FORMULA_BOOLERR:
 			return { ref, type: "error", value: R.BIFF_ERRORS[d.u8()] ?? "#ERR" };
 		default:
-			return undefined; // BLANK: a styled empty cell — record the style, emit no value
+			return undefined; // Full/short BLANK: record the style, emit no value
 	}
 }

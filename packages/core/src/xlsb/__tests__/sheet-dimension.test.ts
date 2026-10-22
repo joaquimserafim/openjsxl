@@ -78,18 +78,15 @@ describe("parseXlsbSheet — used dimensions", () => {
 		expect(sheet.cells.get("A1")).toEqual({ ref: "A1", type: "number", value: 42 });
 	});
 
-	it.each([
-		"",
-		"inline",
-	])("counts an inline string %j without changing value decoding", (value) => {
+	it.each(["", "inline"])("counts and decodes an inline string %j", (value) => {
 		const sheet = parse(dimension(), row(0), cell(0x0006, 0, 7, wide(value)));
 
 		expect(sheet.dimension).toBe("A1");
-		expect(sheet.cells.size).toBe(0);
-		expect(sheet.cellStyles.size).toBe(0);
+		expect([...sheet.cells.values()]).toEqual([{ ref: "A1", type: "string", value }]);
+		expect([...sheet.cellStyles]).toEqual([["A1", 7]]);
 	});
 
-	it("merges sparse inline strings with recognized cells without adding their values or styles", () => {
+	it("merges sparse inline strings with other cells and retains their values and styles", () => {
 		const sheet = parse(
 			dimension(),
 			row(7),
@@ -99,8 +96,14 @@ describe("parseXlsbSheet — used dimensions", () => {
 		);
 
 		expect(sheet.dimension).toBe("B3:E8");
-		expect([...sheet.cells]).toEqual([["B3", { ref: "B3", type: "boolean", value: true }]]);
-		expect([...sheet.cellStyles]).toEqual([["B3", 0]]);
+		expect([...sheet.cells]).toEqual([
+			["E8", { ref: "E8", type: "string", value: "inline" }],
+			["B3", { ref: "B3", type: "boolean", value: true }],
+		]);
+		expect([...sheet.cellStyles]).toEqual([
+			["E8", 7],
+			["B3", 0],
+		]);
 	});
 
 	it("keeps absent, invalid, and ordinary dimensions authoritative with inline strings", () => {

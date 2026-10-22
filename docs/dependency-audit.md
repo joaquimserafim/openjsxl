@@ -171,15 +171,23 @@ worker CLI. See [the benchmark runbook](../packages/bench/README.md).
 - Exact-artifact size measurements pass, including verification of the downloaded SheetJS
   bytes against the lockfile SRI before installation. Install scripts are disabled.
 
-The first complete matrix exposed a separate, pre-existing compatibility gap: openjsxl ignores undocumented XLSB
-short cell variants emitted by SheetJS 0.20.3, so it reads only the first column of these fixtures.
+The first complete matrix exposed a separate, pre-existing compatibility gap: openjsxl ignored undocumented XLSB
+short cell variants emitted by SheetJS 0.20.3, reading only the first column of these fixtures.
 The benchmark now checks read sums against its deterministic dataset and excludes mismatched
-measurements. The XLSB parser correction is separately scoped as F11.28 in the local release plan;
+measurements. The XLSB parser correction was separately scoped as F11.28 in the local release plan;
 no dependency risk acceptance is involved.
 
-The final full matrix exits **0** and records **93 cells: 87 valid measurements, 3 unsupported
+The F11.17 full matrix exited **0** and recorded **93 cells: 87 valid measurements, 3 unsupported
 SheetJS styled writes, and 3 excluded openjsxl XLSB checksum failures**. Every other read checksum
-matches its recipe; all recorded fixture and lockfile hashes match the bytes used. Root/facade
-README claims and [the full report](benchmarks.md) use these dated measurements. Old Python
-reference rows are omitted because they lack matching provenance. The dependency work is complete;
-the XLSB compatibility correction remains open as separate release work.
+matched its recipe; all recorded fixture and lockfile hashes matched the bytes used. Root/facade
+README claims and the report initially used those dated measurements. Old Python
+reference rows are omitted because they lack matching provenance. The dependency work was complete;
+the XLSB compatibility correction remained open as separate release work at that point.
+
+**F11.28 follow-up (2026-10-22):** the shared parser now decodes all seven compact cell variants
+and full inline strings. Real SheetJS fixtures pass public read and both XLSX bridge paths;
+independent LibreOffice/openpyxl checks confirm values and coordinates. The complete benchmark
+was remeasured: **93 cells, 90 valid measurements, 3 unsupported SheetJS styled writes**, with
+every read checksum matching its recipe. All three openjsxl XLSB checksums match exactly.
+Root/facade README claims and [the full report](benchmarks.md) now use this new dated run;
+the parser compatibility gap described above is resolved without changing dependencies.

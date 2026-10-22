@@ -366,6 +366,12 @@ Each reader returns the shared model; features a format can't express **degrade*
 | **`.ods`** | values & types, dates, merges, in-cell hyperlinks, sheet names/order | styles & number formats, formula text (cached values kept), visibility, comments, geometry, images |
 | **`.csv` / `.tsv`** | values with conservative type inference (numbers & booleans; **never dates**), one sheet, auto-detected delimiter | everything structural — CSV carries none |
 
+The XLSB reader supports full and compact cell records emitted by SheetJS 0.20.3, including
+plain inline strings and shared strings. Compact records retain their positions across blanks
+and gaps, with the same date and number-format handling as full records.
+Rich inline `BrtCellRString` values remain unsupported; their coordinates still position
+following compact cells correctly.
+
 `detectSpreadsheetFormat` returns `'xlsx' | 'xlsb' | 'ods' | 'csv' | undefined`. Container formats
 are identified by their package; **CSV has no magic bytes**, so any non-zip input that decodes as
 UTF-8 text classifies as `'csv'` — a documented best-effort heuristic, not a guarantee. Encrypted
@@ -709,15 +715,15 @@ sheet** as follows (median wall-time · peak RSS, each library in an isolated pr
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
-| **read** | **769 ms · 208.0 MB** | 1.56 s · 812.3 MB | 2.49 s · 542.6 MB |
-| **write** | **686 ms · 390.7 MB** | 3.16 s · 1.43 GB | 2.37 s · 523.9 MB |
+| **read** | **799 ms · 208.1 MB** | 1.63 s · 815.6 MB | 2.58 s · 539.1 MB |
+| **write** | **748 ms · 393.6 MB** | 3.37 s · 1.31 GB | 2.64 s · 531.5 MB |
 
-The streamed writer measured **668 ms · 100.6 MB** for the same million
+The streamed writer measured **839 ms · 101.4 MB** for the same million
 cells from a lazy row source. Embedded images, when present, remain resident until the stream ends.
 
-The full report also measures `.ods` and `.csv`. **XLSB timings for openjsxl are excluded:**
-the SheetJS 0.20.3 fixtures use undocumented short cell variants that the current parser drops,
-so their read checksums fail. A separate parser fix is required before those timings can be included.
+The 2026-10-22 report also measures `.xlsb`, `.ods`, and `.csv`. XLSB reads now pass the
+expected checksum at all three sizes, including the SheetJS 0.20.3 compact cell records.
+The million-cell XLSB read measured **949 ms · 513.0 MB**.
 
 A clean production install (lifecycle scripts disabled) gives these footprints:
 

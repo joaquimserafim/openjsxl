@@ -142,6 +142,10 @@ express degrade (`style()` → `undefined`, `mergedCells` → `[]`), never throw
 values, dates (an `.xlsb` on the epoch its `BrtWbProp` 1904 flag selects), merges (ods) and
 hyperlinks; `.csv` infers numbers & booleans only (never dates).
 Any of them converts to `.xlsx` through the bridge (`workbookToInput` → `writeXlsx`).
+The XLSB reader supports full and compact cell records emitted by SheetJS 0.20.3, including
+plain inline strings and shared strings, with positions preserved across blanks and gaps.
+Rich inline `BrtCellRString` values remain unsupported; their coordinates still position
+following compact cells correctly.
 
 ## Exports
 

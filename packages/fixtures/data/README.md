@@ -367,6 +367,72 @@ git-ignored [`../local/`](../local) directory and are never committed.
   checksum-verified logical formulas/values, and the read→write→read result. The PRE workbook is
   evidence only and is deliberately not committed.
 
+- **`sheetjs-short-cells-inline.xlsb` / `sheetjs-short-cells-sst.xlsb`** — authored locally on
+  2026-10-22 by **SheetJS Community Edition 0.20.3**, the reviewed official distribution installed
+  in the private benchmark package, for F11.28. These are unmodified producer outputs, not
+  handcrafted BIFF12 archives. All workbook content was newly authored for this project under its
+  MIT license; the producer is Apache-2.0 and its implementation is not embedded in these fixtures.
+  Each file is under 9 KiB and contains three sheets on the **1904 date system**:
+  `Integers` has 1..20 at A1:J2; `Decimals` has 1.25..20.25 at A1:J2; `Mixed` contains Unicode text,
+  empty text, booleans, errors, date-styled serials 0 and 1.5, number formats, styled blank records,
+  gaps, and a row beginning with a full blank followed by short cells. The only producer-option
+  difference is `bookSST: false` versus `true`.
+
+  Record inspection confirms 2 full RK + 18 short RK records on `Integers`, and 2 full real +
+  18 short real records on `Decimals`, in each file. Across `Mixed` the pair covers all seven
+  short IDs 0x0C–0x12 (blank, RK, error, boolean, real, inline string, shared string); the inline
+  file also contains a full `BrtCellSt` after a gap. These short forms are verified producer
+  compatibility extensions, not a claim that the reviewed MS-XLSB worksheet grammar lists them.
+  `reader/__tests__/xlsb-short-cells.test.ts` reads the committed bytes verbatim, checks every
+  expected cell and iteration order, and exports both buffered and streaming XLSX bridges.
+  Existing bridge degradations remain explicit: standalone errors become literal strings, and
+  XLSB number-format/style metadata is not carried by the bridge (date values retain date-ness).
+
+  Both files were reopened successfully by the producing library with `sheetStubs: true` and by
+  **LibreOfficeDev 26.8.0.0.alpha0**, build `2c87e51eeaa2b413ff4ae097b2705eea1995d8e5`.
+  LibreOffice's XLSX exports were checked with **openpyxl 3.1.5**, warnings-as-errors: all nonempty
+  values, coordinates, error text, 1904 epoch and date serials agree. LibreOffice drops the empty
+  string at Mixed!J1; SheetJS with stubs and the public regression pin retain it. **Oracle caveat:**
+  SheetJS 0.20.3's default read skips blank records without preserving the implicit short-cell
+  position. For this file it wrongly places authored Mixed!I1 at H1; `sheetStubs: true` preserves
+  I1 and is required for the producer-reopen check. Neither oracle limitation was used to alter
+  the authored expectations.
+
+  SHA-256 (two independent generations were byte-identical):
+  - inline: `2d72c2e67472f1343721bc3b6395075ebd85e81a481dcaced1168bf4caab65dc`
+  - SST: `1f00e05c5874823f75afcd16c3aca060aa5468bcf31d84bd9b54b5aaaefd50b4`
+
+  Reproduce only these two files from the repository root after the normal frozen workspace
+  install; this intentionally does not add SheetJS to the fixture package or regenerate the rest
+  of the corpus:
+
+  ```sh
+  node --input-type=module <<'JS'
+  import { writeFileSync } from 'node:fs';
+  import * as XLSX from './packages/bench/node_modules/xlsx/xlsx.mjs';
+  if (XLSX.version !== '0.20.3') throw new Error('Use the pinned producer');
+  for (const [label, bookSST] of [['inline', false], ['sst', true]]) {
+    const wb = XLSX.utils.book_new();
+    wb.Workbook = { WBProps: { date1904: true } };
+    for (const [name, offset] of [['Integers', 0], ['Decimals', 0.25]]) {
+      const rows = Array.from({length: 2}, (_, r) =>
+        Array.from({length: 10}, (_, c) => r * 10 + c + 1 + offset));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+    }
+    const rows = [
+      [1, 'inline α😀', true, false, {t:'e',v:0x07}, {t:'n',v:0,z:'yyyy-mm-dd'},
+        {t:'n',v:1.5,z:'yyyy-mm-dd hh:mm:ss'}, {t:'z',v:null,z:'0.00'}, 99.125, ''],
+      [42, undefined, 'after gap', true, {t:'z',v:null,z:'0.00'}, undefined,
+        {t:'e',v:0x2a}, -7, {t:'n',v:12.5,z:'0.000'}, 'tail'],
+      [undefined, undefined, {t:'z',v:null,z:'0.00'}, 31, 'reset', false]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Mixed');
+    writeFileSync(`packages/fixtures/data/sheetjs-short-cells-${label}.xlsb`,
+      XLSX.write(wb, {type:'buffer', bookType:'xlsb', compression:true, bookSST}));
+  }
+  JS
+  ```
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.

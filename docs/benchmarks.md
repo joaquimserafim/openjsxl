@@ -1,6 +1,6 @@
 # openjsxl benchmarks
 
-_Measured by `pnpm bench` on 2026-10-21. Re-rendering preserves this measurement date._
+_Measured by `pnpm bench` on 2026-10-22. Re-rendering preserves this measurement date._
 
 **Machine:** Apple M2 Pro · 12 cores · 32 GiB · darwin arm64 · Node v24.21.0
 
@@ -14,7 +14,7 @@ caveats are at the bottom.
 Libraries: **openjsxl** `1.0.0` (`workspace`); **ExcelJS** `4.4.0` (`4.4.0`; override uuid 11.1.1); **SheetJS** `0.20.3` ([official distribution](https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz)). Peak RSS is absolute and includes loading the library.
 
 **Source snapshot:** lockfile SHA-256 `a09142b230a845d99f8090a7463f6404955da7d3c66fd7a9d62dcbb90e95b76e`; core bundle SHA-256
-`5e753d112a40440898cb2ceec7769c0e3e3e63fc2b28fe6e8e8b94e05a7852b6`. The raw result cache also records locked comparator artifact
+`b4fdabca4d56ba2567e6923e0e111965a2221254d00614a6de90ddd962f6da89`. The raw result cache also records locked comparator artifact
 integrities and fixture hashes.
 
 ## Library size
@@ -50,25 +50,25 @@ Parse a real `.xlsx` and materialize every cell value.
 
 | Cells | openjsxl | ExcelJS | SheetJS |
 | --- | --- | --- | --- |
-| `10k` | 11 ms · 68.4 MB | 42 ms · 88.3 MB | 24 ms · 75.7 MB |
-| `100k` | 93 ms · 82.8 MB | 191 ms · 193.3 MB | 225 ms · 134.9 MB |
-| `1M` | 769 ms · 208.0 MB | 1.56 s · 812.3 MB | 2.49 s · 542.6 MB |
+| `10k` | 11 ms · 69.5 MB | 46 ms · 88.5 MB | 26 ms · 76.8 MB |
+| `100k` | 90 ms · 82.5 MB | 191 ms · 221.5 MB | 232 ms · 136.4 MB |
+| `1M` | 799 ms · 208.1 MB | 1.63 s · 815.6 MB | 2.58 s · 539.1 MB |
 
 #### strings
 
 | Cells | openjsxl | ExcelJS | SheetJS |
 | --- | --- | --- | --- |
-| `10k` | 16 ms · 71.8 MB | 60 ms · 91.2 MB | 30 ms · 78.1 MB |
-| `100k` | 101 ms · 83.9 MB | 198 ms · 196.1 MB | 213 ms · 135.9 MB |
-| `1M` | 838 ms · 210.0 MB | 1.67 s · 787.5 MB | 2.11 s · 539.3 MB |
+| `10k` | 17 ms · 71.2 MB | 62 ms · 91.3 MB | 31 ms · 79.1 MB |
+| `100k` | 105 ms · 82.9 MB | 213 ms · 201.3 MB | 217 ms · 135.6 MB |
+| `1M` | 909 ms · 211.5 MB | 1.74 s · 675.9 MB | 2.22 s · 540.8 MB |
 
 #### styled
 
 | Cells | openjsxl | ExcelJS | SheetJS |
 | --- | --- | --- | --- |
-| `10k` | 26 ms · 70.7 MB | 47 ms · 90.1 MB | 28 ms · 79.2 MB |
-| `100k` | 99 ms · 84.7 MB | 224 ms · 258.2 MB | 248 ms · 138.3 MB |
-| `1M` | 832 ms · 228.3 MB | 1.74 s · 835.8 MB | 2.75 s · 552.2 MB |
+| `10k` | 11 ms · 70.0 MB | 45 ms · 89.8 MB | 28 ms · 78.7 MB |
+| `100k` | 96 ms · 85.7 MB | 224 ms · 276.7 MB | 259 ms · 137.2 MB |
+| `1M` | 859 ms · 227.1 MB | 1.81 s · 795.9 MB | 2.74 s · 527.5 MB |
 
 
 ## Write
@@ -80,25 +80,25 @@ generator) — the honest streaming case, where the full row array never exists 
 
 | Cells | openjsxl (buffered) | openjsxl (streamed) | ExcelJS | SheetJS |
 | --- | --- | --- | --- | --- |
-| `10k` | 9.2 ms · 64.6 MB | 8.0 ms · 62.1 MB | 56 ms · 94.4 MB | 17 ms · 73.8 MB |
-| `100k` | 72 ms · 94.2 MB | 67 ms · 68.9 MB | 335 ms · 251.9 MB | 126 ms · 135.8 MB |
-| `1M` | 686 ms · 390.7 MB | 668 ms · 100.6 MB | 3.16 s · 1.43 GB | 2.37 s · 523.9 MB |
+| `10k` | 9.2 ms · 65.4 MB | 8.4 ms · 61.6 MB | 59 ms · 94.3 MB | 18 ms · 75.3 MB |
+| `100k` | 73 ms · 93.7 MB | 72 ms · 69.5 MB | 350 ms · 250.8 MB | 150 ms · 135.7 MB |
+| `1M` | 748 ms · 393.6 MB | 839 ms · 101.4 MB | 3.37 s · 1.31 GB | 2.64 s · 531.5 MB |
 
 #### strings
 
 | Cells | openjsxl (buffered) | openjsxl (streamed) | ExcelJS | SheetJS |
 | --- | --- | --- | --- | --- |
-| `10k` | 19 ms · 66.8 MB | 18 ms · 62.6 MB | 94 ms · 110.1 MB | 26 ms · 76.0 MB |
-| `100k` | 81 ms · 115.3 MB | 80 ms · 66.7 MB | 357 ms · 327.7 MB | 140 ms · 142.9 MB |
-| `1M` | 808 ms · 502.2 MB | 854 ms · 96.0 MB | 3.41 s · 1.59 GB | 2.24 s · 551.7 MB |
+| `10k` | 10 ms · 66.0 MB | 9.3 ms · 62.2 MB | 66 ms · 105.8 MB | 20 ms · 75.4 MB |
+| `100k` | 88 ms · 115.6 MB | 84 ms · 66.7 MB | 381 ms · 328.7 MB | 150 ms · 142.1 MB |
+| `1M` | 838 ms · 502.1 MB | 927 ms · 96.3 MB | 3.51 s · 1.58 GB | 2.50 s · 552.0 MB |
 
 #### styled
 
 | Cells | openjsxl (buffered) | openjsxl (streamed) | ExcelJS | SheetJS |
 | --- | --- | --- | --- | --- |
-| `10k` | 20 ms · 67.6 MB | 18 ms · 63.7 MB | 84 ms · 117.0 MB | — |
-| `100k` | 152 ms · 120.7 MB | 143 ms · 79.2 MB | 515 ms · 297.9 MB | — |
-| `1M` | 1.42 s · 555.6 MB | 1.42 s · 126.5 MB | 5.11 s · 1.76 GB | — |
+| `10k` | 19 ms · 67.0 MB | 18 ms · 63.1 MB | 86 ms · 116.6 MB | — |
+| `100k` | 161 ms · 126.4 MB | 157 ms · 78.2 MB | 563 ms · 298.4 MB | — |
+| `1M` | 1.57 s · 555.6 MB | 1.56 s · 125.8 MB | 5.43 s · 1.76 GB | — |
 
 ### Output file size
 
@@ -140,33 +140,33 @@ Format compatibility is measured with the recorded producer version; old produce
 
 | Cells | openjsxl | ExcelJS | SheetJS |
 | --- | --- | --- | --- |
-| `10k` | 12 ms · 68.9 MB | 41 ms · 88.5 MB | 24 ms · 76.3 MB |
-| `100k` | 88 ms · 81.7 MB | 183 ms · 193.1 MB | 343 ms · 134.1 MB |
-| `1M` | 838 ms · 207.5 MB | 1.90 s · 740.8 MB | 2.84 s · 524.0 MB |
+| `10k` | 11 ms · 69.2 MB | 46 ms · 88.5 MB | 25 ms · 76.1 MB |
+| `100k` | 92 ms · 82.1 MB | 214 ms · 268.8 MB | 242 ms · 132.9 MB |
+| `1M` | 783 ms · 206.5 MB | 1.66 s · 805.1 MB | 2.56 s · 535.7 MB |
 
 #### xlsb
 
 | Cells | openjsxl | SheetJS |
 | --- | --- | --- |
-| `10k` | — | 14 ms · 70.3 MB |
-| `100k` | — | 144 ms · 120.7 MB |
-| `1M` | — | 1.99 s · 456.8 MB |
+| `10k` | 10 ms · 70.0 MB | 15 ms · 70.6 MB |
+| `100k` | 66 ms · 126.6 MB | 152 ms · 120.6 MB |
+| `1M` | 949 ms · 513.0 MB | 1.68 s · 456.8 MB |
 
 #### ods
 
 | Cells | openjsxl | SheetJS |
 | --- | --- | --- |
-| `10k` | 17 ms · 75.2 MB | 35 ms · 84.0 MB |
-| `100k` | 143 ms · 163.2 MB | 316 ms · 184.4 MB |
-| `1M` | 1.70 s · 805.3 MB | 3.24 s · 955.1 MB |
+| `10k` | 17 ms · 73.8 MB | 35 ms · 82.8 MB |
+| `100k` | 135 ms · 164.9 MB | 354 ms · 181.3 MB |
+| `1M` | 1.49 s · 804.7 MB | 3.25 s · 984.2 MB |
 
 #### csv
 
 | Cells | openjsxl | ExcelJS | SheetJS |
 | --- | --- | --- | --- |
-| `10k` | 4.9 ms · 64.3 MB | 11 ms · 83.3 MB | 5.7 ms · 68.0 MB |
-| `100k` | 50 ms · 115.4 MB | 134 ms · 138.2 MB | 65 ms · 104.4 MB |
-| `1M` | 612 ms · 477.4 MB | 654 ms · 568.8 MB | 1.06 s · 460.4 MB |
+| `10k` | 5.3 ms · 64.1 MB | 12 ms · 83.7 MB | 5.9 ms · 67.8 MB |
+| `100k` | 52 ms · 115.4 MB | 67 ms · 132.7 MB | 47 ms · 107.3 MB |
+| `1M` | 627 ms · 477.6 MB | 654 ms · 569.1 MB | 1.04 s · 460.8 MB |
 
 
 ## Failed or unsupported measurements
@@ -178,9 +178,6 @@ These cells are shown as — above; their timing and memory measurements are exc
 | SheetJS | write | styled | xlsx | 10k | unsupported: SheetJS community build does not emit cell styles |
 | SheetJS | write | styled | xlsx | 100k | unsupported: SheetJS community build does not emit cell styles |
 | SheetJS | write | styled | xlsx | 1M | unsupported: SheetJS community build does not emit cell styles |
-| openjsxl | read | numbers | xlsb | 10k | Read checksum mismatch: expected 74995650.00000311, received 7492500 (tolerance 5.328761432110917e-7) |
-| openjsxl | read | numbers | xlsb | 100k | Read checksum mismatch: expected 7499956500.00169, received 749925000 (tolerance 0.000053290396095929466) |
-| openjsxl | read | numbers | xlsb | 1M | Read checksum mismatch: expected 749999565001.5581, received 74999250000 (tolerance 0.005329067427350922) |
 
 
 ## Reference: Python

@@ -9,10 +9,10 @@ Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader **and writer*
 runtimes — Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports
 the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
-On the 2026-10-21 benchmark, this workspace build reads a 1M-cell numeric XLSX sheet
-in **769 ms** (ExcelJS: 1.56 s; SheetJS: 2.49 s).
-Published 1.0.0 installs in **0.52 MB with zero third-party dependencies**. The current
-XLSB short-cell compatibility gap fails the benchmark checksum and is excluded from timings.
+On the 2026-10-22 benchmark, this workspace build reads a 1M-cell numeric XLSX sheet
+in **799 ms** (ExcelJS: 1.63 s; SheetJS: 2.58 s).
+Published 1.0.0 installs in **0.52 MB with zero third-party dependencies**. XLSB reads now pass
+the expected checksum at all three benchmark sizes; the 1M-cell XLSB read takes **949 ms**.
 See the [full measurements and limitations](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md).
 
 ```sh
@@ -121,6 +121,10 @@ never throw — `.xlsb`/`.ods` carry values, dates (an `.xlsb` on the epoch its 
 flag selects), merges (ods) and hyperlinks; `.csv` infers
 numbers & booleans only (never dates). So "a user uploaded a spreadsheet" is one code path, and any
 reader converts to `.xlsx` through the bridge.
+The XLSB reader supports full and compact cell records emitted by SheetJS 0.20.3, including
+plain inline strings and shared strings, with positions preserved across blanks and gaps.
+Rich inline `BrtCellRString` values remain unsupported; their coordinates still position
+following compact cells correctly.
 
 **Formulas (0.8):** the reader keeps a formula's text and cached value; the opt-in
 `openjsxl/formula` entry adds a zero-dependency engine that recomputes them —
