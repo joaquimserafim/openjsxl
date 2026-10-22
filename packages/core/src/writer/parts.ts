@@ -7,7 +7,7 @@ import type { SheetState, WorkbookProtection } from "../types";
 import { definedNamesXml } from "./defined-names";
 import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
-import { escapeAttr, isPlainRecord, isXmlSafe } from "./xml";
+import { escapeAttr, isPlainRecord, isXmlSafe, ownValue } from "./xml";
 
 // The OPC part builders shared by the buffered writer (writeXlsx) and the streaming writer
 // (streamXlsx). Every function here returns the EXACT bytes writeXlsx used to build inline, so the
@@ -61,8 +61,9 @@ export function validateSheetMeta(sheets: unknown): {
 	const states: SheetState[] = [];
 	const names: string[] = [];
 	let anyVisible = false;
-	for (const sheet of sheets) {
-		const name = sheet?.name;
+	for (let i = 0; i < sheets.length; i++) {
+		const sheet = ownValue(sheets, i);
+		const name = sheet == null ? undefined : ownValue(sheet, "name");
 		if (typeof name !== "string" || name.length === 0) {
 			throw new XlsxError("invalid-input", "a sheet name must be a non-empty string");
 		}
@@ -98,7 +99,7 @@ export function validateSheetMeta(sheets: unknown): {
 		names.push(name);
 		// Tab visibility (F4.6). Read the caller's property ONCE; absent means visible; only the three
 		// spec values are accepted.
-		const state = sheet.state ?? "visible";
+		const state = ownValue(sheet, "state") ?? "visible";
 		if (state !== "visible" && state !== "hidden" && state !== "veryHidden") {
 			throw new XlsxError(
 				"invalid-input",
@@ -215,20 +216,20 @@ export function workbookProtectionXml(protection: WorkbookProtection | undefined
 	}
 	let attrs = "";
 	for (const flag of WORKBOOK_PROTECTION_BOOL_ATTRS) {
-		const v = protection[flag];
+		const v = ownValue(protection, flag);
 		if (v === undefined) continue;
 		if (typeof v !== "boolean") protectionInvalid(`protection.${flag} must be a boolean`);
 		attrs += ` ${flag}="${v ? 1 : 0}"`;
 	}
 	for (const attr of WORKBOOK_PROTECTION_STR_ATTRS) {
-		const v = protection[attr];
+		const v = ownValue(protection, attr);
 		if (v === undefined) continue;
 		if (typeof v !== "string") protectionInvalid(`protection.${attr} must be a string`);
 		if (!isXmlSafe(v))
 			protectionInvalid(`protection.${attr} contains a character not allowed in XML`);
 		attrs += ` ${attr}="${escapeAttr(v)}"`;
 	}
-	const spin = protection.workbookSpinCount;
+	const spin = ownValue(protection, "workbookSpinCount");
 	if (spin !== undefined) {
 		// Bounded to xsd:unsignedInt (MAX_SPIN_COUNT); above it, `${spin}` emits `1e+21` (invalid XML).
 		if (
@@ -329,24 +330,30 @@ export function sheetSideParts(
 			xml: sheetRelsXml(side.rels),
 		});
 	}
-	if (side.commentsXml !== undefined) {
-		parts.push({ name: `xl/comments${n}.xml`, xml: side.commentsXml });
+	// Normalized side parts omit unused fields, so do not inherit them again at emission.
+	const commentsXml = ownValue(side, "commentsXml");
+	if (commentsXml !== undefined) {
+		parts.push({ name: `xl/comments${n}.xml`, xml: commentsXml });
 	}
-	if (side.vmlXml !== undefined) {
-		parts.push({ name: `xl/drawings/vmlDrawing${n}.vml`, xml: side.vmlXml });
+	const vmlXml = ownValue(side, "vmlXml");
+	if (vmlXml !== undefined) {
+		parts.push({ name: `xl/drawings/vmlDrawing${n}.vml`, xml: vmlXml });
 	}
-	if (side.drawingXml !== undefined) {
-		parts.push({ name: `xl/drawings/drawing${n}.xml`, xml: side.drawingXml });
+	const drawingXml = ownValue(side, "drawingXml");
+	if (drawingXml !== undefined) {
+		parts.push({ name: `xl/drawings/drawing${n}.xml`, xml: drawingXml });
 	}
-	if (side.drawingRelsXml !== undefined) {
+	const drawingRelsXml = ownValue(side, "drawingRelsXml");
+	if (drawingRelsXml !== undefined) {
 		parts.push({
 			name: `xl/drawings/_rels/drawing${n}.xml.rels`,
-			xml: side.drawingRelsXml,
+			xml: drawingRelsXml,
 		});
 	}
 	// Table parts are numbered workbook-globally (not by sheet), so each carries its own number.
-	if (side.tables !== undefined) {
-		for (const table of side.tables) {
+	const tables = ownValue(side, "tables");
+	if (tables !== undefined) {
+		for (const table of tables) {
 			parts.push({ name: `xl/tables/table${table.number}.xml`, xml: table.xml });
 		}
 	}

@@ -28,14 +28,22 @@ export { isXmlSafe } from "../utils";
 
 /**
  * A direct instance of `Object` (or a null-prototype object) — not an array, `Date`, class instance,
- * or otherwise exotic value. Writer input validation rejects anything else BEFORE reading properties,
- * so a hostile prototype/getter can't smuggle values past validation (single-read TOCTOU). Shared by
- * the sheet-level and workbook-level validators.
+ * or otherwise exotic value. This checks shape; callers must still use ownValue to capture each
+ * allowed field once and validate it. Shared by sheet-level and workbook-level validators.
  */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null) return false;
 	const proto = Object.getPrototypeOf(value);
 	return proto === null || proto === Object.prototype;
+}
+
+/**
+ * Capture an own model field once; inherited values are absent, including on sparse arrays.
+ * Use Object.hasOwn separately when the schema distinguishes absence from an own undefined value.
+ * Retains the original receiver for getters and supports null-prototype records.
+ */
+export function ownValue<T extends object, K extends keyof T>(record: T, key: K): T[K] | undefined {
+	return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
 // A string whose meaningful leading/trailing whitespace would be stripped by an XML reader needs

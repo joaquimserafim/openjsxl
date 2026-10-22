@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { escapeAttr, escapeText, isPlainRecord, needsPreserve, preserveAttr } from "../xml";
+import {
+	escapeAttr,
+	escapeText,
+	isPlainRecord,
+	needsPreserve,
+	ownValue,
+	preserveAttr,
+} from "../xml";
 
 describe("escapeText", () => {
 	it("escapes the markup-significant characters", () => {
@@ -82,5 +89,52 @@ describe("isPlainRecord", () => {
 	it("rejects an object whose prototype was reassigned to a non-Object prototype", () => {
 		const spoofed = Object.setPrototypeOf({ a: 1 }, Array.prototype);
 		expect(isPlainRecord(spoofed)).toBe(false);
+	});
+});
+
+describe("ownValue", () => {
+	it("retains own undefined presence, non-enumerable values, and null prototypes", () => {
+		const record: Record<string, unknown> = { present: undefined };
+		Object.setPrototypeOf(record, null);
+		Object.defineProperty(record, "hidden", { value: 7 });
+		expect(ownValue(record, "missing")).toBeUndefined();
+		expect(ownValue(record, "present")).toBeUndefined();
+		expect(Object.hasOwn(record, "missing")).toBe(false);
+		expect(Object.hasOwn(record, "present")).toBe(true);
+		expect(ownValue(record, "hidden")).toBe(7);
+	});
+
+	it("reads an own getter once with its original receiver", () => {
+		let reads = 0;
+		const record = {
+			marker: 4,
+			get value() {
+				reads++;
+				return this.marker;
+			},
+		};
+		expect(ownValue(record, "value")).toBe(4);
+		expect(reads).toBe(1);
+	});
+
+	it("never reads inherited getters, including sparse array entries", () => {
+		let reads = 0;
+		const record: Record<string, unknown> = {};
+		Object.setPrototypeOf(record, {
+			get value() {
+				reads++;
+				return 9;
+			},
+		});
+		expect(ownValue(record, "value")).toBeUndefined();
+		const rows: number[] = new Array(1);
+		Object.setPrototypeOf(rows, {
+			get 0() {
+				reads++;
+				return 9;
+			},
+		});
+		expect(ownValue(rows, 0)).toBeUndefined();
+		expect(reads).toBe(0);
 	});
 });

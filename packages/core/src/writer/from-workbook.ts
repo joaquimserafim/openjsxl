@@ -24,6 +24,7 @@ import type {
 	Worksheet,
 } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
+import { ownValue } from "./xml";
 
 /**
  * Return `name` if unseen (case-insensitively), else a suffixed variant (`name_2`, `name_3`, …) that
@@ -67,7 +68,8 @@ export function dedupeDefinedNames(names: readonly DefinedName[]): readonly Defi
 	const seen = new Set<string>();
 	let duplicate = false;
 	for (const dn of names) {
-		const scopeKey = dn.localSheetId !== undefined ? String(dn.localSheetId) : "*";
+		const localSheetId = ownValue(dn, "localSheetId");
+		const scopeKey = localSheetId !== undefined ? String(localSheetId) : "*";
 		const key = `${scopeKey} ${dn.name.toUpperCase()}`;
 		if (seen.has(key)) {
 			duplicate = true;
@@ -79,7 +81,8 @@ export function dedupeDefinedNames(names: readonly DefinedName[]): readonly Defi
 	seen.clear();
 	const out: DefinedName[] = [];
 	for (const dn of names) {
-		const scopeKey = dn.localSheetId !== undefined ? String(dn.localSheetId) : "*";
+		const localSheetId = ownValue(dn, "localSheetId");
+		const scopeKey = localSheetId !== undefined ? String(localSheetId) : "*";
 		const key = `${scopeKey} ${dn.name.toUpperCase()}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
@@ -161,6 +164,21 @@ function cellToInput(worksheet: Worksheet, cell: Cell): CellInput {
 	return style === undefined ? cell.value : { value: cell.value, style };
 }
 
+// Sparse bridge arrays are internal accumulators. An inherited index must neither receive a
+// write through a setter nor prevent a real cell/row from being stored through a readonly slot.
+function setArraySlot<T>(array: T[], index: number, value: T): void {
+	if (Object.hasOwn(array, index) || !(index in array)) {
+		array[index] = value;
+		return;
+	}
+	Object.defineProperty(array, index, {
+		value,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
+}
+
 /**
  * Convert an open {@link Workbook} into {@link WorkbookInput} for {@link writeXlsx}. Each populated
  * cell is placed at its own A1 reference with its resolved style (if any), preserving sheet names
@@ -214,12 +232,12 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 				}
 				occupied.set(canonical, cell.ref);
 				const { col, row: rowNum } = placed;
-				let rowArr = rows[rowNum - 1];
+				let rowArr = ownValue(rows, rowNum - 1);
 				if (rowArr === undefined) {
 					rowArr = [];
-					rows[rowNum - 1] = rowArr;
+					setArraySlot(rows, rowNum - 1, rowArr);
 				}
-				rowArr[col - 1] = cellToInput(worksheet, cell);
+				setArraySlot(rowArr, col - 1, cellToInput(worksheet, cell));
 			}
 		}
 		// Geometry (F4.5) and structural metadata (F4.6): carried only when present, so a workbook
@@ -245,6 +263,9 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 			printOptions?: PrintOptions;
 			headerFooter?: HeaderFooter;
 		} = { name: info.name, rows };
+		// Carried optional fields are assigned below. Keep this internal record detached from
+		// inherited setters or readonly properties that could intercept those own model values.
+		Object.setPrototypeOf(sheet, null);
 		const columns = worksheet.columns;
 		if (columns.length > 0) sheet.columns = columns;
 		const rowProperties = worksheet.rowProperties;

@@ -57,7 +57,7 @@ import type { MediaRegistry } from "./images";
 import { checkKeys, sheetInvalid, shortened } from "./sheet-validation";
 import { colorXml, type Fail, type StyleRegistry, validateColor } from "./styles";
 import type { CellInput, CellValue, SheetInput, StreamSheetInput } from "./types";
-import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, preserveAttr } from "./xml";
+import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, ownValue, preserveAttr } from "./xml";
 
 const encoder = new TextEncoder();
 
@@ -116,14 +116,14 @@ function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 			);
 		}
 	}
-	const hasFormula = "formula" in input;
-	if (!hasFormula && !("value" in input)) {
+	const hasFormula = Object.hasOwn(input, "formula");
+	if (!hasFormula && !Object.hasOwn(input, "value")) {
 		throw new XlsxError(
 			"invalid-input",
 			`cell ${ref}: an object cell must be { value, style? } or carry a formula`,
 		);
 	}
-	const value = input.value;
+	const value = ownValue(input, "value");
 	// The inner value must be a plain CellValue — a nested { value } or any other object (except Date)
 	// has no meaning and would silently mis-serialize. This guard is RUNTIME-only: a JS caller can pass
 	// a non-Date object even though the type forbids it, so keep it even though TS sees it as dead.
@@ -137,8 +137,8 @@ function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 	}
 	return {
 		value,
-		formula: hasFormula ? input.formula : undefined,
-		style: input.style,
+		formula: hasFormula ? ownValue(input, "formula") : undefined,
+		style: ownValue(input, "style"),
 	};
 }
 
@@ -288,12 +288,12 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 	if (!Array.isArray(columns)) sheetInvalid(sheetName, "columns must be an array");
 	const entries: string[] = [];
 	for (let i = 0; i < columns.length; i++) {
-		const raw = columns[i] as unknown;
+		const raw = ownValue(columns, i) as unknown;
 		const what = `columns[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, ["min", "max", "width", "hidden"]);
-		const min = raw.min;
-		const max = raw.max;
+		const min = ownValue(raw, "min");
+		const max = ownValue(raw, "max");
 		if (
 			typeof min !== "number" ||
 			!Number.isInteger(min) ||
@@ -309,7 +309,7 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 			);
 		}
 		let attrs = ` min="${min}" max="${max}"`;
-		const width = raw.width;
+		const width = ownValue(raw, "width");
 		if (width !== undefined) {
 			if (
 				typeof width !== "number" ||
@@ -322,7 +322,7 @@ function colsXml(sheetName: string, columns: readonly ColumnProps[] | undefined)
 			// customWidth marks the width as user-set — Excel ignores a bare width without it.
 			attrs += ` width="${String(width)}" customWidth="1"`;
 		}
-		const hidden = raw.hidden;
+		const hidden = ownValue(raw, "hidden");
 		if (hidden !== undefined && typeof hidden !== "boolean") {
 			sheetInvalid(sheetName, `${what}.hidden must be a boolean`);
 		}
@@ -341,7 +341,8 @@ function rowAttrsMap(
 	const out = new Map<number, string>();
 	if (rowProperties === undefined) return out;
 	if (!isPlainRecord(rowProperties)) sheetInvalid(sheetName, "rowProperties must be an object");
-	for (const key of Object.keys(rowProperties)) {
+	const record: Record<string, unknown> = rowProperties;
+	for (const key of Object.keys(record)) {
 		const rowNum = Number(key);
 		if (!Number.isInteger(rowNum) || rowNum < 1 || rowNum > MAX_ROW) {
 			sheetInvalid(
@@ -349,12 +350,12 @@ function rowAttrsMap(
 				`rowProperties key "${key}" is not a row number within Excel's grid`,
 			);
 		}
-		const raw = (rowProperties as Record<string, unknown>)[key];
+		const raw = ownValue(record, key);
 		const what = `rowProperties[${key}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, ["height", "hidden"]);
 		let attrs = "";
-		const height = raw.height;
+		const height = ownValue(raw, "height");
 		if (height !== undefined) {
 			if (
 				typeof height !== "number" ||
@@ -370,7 +371,7 @@ function rowAttrsMap(
 			// customHeight marks the height as user-set, mirroring customWidth on columns.
 			attrs += ` ht="${String(height)}" customHeight="1"`;
 		}
-		const hidden = raw.hidden;
+		const hidden = ownValue(raw, "hidden");
 		if (hidden !== undefined && typeof hidden !== "boolean") {
 			sheetInvalid(sheetName, `${what}.hidden must be a boolean`);
 		}
@@ -394,8 +395,8 @@ function sheetViewsXml(sheetName: string, freeze: FreezePane | undefined): strin
 		}
 		return value;
 	};
-	const rows = validate(freeze.rows, "rows", MAX_ROW);
-	const cols = validate(freeze.cols, "cols", MAX_COL);
+	const rows = validate(ownValue(freeze, "rows"), "rows", MAX_ROW);
+	const cols = validate(ownValue(freeze, "cols"), "cols", MAX_COL);
 	if (rows === 0 && cols === 0) return ""; // freezing nothing is no freeze
 	const splits = (cols > 0 ? ` xSplit="${cols}"` : "") + (rows > 0 ? ` ySplit="${rows}"` : "");
 	const topLeft = formatRef({ col: cols + 1, row: rows + 1 });
@@ -434,7 +435,7 @@ function autoFilterXml(
 	for (const key of Object.keys(autoFilter)) {
 		if (key !== "ref") sheetInvalid(sheetName, `autoFilter has unknown property "${key}"`);
 	}
-	const ref = autoFilter.ref;
+	const ref = ownValue(autoFilter, "ref");
 	if (typeof ref !== "string") sheetInvalid(sheetName, "autoFilter.ref must be a string");
 	const range = parseCanonicalRange(ref);
 	if (range === undefined) {
@@ -494,13 +495,13 @@ function sheetProtectionXml(sheetName: string, protection: SheetInput["protectio
 	}
 	let attrs = "";
 	for (const flag of SHEET_PROTECTION_BOOL_ATTRS) {
-		const v = protection[flag];
+		const v = ownValue(protection, flag);
 		if (v === undefined) continue;
 		if (typeof v !== "boolean") sheetInvalid(sheetName, `protection.${flag} must be a boolean`);
 		attrs += ` ${flag}="${v ? 1 : 0}"`;
 	}
 	for (const attr of SHEET_PROTECTION_STR_ATTRS) {
-		const v = protection[attr];
+		const v = ownValue(protection, attr);
 		if (v === undefined) continue;
 		if (typeof v !== "string") sheetInvalid(sheetName, `protection.${attr} must be a string`);
 		if (!isXmlSafe(v)) {
@@ -508,7 +509,7 @@ function sheetProtectionXml(sheetName: string, protection: SheetInput["protectio
 		}
 		attrs += ` ${attr}="${escapeAttr(v)}"`;
 	}
-	const spin = protection.spinCount;
+	const spin = ownValue(protection, "spinCount");
 	if (spin !== undefined) {
 		// Bounded to xsd:unsignedInt (MAX_SPIN_COUNT): above it, `${spin}` would emit `1e+21` (invalid
 		// integer XML). Shared bound with the reader's drop.
@@ -553,7 +554,7 @@ function printOptionsXml(sheetName: string, po: SheetInput["printOptions"]): str
 	}
 	let attrs = "";
 	for (const flag of PRINT_OPTIONS_FLAGS) {
-		const v = po[flag];
+		const v = ownValue(po, flag);
 		if (v === undefined) continue;
 		if (typeof v !== "boolean")
 			sheetInvalid(sheetName, `printOptions.${flag} must be a boolean`);
@@ -575,7 +576,7 @@ function pageMarginsXml(sheetName: string, m: SheetInput["pageMargins"]): string
 	// All six are required by the schema.
 	let attrs = "";
 	for (const key of PAGE_MARGIN_KEYS) {
-		const v = m[key];
+		const v = ownValue(m, key);
 		if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > MAX_PAGE_MARGIN) {
 			sheetInvalid(
 				sheetName,
@@ -630,9 +631,9 @@ function pageSetupXml(sheetName: string, ps: SheetInput["pageSetup"]): string {
 	};
 	// Attribute emission in CT_PageSetup schema order (single-read each).
 	let attrs = "";
-	const paperSize = ps.paperSize;
+	const paperSize = ownValue(ps, "paperSize");
 	if (paperSize !== undefined) attrs += ` paperSize="${uint("paperSize", paperSize)}"`;
-	const scale = ps.scale;
+	const scale = ownValue(ps, "scale");
 	if (scale !== undefined) {
 		if (
 			typeof scale !== "number" ||
@@ -647,32 +648,32 @@ function pageSetupXml(sheetName: string, ps: SheetInput["pageSetup"]): string {
 		}
 		attrs += ` scale="${scale}"`;
 	}
-	const firstPageNumber = ps.firstPageNumber;
+	const firstPageNumber = ownValue(ps, "firstPageNumber");
 	if (firstPageNumber !== undefined) {
 		attrs += ` firstPageNumber="${uint("firstPageNumber", firstPageNumber)}"`;
 	}
-	const fitToWidth = ps.fitToWidth;
+	const fitToWidth = ownValue(ps, "fitToWidth");
 	if (fitToWidth !== undefined) attrs += ` fitToWidth="${uint("fitToWidth", fitToWidth)}"`;
-	const fitToHeight = ps.fitToHeight;
+	const fitToHeight = ownValue(ps, "fitToHeight");
 	if (fitToHeight !== undefined) attrs += ` fitToHeight="${uint("fitToHeight", fitToHeight)}"`;
-	const pageOrder = ps.pageOrder;
+	const pageOrder = ownValue(ps, "pageOrder");
 	if (pageOrder !== undefined) {
 		attrs += ` pageOrder="${oneOf("pageOrder", pageOrder, ["downThenOver", "overThenDown"])}"`;
 	}
-	const orientation = ps.orientation;
+	const orientation = ownValue(ps, "orientation");
 	if (orientation !== undefined) {
 		attrs += ` orientation="${oneOf("orientation", orientation, ["default", "portrait", "landscape"])}"`;
 	}
-	const blackAndWhite = ps.blackAndWhite;
+	const blackAndWhite = ownValue(ps, "blackAndWhite");
 	if (blackAndWhite !== undefined)
 		attrs += ` blackAndWhite="${bool("blackAndWhite", blackAndWhite)}"`;
-	const draft = ps.draft;
+	const draft = ownValue(ps, "draft");
 	if (draft !== undefined) attrs += ` draft="${bool("draft", draft)}"`;
-	const cellComments = ps.cellComments;
+	const cellComments = ownValue(ps, "cellComments");
 	if (cellComments !== undefined) {
 		attrs += ` cellComments="${oneOf("cellComments", cellComments, ["none", "asDisplayed", "atEnd"])}"`;
 	}
-	const useFirstPageNumber = ps.useFirstPageNumber;
+	const useFirstPageNumber = ownValue(ps, "useFirstPageNumber");
 	if (useFirstPageNumber !== undefined) {
 		attrs += ` useFirstPageNumber="${bool("useFirstPageNumber", useFirstPageNumber)}"`;
 	}
@@ -704,7 +705,7 @@ function headerFooterXml(sheetName: string, hf: SheetInput["headerFooter"]): str
 	}
 	let attrs = "";
 	for (const flag of HF_FLAGS) {
-		const v = hf[flag];
+		const v = ownValue(hf, flag);
 		if (v === undefined) continue;
 		if (typeof v !== "boolean")
 			sheetInvalid(sheetName, `headerFooter.${flag} must be a boolean`);
@@ -712,7 +713,7 @@ function headerFooterXml(sheetName: string, hf: SheetInput["headerFooter"]): str
 	}
 	let children = "";
 	for (const key of HF_CHILDREN) {
-		const v = hf[key];
+		const v = ownValue(hf, key);
 		if (v === undefined) continue;
 		if (typeof v !== "string") sheetInvalid(sheetName, `headerFooter.${key} must be a string`);
 		// The string carries Excel's &-codes as literal text; ST_Xstring-encode (like comment text, F9.6)
@@ -733,10 +734,10 @@ type PrintSetupInput = Pick<
 >;
 function printSetupXml(sheetName: string, sheet: PrintSetupInput): string {
 	return (
-		printOptionsXml(sheetName, sheet.printOptions) +
-		pageMarginsXml(sheetName, sheet.pageMargins) +
-		pageSetupXml(sheetName, sheet.pageSetup) +
-		headerFooterXml(sheetName, sheet.headerFooter)
+		printOptionsXml(sheetName, ownValue(sheet, "printOptions")) +
+		pageMarginsXml(sheetName, ownValue(sheet, "pageMargins")) +
+		pageSetupXml(sheetName, ownValue(sheet, "pageSetup")) +
+		headerFooterXml(sheetName, ownValue(sheet, "headerFooter"))
 	);
 }
 
@@ -751,7 +752,7 @@ function mergeCellsXml(sheetName: string, merges: readonly string[] | undefined)
 	if (!Array.isArray(merges)) sheetInvalid(sheetName, "merges must be an array");
 	const rects: MergeRect[] = [];
 	for (let i = 0; i < merges.length; i++) {
-		const ref = merges[i] as unknown;
+		const ref = ownValue(merges, i) as unknown;
 		const what = `merges[${i}]`;
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what} must be a string`);
 		const colon = ref.indexOf(":");
@@ -814,11 +815,11 @@ function hyperlinksXml(
 	const targets: string[] = [];
 	const entries: string[] = [];
 	for (let i = 0; i < hyperlinks.length; i++) {
-		const raw = hyperlinks[i] as unknown;
+		const raw = ownValue(hyperlinks, i) as unknown;
 		const what = `hyperlinks[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, ["ref", "target", "location", "tooltip", "display"]);
-		const ref = raw.ref;
+		const ref = ownValue(raw, "ref");
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
 		const colon = ref.indexOf(":");
 		const from = parseCanonicalCell(colon === -1 ? ref : ref.slice(0, colon));
@@ -848,16 +849,16 @@ function hyperlinksXml(
 			}
 			return value;
 		};
-		const rawTarget = str("target", raw.target);
-		const rawLocation = str("location", raw.location);
+		const rawTarget = str("target", ownValue(raw, "target"));
+		const rawLocation = str("location", ownValue(raw, "location"));
 		// An empty destination is no destination — the reader drops location="" the same way.
 		const target = rawTarget === "" ? undefined : rawTarget;
 		const location = rawLocation === "" ? undefined : rawLocation;
 		if (target === undefined && location === undefined) {
 			sheetInvalid(sheetName, `${what} needs an external target and/or a location`);
 		}
-		const tooltip = str("tooltip", raw.tooltip);
-		const display = str("display", raw.display);
+		const tooltip = str("tooltip", ownValue(raw, "tooltip"));
+		const display = str("display", ownValue(raw, "display"));
 		let attrs = ` ref="${ref}"`;
 		if (target !== undefined) {
 			targets.push(target);
@@ -908,7 +909,7 @@ function dataValidationsXml(
 
 	const entries: string[] = [];
 	for (let i = 0; i < dataValidations.length; i++) {
-		const raw = dataValidations[i] as unknown;
+		const raw = ownValue(dataValidations, i) as unknown;
 		const what = `dataValidations[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, [
@@ -929,7 +930,7 @@ function dataValidationsXml(
 		]);
 
 		// sqref — required, non-empty, canonical, capped in RANGE COUNT (decision 5).
-		const sqref = raw.sqref;
+		const sqref = ownValue(raw, "sqref");
 		if (!Array.isArray(sqref)) {
 			sheetInvalid(sheetName, `${what}.sqref must be an array of A1 ranges`);
 		}
@@ -940,7 +941,7 @@ function dataValidationsXml(
 		}
 		const tokens: string[] = [];
 		for (let s = 0; s < sqref.length; s++) {
-			const token = sqref[s] as unknown;
+			const token = ownValue(sqref, s) as unknown;
 			if (typeof token !== "string") {
 				sheetInvalid(sheetName, `${what}.sqref[${s}] must be a string`);
 			}
@@ -990,7 +991,7 @@ function dataValidationsXml(
 		};
 
 		// type — default "none".
-		const rawType = raw.type;
+		const rawType = ownValue(raw, "type");
 		let type: DataValidationType = "none";
 		if (rawType !== undefined) {
 			if (!isDataValidationType(rawType)) {
@@ -1002,8 +1003,8 @@ function dataValidationsXml(
 			type = rawType;
 		}
 
-		const formula1 = formulaValue("formula1", raw.formula1);
-		const formula2 = formulaValue("formula2", raw.formula2);
+		const formula1 = formulaValue("formula1", ownValue(raw, "formula1"));
+		const formula2 = formulaValue("formula2", ownValue(raw, "formula2"));
 		// An inline list literal (`"a,b,c"`) is capped at Excel's source ceiling (decision 5). A
 		// range/reference source is unbounded here.
 		if (
@@ -1019,7 +1020,7 @@ function dataValidationsXml(
 		}
 
 		let attrs = ` type="${type}"`;
-		const operator = raw.operator;
+		const operator = ownValue(raw, "operator");
 		if (operator !== undefined) {
 			if (!isDataValidationOperator(operator)) {
 				sheetInvalid(
@@ -1029,18 +1030,18 @@ function dataValidationsXml(
 			}
 			attrs += ` operator="${operator}"`;
 		}
-		const allowBlank = boolValue("allowBlank", raw.allowBlank);
+		const allowBlank = boolValue("allowBlank", ownValue(raw, "allowBlank"));
 		if (allowBlank !== undefined) attrs += ` allowBlank="${allowBlank ? 1 : 0}"`;
-		const showInputMessage = boolValue("showInputMessage", raw.showInputMessage);
+		const showInputMessage = boolValue("showInputMessage", ownValue(raw, "showInputMessage"));
 		if (showInputMessage !== undefined)
 			attrs += ` showInputMessage="${showInputMessage ? 1 : 0}"`;
-		const showErrorMessage = boolValue("showErrorMessage", raw.showErrorMessage);
+		const showErrorMessage = boolValue("showErrorMessage", ownValue(raw, "showErrorMessage"));
 		if (showErrorMessage !== undefined)
 			attrs += ` showErrorMessage="${showErrorMessage ? 1 : 0}"`;
 		// showDropDown is INVERTED in the file — intuitive `true` (arrow shown) writes as "0".
-		const showDropDown = boolValue("showDropDown", raw.showDropDown);
+		const showDropDown = boolValue("showDropDown", ownValue(raw, "showDropDown"));
 		if (showDropDown !== undefined) attrs += ` showDropDown="${showDropDown ? 0 : 1}"`;
-		const errorStyle = raw.errorStyle;
+		const errorStyle = ownValue(raw, "errorStyle");
 		if (errorStyle !== undefined) {
 			if (!isDataValidationErrorStyle(errorStyle)) {
 				sheetInvalid(
@@ -1050,13 +1051,17 @@ function dataValidationsXml(
 			}
 			attrs += ` errorStyle="${errorStyle}"`;
 		}
-		const promptTitle = textValue("promptTitle", raw.promptTitle, MAX_DV_TITLE_LEN);
+		const promptTitle = textValue(
+			"promptTitle",
+			ownValue(raw, "promptTitle"),
+			MAX_DV_TITLE_LEN,
+		);
 		if (promptTitle !== undefined) attrs += ` promptTitle="${escapeAttr(promptTitle)}"`;
-		const prompt = textValue("prompt", raw.prompt, MAX_DV_TEXT_LEN);
+		const prompt = textValue("prompt", ownValue(raw, "prompt"), MAX_DV_TEXT_LEN);
 		if (prompt !== undefined) attrs += ` prompt="${escapeAttr(prompt)}"`;
-		const errorTitle = textValue("errorTitle", raw.errorTitle, MAX_DV_TITLE_LEN);
+		const errorTitle = textValue("errorTitle", ownValue(raw, "errorTitle"), MAX_DV_TITLE_LEN);
 		if (errorTitle !== undefined) attrs += ` errorTitle="${escapeAttr(errorTitle)}"`;
-		const error = textValue("error", raw.error, MAX_DV_TEXT_LEN);
+		const error = textValue("error", ownValue(raw, "error"), MAX_DV_TEXT_LEN);
 		if (error !== undefined) attrs += ` error="${escapeAttr(error)}"`;
 		// sqref is the LAST attribute (matching Excel/openpyxl); tokens are canonical A1 — no escaping.
 		attrs += ` sqref="${tokens.join(" ")}"`;
@@ -1126,12 +1131,12 @@ function conditionalFormattingXml(
 	let doc = 0;
 
 	for (let b = 0; b < cfs.length; b++) {
-		const rawBlock = cfs[b] as unknown;
+		const rawBlock = ownValue(cfs, b) as unknown;
 		const wb = `conditionalFormatting[${b}]`;
 		if (!isPlainRecord(rawBlock)) sheetInvalid(sheetName, `${wb} must be an object`);
 		checkKeys(sheetName, wb, rawBlock, ["sqref", "rules"]);
 
-		const sqref = rawBlock.sqref;
+		const sqref = ownValue(rawBlock, "sqref");
 		if (!Array.isArray(sqref))
 			sheetInvalid(sheetName, `${wb}.sqref must be an array of A1 ranges`);
 		if (sqref.length === 0)
@@ -1141,7 +1146,7 @@ function conditionalFormattingXml(
 		}
 		const tokens: string[] = [];
 		for (let s = 0; s < sqref.length; s++) {
-			const tok = sqref[s] as unknown;
+			const tok = ownValue(sqref, s) as unknown;
 			if (typeof tok !== "string")
 				sheetInvalid(sheetName, `${wb}.sqref[${s}] must be a string`);
 			if (!isCanonicalSqrefToken(tok)) {
@@ -1154,11 +1159,13 @@ function conditionalFormattingXml(
 		}
 		blockSqref[b] = tokens;
 
-		const rules = rawBlock.rules;
+		const rules = ownValue(rawBlock, "rules");
 		if (!Array.isArray(rules)) sheetInvalid(sheetName, `${wb}.rules must be an array`);
 		if (rules.length === 0) sheetInvalid(sheetName, `${wb}.rules must have at least one rule`);
 		for (let r = 0; r < rules.length; r++) {
-			built.push(buildCfRule(sheetName, `${wb}.rules[${r}]`, rules[r], styles, b, doc++));
+			built.push(
+				buildCfRule(sheetName, `${wb}.rules[${r}]`, ownValue(rules, r), styles, b, doc++),
+			);
 		}
 	}
 
@@ -1200,18 +1207,18 @@ function buildCfRule(
 	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 	const fail: Fail = (message) => sheetInvalid(sheetName, `${what}: ${message}`);
 
-	const type = raw.type;
+	const type = ownValue(raw, "type");
 	if (typeof type !== "string" || !isXmlSafe(type)) {
 		sheetInvalid(sheetName, `${what}.type must be an XML-safe string`);
 	}
-	const priority = raw.priority;
+	const priority = ownValue(raw, "priority");
 	if (typeof priority !== "number" || !Number.isInteger(priority) || priority < 1) {
 		sheetInvalid(sheetName, `${what}.priority must be an integer ≥ 1`);
 	}
 
 	// Shared attributes across every variant.
 	let rest = "";
-	const stopIfTrue = raw.stopIfTrue;
+	const stopIfTrue = ownValue(raw, "stopIfTrue");
 	if (stopIfTrue !== undefined) {
 		if (typeof stopIfTrue !== "boolean")
 			sheetInvalid(sheetName, `${what}.stopIfTrue must be a boolean`);
@@ -1229,8 +1236,8 @@ function buildCfRule(
 
 	if (type === "colorScale") {
 		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "cfvo", "colors"]);
-		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
-		const colors = cfColorsXml(fail, `${what}.colors`, raw.colors);
+		const cfvos = cfvoXml(sheetName, what, ownValue(raw, "cfvo"));
+		const colors = cfColorsXml(fail, `${what}.colors`, ownValue(raw, "colors"));
 		// Excel repair-prompts on an out-of-count scale — reject (the reader drops it; shared bound).
 		if (!colorScaleCountsOk(cfvos.count, colors.count)) {
 			sheetInvalid(
@@ -1246,24 +1253,27 @@ function buildCfRule(
 	}
 	if (type === "dataBar") {
 		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "cfvo", "color"]);
-		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
+		const cfvos = cfvoXml(sheetName, what, ownValue(raw, "cfvo"));
 		if (!dataBarCountsOk(cfvos.count)) {
 			sheetInvalid(sheetName, `${what} dataBar needs exactly 2 cfvo`);
 		}
-		const color = colorXml("color", validateColor(fail, `${what}.color`, raw.color));
+		const color = colorXml(
+			"color",
+			validateColor(fail, `${what}.color`, ownValue(raw, "color")),
+		);
 		return finish('type="dataBar"', "", `<dataBar>${cfvos.xml}${color}</dataBar>`);
 	}
 	if (type === "iconSet") {
 		checkKeys(sheetName, what, raw, ["type", "priority", "stopIfTrue", "iconSet", "cfvo"]);
 		let attrs = "";
-		const iconSet = raw.iconSet;
+		const iconSet = ownValue(raw, "iconSet");
 		if (iconSet !== undefined) {
 			if (typeof iconSet !== "string" || !isXmlSafe(iconSet)) {
 				sheetInvalid(sheetName, `${what}.iconSet must be an XML-safe string`);
 			}
 			attrs += ` iconSet="${escapeAttr(iconSet)}"`;
 		}
-		const cfvos = cfvoXml(sheetName, what, raw.cfvo);
+		const cfvos = cfvoXml(sheetName, what, ownValue(raw, "cfvo"));
 		const iconName = typeof iconSet === "string" ? iconSet : undefined;
 		if (!iconSetCountsOk(iconName, cfvos.count)) {
 			sheetInvalid(
@@ -1290,7 +1300,7 @@ function buildCfRule(
 			"stdDev",
 			"formulas",
 		]);
-		const dxfId = styles.internDxf(raw.dxf, `${what}.dxf`);
+		const dxfId = styles.internDxf(ownValue(raw, "dxf"), `${what}.dxf`);
 		let extra = "";
 		const strAttr = (key: string, value: unknown): void => {
 			if (value === undefined) return;
@@ -1312,16 +1322,16 @@ function buildCfRule(
 				sheetInvalid(sheetName, `${what}.${key} must be a boolean`);
 			extra += ` ${key}="${value ? 1 : 0}"`;
 		};
-		strAttr("operator", raw.operator);
-		strAttr("text", raw.text);
-		strAttr("timePeriod", raw.timePeriod);
-		intAttr("rank", raw.rank);
-		boolAttr("percent", raw.percent);
-		boolAttr("bottom", raw.bottom);
-		boolAttr("aboveAverage", raw.aboveAverage);
-		boolAttr("equalAverage", raw.equalAverage);
-		intAttr("stdDev", raw.stdDev);
-		const children = cfFormulasXml(sheetName, what, raw.formulas);
+		strAttr("operator", ownValue(raw, "operator"));
+		strAttr("text", ownValue(raw, "text"));
+		strAttr("timePeriod", ownValue(raw, "timePeriod"));
+		intAttr("rank", ownValue(raw, "rank"));
+		boolAttr("percent", ownValue(raw, "percent"));
+		boolAttr("bottom", ownValue(raw, "bottom"));
+		boolAttr("aboveAverage", ownValue(raw, "aboveAverage"));
+		boolAttr("equalAverage", ownValue(raw, "equalAverage"));
+		intAttr("stdDev", ownValue(raw, "stdDev"));
+		const children = cfFormulasXml(sheetName, what, ownValue(raw, "formulas"));
 		const open = dxfId !== undefined ? `type="${type}" dxfId="${dxfId}"` : `type="${type}"`;
 		return finish(open, extra, children);
 	}
@@ -1339,23 +1349,23 @@ function cfvoXml(sheetName: string, what: string, raw: unknown): { xml: string; 
 	const n = raw.length;
 	let out = "";
 	for (let i = 0; i < n; i++) {
-		const c = raw[i] as unknown;
+		const c = ownValue(raw, i) as unknown;
 		const cw = `${what}.cfvo[${i}]`;
 		if (!isPlainRecord(c)) sheetInvalid(sheetName, `${cw} must be an object`);
 		checkKeys(sheetName, cw, c, ["type", "val", "gte"]);
-		const t = c.type;
+		const t = ownValue(c, "type");
 		if (typeof t !== "string" || !isXmlSafe(t)) {
 			sheetInvalid(sheetName, `${cw}.type must be an XML-safe string`);
 		}
 		let attrs = ` type="${escapeAttr(t)}"`;
-		const val = c.val;
+		const val = ownValue(c, "val");
 		if (val !== undefined) {
 			if (typeof val !== "string" || !isXmlSafe(val)) {
 				sheetInvalid(sheetName, `${cw}.val must be an XML-safe string`);
 			}
 			attrs += ` val="${escapeAttr(val)}"`;
 		}
-		const gte = c.gte;
+		const gte = ownValue(c, "gte");
 		if (gte !== undefined) {
 			if (typeof gte !== "boolean") sheetInvalid(sheetName, `${cw}.gte must be a boolean`);
 			attrs += ` gte="${gte ? 1 : 0}"`;
@@ -1371,7 +1381,7 @@ function cfColorsXml(fail: Fail, what: string, raw: unknown): { xml: string; cou
 	const n = raw.length;
 	let out = "";
 	for (let i = 0; i < n; i++) {
-		out += colorXml("color", validateColor(fail, `${what}[${i}]`, raw[i]));
+		out += colorXml("color", validateColor(fail, `${what}[${i}]`, ownValue(raw, i)));
 	}
 	return { xml: out, count: n };
 }
@@ -1383,7 +1393,7 @@ function cfFormulasXml(sheetName: string, what: string, raw: unknown): string {
 	let out = "";
 	let emitted = 0;
 	for (let i = 0; i < raw.length; i++) {
-		const f = raw[i] as unknown;
+		const f = ownValue(raw, i) as unknown;
 		if (typeof f !== "string")
 			sheetInvalid(sheetName, `${what}.formulas[${i}] must be a string`);
 		const stored = f.startsWith("=") ? f.slice(1) : f;
@@ -1467,7 +1477,7 @@ function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): strin
 		"showColumnStripes",
 	]);
 	let attrs = "";
-	const styleName = raw.name;
+	const styleName = ownValue(raw, "name");
 	if (styleName !== undefined) {
 		if (typeof styleName !== "string")
 			sheetInvalid(sheetName, `${what}.style.name must be a string`);
@@ -1482,7 +1492,7 @@ function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): strin
 		"showRowStripes",
 		"showColumnStripes",
 	] as const) {
-		const value = raw[flag];
+		const value = ownValue(raw, flag);
 		if (value === undefined) continue;
 		if (typeof value !== "boolean")
 			sheetInvalid(sheetName, `${what}.style.${flag} must be a boolean`);
@@ -1512,7 +1522,7 @@ export function buildTables(
 	const parts: TablePart[] = [];
 
 	for (let i = 0; i < tables.length; i++) {
-		const raw = tables[i] as unknown;
+		const raw = ownValue(tables, i) as unknown;
 		const what = `tables[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, [
@@ -1527,12 +1537,12 @@ export function buildTables(
 			"totalsRowStyle",
 		]);
 
-		const name = raw.name;
+		const name = ownValue(raw, "name");
 		if (typeof name !== "string") sheetInvalid(sheetName, `${what}.name must be a string`);
 		validateTableName(sheetName, what, name);
 		ctx.claimName(sheetName, name);
 
-		const ref = raw.ref;
+		const ref = ownValue(raw, "ref");
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
 		const colon = ref.indexOf(":");
 		const from = colon === -1 ? undefined : parseCanonicalCell(ref.slice(0, colon));
@@ -1545,10 +1555,10 @@ export function buildTables(
 		}
 		const width = to.col - from.col + 1;
 
-		const headerRow = raw.headerRow !== false; // default true
-		const totalsRow = raw.totalsRow === true;
+		const headerRow = ownValue(raw, "headerRow") !== false; // default true
+		const totalsRow = ownValue(raw, "totalsRow") === true;
 
-		const columns = raw.columns;
+		const columns = ownValue(raw, "columns");
 		if (columns !== undefined && !Array.isArray(columns)) {
 			sheetInvalid(sheetName, `${what}.columns must be an array`);
 		}
@@ -1567,12 +1577,12 @@ export function buildTables(
 		for (let c = 0; c < width; c++) {
 			// Read the caller's column entry ONCE (single-read TOCTOU — a Proxy array must not return a
 			// different object between the isPlainRecord check and its use).
-			const rawColumn = columns !== undefined ? columns[c] : undefined;
+			const rawColumn = columns !== undefined ? ownValue(columns, c) : undefined;
 			const provided = isPlainRecord(rawColumn) ? rawColumn : undefined;
 			let columnName: string;
 			if (headerRow && headerText !== undefined) {
 				const text = headerText(from.row, from.col + c);
-				const provName = provided !== undefined ? provided.name : undefined;
+				const provName = provided !== undefined ? ownValue(provided, "name") : undefined;
 				if (text !== undefined && text !== "") {
 					// Header text is authoritative — Excel requires the column name to match the header cell.
 					columnName = text;
@@ -1587,7 +1597,7 @@ export function buildTables(
 					);
 				}
 			} else {
-				const provName = provided !== undefined ? provided.name : undefined;
+				const provName = provided !== undefined ? ownValue(provided, "name") : undefined;
 				if (typeof provName === "string" && provName !== "") columnName = provName;
 				else if (headerRow) {
 					sheetInvalid(
@@ -1639,7 +1649,7 @@ export function buildTables(
 		const totalsAttr = totalsRow ? ' totalsRowCount="1"' : ' totalsRowShown="0"';
 		// Table-wide highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs> table.
 		const tableDxf = tableDxfAttrs(styles, what, raw);
-		const styleXml = tableStyleInfoXml(sheetName, what, raw.style);
+		const styleXml = tableStyleInfoXml(sheetName, what, ownValue(raw, "style"));
 		// name/displayName are ST_Xstring — encode so a legal name that LOOKS like an escape
 		// (`_x0041_`) reads back as itself in Excel/openpyxl (both decode table names). A name
 		// with nothing to protect is unchanged (byte-identity).
@@ -1656,11 +1666,11 @@ export function buildTables(
 // table and return the `*DxfId` attributes (F9.3 retrofit). Absent styles emit nothing (byte-identity).
 function tableDxfAttrs(styles: StyleRegistry, what: string, raw: Record<string, unknown>): string {
 	let attrs = "";
-	const header = styles.internDxf(raw.headerRowStyle, `${what}.headerRowStyle`);
+	const header = styles.internDxf(ownValue(raw, "headerRowStyle"), `${what}.headerRowStyle`);
 	if (header !== undefined) attrs += ` headerRowDxfId="${header}"`;
-	const data = styles.internDxf(raw.dataStyle, `${what}.dataStyle`);
+	const data = styles.internDxf(ownValue(raw, "dataStyle"), `${what}.dataStyle`);
 	if (data !== undefined) attrs += ` dataDxfId="${data}"`;
-	const totals = styles.internDxf(raw.totalsRowStyle, `${what}.totalsRowStyle`);
+	const totals = styles.internDxf(ownValue(raw, "totalsRowStyle"), `${what}.totalsRowStyle`);
 	if (totals !== undefined) attrs += ` totalsRowDxfId="${totals}"`;
 	return attrs;
 }
@@ -1692,23 +1702,23 @@ function tableColumnXml(
 		]);
 		// Per-column highlight dxfs (F9.3 retrofit) — interned into the shared <dxfs>.
 		attrs += tableDxfAttrs(styles, `${what} column ${id}`, provided);
-		const label = provided.totalsRowLabel;
+		const label = ownValue(provided, "totalsRowLabel");
 		if (label !== undefined) {
 			if (typeof label !== "string")
 				sheetInvalid(sheetName, `${what} totalsRowLabel must be a string`);
 			attrs += ` totalsRowLabel="${escapeAttr(encodeXstring(label))}"`;
 		}
-		const fn = provided.totalsRowFunction;
+		const fn = ownValue(provided, "totalsRowFunction");
 		if (fn !== undefined)
 			attrs += ` totalsRowFunction="${escapeAttr(requireXmlString(sheetName, `${what} totalsRowFunction`, fn))}"`;
 		// Both formulas are logical ST_Formula (⊂ ST_Xstring) text: validated, then encoded once
 		// right before escaping (F11.20) — the same convention the table name/label already use.
-		const totalsFormula = provided.totalsRowFormula;
+		const totalsFormula = ownValue(provided, "totalsRowFormula");
 		if (totalsFormula !== undefined) {
 			const logical = requireXmlString(sheetName, `${what} totalsRowFormula`, totalsFormula);
 			children += `<totalsRowFormula>${escapeText(encodeXstring(logical))}</totalsRowFormula>`;
 		}
-		const calcFormula = provided.calculatedColumnFormula;
+		const calcFormula = ownValue(provided, "calculatedColumnFormula");
 		if (calcFormula !== undefined) {
 			const logical = requireXmlString(
 				sheetName,
@@ -1767,8 +1777,8 @@ interface Point {
 function validatePoint(sheetName: string, what: string, raw: unknown): Point {
 	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 	checkKeys(sheetName, what, raw, ["col", "row", "colOff", "rowOff"]);
-	const col = raw.col;
-	const row = raw.row;
+	const col = ownValue(raw, "col");
+	const row = ownValue(raw, "row");
 	if (typeof col !== "number" || !Number.isInteger(col) || col < 1 || col > MAX_COL) {
 		sheetInvalid(sheetName, `${what}.col must be an integer column in 1..${MAX_COL}`);
 	}
@@ -1778,8 +1788,8 @@ function validatePoint(sheetName: string, what: string, raw: unknown): Point {
 	return {
 		col,
 		row,
-		colOff: emuValue(sheetName, `${what}.colOff`, raw.colOff),
-		rowOff: emuValue(sheetName, `${what}.rowOff`, raw.rowOff),
+		colOff: emuValue(sheetName, `${what}.colOff`, ownValue(raw, "colOff")),
+		rowOff: emuValue(sheetName, `${what}.rowOff`, ownValue(raw, "rowOff")),
 	};
 }
 
@@ -1808,20 +1818,20 @@ function imageParts(
 	const anchors: string[] = [];
 	const rels: string[] = [];
 	for (let i = 0; i < images.length; i++) {
-		const raw = images[i] as unknown;
+		const raw = ownValue(images, i) as unknown;
 		const what = `images[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, ["anchor", "bytes", "mime", "name"]);
 
 		// bytes — read the reference ONCE (a getter must not swap the buffer between here and packing).
-		const bytes = raw.bytes;
+		const bytes = ownValue(raw, "bytes");
 		if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
 			sheetInvalid(sheetName, `${what}.bytes must be a non-empty Uint8Array`);
 		}
 		// mime — allowlist only; the extension is derived from the mime, never sniffed from the data.
 		// Use hasOwn, not a bare lookup: a bare `map[mime]` walks the prototype chain, so a mime like
 		// "constructor" or "toString" would resolve to an inherited value and slip past the gate.
-		const mime = raw.mime;
+		const mime = ownValue(raw, "mime");
 		const ext =
 			typeof mime === "string" && Object.hasOwn(MEDIA_MIME_TO_EXT, mime)
 				? MEDIA_MIME_TO_EXT[mime]
@@ -1834,21 +1844,21 @@ function imageParts(
 			);
 		}
 		// name — optional; defaults to a deterministic "Image N".
-		const rawName = raw.name;
+		const rawName = ownValue(raw, "name");
 		if (rawName !== undefined && (typeof rawName !== "string" || !isXmlSafe(rawName))) {
 			sheetInvalid(sheetName, `${what}.name must be an XML-safe string`);
 		}
 		const name = rawName ?? `Image ${i + 1}`;
 
 		// anchor — exactly one of `to` (two-cell) or `ext` (one-cell).
-		const anchor = raw.anchor;
+		const anchor = ownValue(raw, "anchor");
 		if (!isPlainRecord(anchor)) sheetInvalid(sheetName, `${what}.anchor must be an object`);
 		checkKeys(sheetName, `${what}.anchor`, anchor, ["from", "to", "ext", "editAs"]);
-		const from = validatePoint(sheetName, `${what}.anchor.from`, anchor.from);
+		const from = validatePoint(sheetName, `${what}.anchor.from`, ownValue(anchor, "from"));
 		// Read `to`/`ext` ONCE each (single-read TOCTOU): a getter must not present one shape to the
 		// XOR check and another to emission.
-		const rawTo = anchor.to;
-		const rawExt = anchor.ext;
+		const rawTo = ownValue(anchor, "to");
+		const rawExt = ownValue(anchor, "ext");
 		const hasTo = rawTo !== undefined;
 		const hasExt = rawExt !== undefined;
 		if (hasTo === hasExt) {
@@ -1857,7 +1867,7 @@ function imageParts(
 				`${what}.anchor must have exactly one of "to" (two-cell) or "ext" (one-cell)`,
 			);
 		}
-		const editAs = anchor.editAs;
+		const editAs = ownValue(anchor, "editAs");
 		if (
 			editAs !== undefined &&
 			editAs !== "twoCell" &&
@@ -1886,8 +1896,8 @@ function imageParts(
 			if (!isPlainRecord(rawExt))
 				sheetInvalid(sheetName, `${what}.anchor.ext must be an object`);
 			checkKeys(sheetName, `${what}.anchor.ext`, rawExt, ["cx", "cy"]);
-			const cx = emuValue(sheetName, `${what}.anchor.ext.cx`, rawExt.cx);
-			const cy = emuValue(sheetName, `${what}.anchor.ext.cy`, rawExt.cy);
+			const cx = emuValue(sheetName, `${what}.anchor.ext.cx`, ownValue(rawExt, "cx"));
+			const cy = emuValue(sheetName, `${what}.anchor.ext.cy`, ownValue(rawExt, "cy"));
 			anchors.push(
 				`<xdr:oneCellAnchor>${pointXml("from", from)}<xdr:ext cx="${cx}" cy="${cy}"/>${pic}<xdr:clientData/></xdr:oneCellAnchor>`,
 			);
@@ -2036,40 +2046,45 @@ export function worksheetXml(
 	styles: StyleRegistry,
 	media: MediaRegistry,
 	tableCtx: TableContext,
+	sheetName: string,
 ): WorksheetResult {
 	// Geometry and metadata validate up front (geometry also contributes rows below): a bad
 	// column/row/freeze/merge/hyperlink/comment/image spec must surface before any cell work.
-	const cols = colsXml(sheet.name, sheet.columns);
-	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
-	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
-	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
-	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
-	const printSetup = printSetupXml(sheet.name, sheet);
-	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const cols = colsXml(sheetName, ownValue(sheet, "columns"));
+	const rowAttrs = rowAttrsMap(sheetName, ownValue(sheet, "rowProperties"));
+	const sheetViews = sheetViewsXml(sheetName, ownValue(sheet, "freeze"));
+	const autoFilter = autoFilterXml(sheetName, ownValue(sheet, "autoFilter"));
+	const sheetProtection = sheetProtectionXml(sheetName, ownValue(sheet, "protection"));
+	const printSetup = printSetupXml(sheetName, sheet);
+	const mergeCells = mergeCellsXml(sheetName, ownValue(sheet, "merges"));
 	const conditionalFormatting = conditionalFormattingXml(
-		sheet.name,
-		sheet.conditionalFormatting,
+		sheetName,
+		ownValue(sheet, "conditionalFormatting"),
 		styles,
 	);
-	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
-	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
-	const comments = commentsParts(sheet.name, sheet.comments);
-	const pictures = imageParts(sheet.name, sheet.images, media);
+	const dataValidations = dataValidationsXml(sheetName, ownValue(sheet, "dataValidations"));
+	const links = hyperlinksXml(sheetName, ownValue(sheet, "hyperlinks"));
+	const comments = commentsParts(sheetName, ownValue(sheet, "comments"));
+	const pictures = imageParts(sheetName, ownValue(sheet, "images"), media);
 	// Only table-header coordinates need to survive both metadata and cell emission. Cache by
 	// position, not object identity: callers can reuse one StyledCell at distinct coordinates.
 	const headerCells = new Map<
 		number,
 		Map<number, { readonly cell: CapturedCell; readonly text: string | undefined }>
 	>();
+	const headerRows = new Map<number, SheetInput["rows"][number]>();
 	const tables = buildTables(
-		sheet.name,
-		sheet.tables,
+		sheetName,
+		ownValue(sheet, "tables"),
 		(row, col) => {
 			let capturedRow = headerCells.get(row);
 			const captured = capturedRow?.get(col);
 			if (captured !== undefined) return captured.text;
-			const rowCells = rows[row - 1];
-			const input: CellInput = Array.isArray(rowCells) ? rowCells[col - 1] : undefined;
+			if (!headerRows.has(row - 1)) headerRows.set(row - 1, ownValue(rows, row - 1));
+			const rowCells = headerRows.get(row - 1);
+			const input: CellInput = Array.isArray(rowCells)
+				? ownValue(rowCells, col - 1)
+				: undefined;
 			// Preserve header policy: bare strings and plain records with a string value (including
 			// cached formula strings) infer names; other cells may use a provided column-name fallback.
 			const canInfer = typeof input === "string" || isPlainRecord(input);
@@ -2102,7 +2117,7 @@ export function worksheetXml(
 	}
 
 	for (let r = 0; r < rows.length; r++) {
-		const cells = rows[r];
+		const cells = headerRows.has(r) ? headerRows.get(r) : ownValue(rows, r);
 		// A missing row (array hole / undefined) is an empty row — skip it. Anything else that isn't
 		// an array (a string, a number, null, an object) would otherwise be iterated as if it were a
 		// row: a string "abc" would explode into three character cells. Reject it instead of silently
@@ -2126,7 +2141,8 @@ export function worksheetXml(
 		const cellXmls: string[] = [];
 		for (let c = 0; c < cells.length; c++) {
 			const colNum = c + 1;
-			const cell = capturedRow?.get(colNum)?.cell ?? splitInput(colNum, rowNum, cells[c]);
+			const cell =
+				capturedRow?.get(colNum)?.cell ?? splitInput(colNum, rowNum, ownValue(cells, c));
 			const rendered = renderCell(colNum, rowNum, cell, date1904, styles);
 			if (rendered === undefined) continue;
 			if (minRow === 0 || rowNum < minRow) minRow = rowNum;
@@ -2178,9 +2194,8 @@ export function worksheetXml(
 		.join(
 			"",
 		)}</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${printSetup}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
-	// Comment/drawing/table side parts are spread only when present so the optional properties stay
-	// truly absent (exactOptionalPropertyTypes).
-	return {
+	// Keep absent side parts absent even if Object.prototype changes before the parts are emitted.
+	const result: WorksheetResult = {
 		xml,
 		rels,
 		...(comments !== undefined
@@ -2192,6 +2207,8 @@ export function worksheetXml(
 		...(tables !== undefined ? { tables } : {}),
 		...(autoFilter.ref !== undefined ? { autoFilterRef: autoFilter.ref } : {}),
 	};
+	Object.setPrototypeOf(result, null);
+	return result;
 }
 
 // ── Streaming worksheet (F5.1) ─────────────────────────────────────────────────────────────────
@@ -2235,7 +2252,7 @@ function renderStreamRow(
 	}
 	const cellXmls: string[] = [];
 	for (let c = 0; c < cells.length; c++) {
-		const cell = splitInput(c + 1, rowNum, cells[c]);
+		const cell = splitInput(c + 1, rowNum, ownValue(cells, c));
 		const rendered = renderCell(c + 1, rowNum, cell, date1904, styles);
 		if (rendered !== undefined) cellXmls.push(rendered);
 	}
@@ -2246,6 +2263,29 @@ function renderStreamRow(
 // Roughly this many bytes of row XML accumulate before a chunk is flushed — batching keeps the
 // compressor fed with substantial writes instead of one tiny write per row.
 const ROW_CHUNK_BYTES = 65536;
+
+// Native array iteration resolves holes through the prototype chain. Preserve array positions
+// with own reads when the caller uses that iterator. Custom iterable protocols remain supported.
+function* ownRows(rows: SheetInput["rows"]): Generator<SheetInput["rows"][number]> {
+	for (let i = 0; i < rows.length; i++) yield ownValue(rows, i);
+}
+
+function streamRowSource(rows: StreamSheetInput["rows"]): StreamSheetInput["rows"] {
+	const source = rows;
+	if (!Array.isArray(rows)) return rows;
+	// Capture the selected protocol once, as for-await would. Returning the original array
+	// after inspecting its method would invoke a caller's iterator getter a second time.
+	if (Symbol.asyncIterator in source) {
+		const iterate = source[Symbol.asyncIterator];
+		if (iterate !== undefined && iterate !== null) {
+			return { [Symbol.asyncIterator]: () => iterate.call(rows) };
+		}
+	}
+	const iterate = rows[Symbol.iterator];
+	return iterate === Array.prototype[Symbol.iterator]
+		? ownRows(rows)
+		: { [Symbol.iterator]: () => iterate.call(rows) };
+}
 
 async function* streamRowChunks(
 	sheetName: string,
@@ -2260,7 +2300,7 @@ async function* streamRowChunks(
 	let rowNum = 0;
 	let buf = "";
 	// `for await` iterates both a sync iterable (an array) and an async one (a DB cursor).
-	for await (const cells of rows) {
+	for await (const cells of streamRowSource(rows)) {
 		rowNum++;
 		if (rowNum > MAX_ROW) {
 			throw new XlsxError(
@@ -2299,26 +2339,27 @@ export function streamWorksheet(
 	styles: StyleRegistry,
 	media: MediaRegistry,
 	tableCtx: TableContext,
+	sheetName: string,
 ): StreamedWorksheet {
-	const cols = colsXml(sheet.name, sheet.columns);
-	const rowAttrs = rowAttrsMap(sheet.name, sheet.rowProperties);
-	const sheetViews = sheetViewsXml(sheet.name, sheet.freeze);
-	const autoFilter = autoFilterXml(sheet.name, sheet.autoFilter);
-	const sheetProtection = sheetProtectionXml(sheet.name, sheet.protection);
-	const printSetup = printSetupXml(sheet.name, sheet);
-	const mergeCells = mergeCellsXml(sheet.name, sheet.merges);
+	const cols = colsXml(sheetName, ownValue(sheet, "columns"));
+	const rowAttrs = rowAttrsMap(sheetName, ownValue(sheet, "rowProperties"));
+	const sheetViews = sheetViewsXml(sheetName, ownValue(sheet, "freeze"));
+	const autoFilter = autoFilterXml(sheetName, ownValue(sheet, "autoFilter"));
+	const sheetProtection = sheetProtectionXml(sheetName, ownValue(sheet, "protection"));
+	const printSetup = printSetupXml(sheetName, sheet);
+	const mergeCells = mergeCellsXml(sheetName, ownValue(sheet, "merges"));
 	const conditionalFormatting = conditionalFormattingXml(
-		sheet.name,
-		sheet.conditionalFormatting,
+		sheetName,
+		ownValue(sheet, "conditionalFormatting"),
 		styles,
 	);
-	const dataValidations = dataValidationsXml(sheet.name, sheet.dataValidations);
-	const links = hyperlinksXml(sheet.name, sheet.hyperlinks);
-	const comments = commentsParts(sheet.name, sheet.comments);
-	const pictures = imageParts(sheet.name, sheet.images, media);
+	const dataValidations = dataValidationsXml(sheetName, ownValue(sheet, "dataValidations"));
+	const links = hyperlinksXml(sheetName, ownValue(sheet, "hyperlinks"));
+	const comments = commentsParts(sheetName, ownValue(sheet, "comments"));
+	const pictures = imageParts(sheetName, ownValue(sheet, "images"), media);
 	// The footer (which carries <tableParts>) is built BEFORE the rows stream, so the header row isn't
 	// available — column names come from `tables[i].columns` here (no header resolver).
-	const tables = buildTables(sheet.name, sheet.tables, undefined, tableCtx, styles);
+	const tables = buildTables(sheetName, ownValue(sheet, "tables"), undefined, tableCtx, styles);
 
 	// Relationships + the body plumbing that references them — the SAME builder the buffered writer
 	// uses, so the two can't drift on rel order, rId allocation, or the drawing/legacyDrawing refs.
@@ -2332,8 +2373,8 @@ export function streamWorksheet(
 
 	const header = `${XML_DECL}\n<worksheet xmlns="${NS_MAIN}"${nsR}>${sheetViews}${cols}<sheetData>`;
 	const footer = `</sheetData>${sheetProtection}${autoFilter.xml}${mergeCells}${conditionalFormatting}${dataValidations}${links.xml}${printSetup}${drawing}${legacyDrawing}${tableParts}</worksheet>`;
-	const chunks = streamRowChunks(sheet.name, rows, header, footer, rowAttrs, date1904, styles);
-	return {
+	const chunks = streamRowChunks(sheetName, rows, header, footer, rowAttrs, date1904, styles);
+	const result: StreamedWorksheet = {
 		chunks,
 		rels,
 		...(comments !== undefined
@@ -2345,4 +2386,6 @@ export function streamWorksheet(
 		...(tables !== undefined ? { tables } : {}),
 		...(autoFilter.ref !== undefined ? { autoFilterRef: autoFilter.ref } : {}),
 	};
+	Object.setPrototypeOf(result, null);
+	return result;
 }

@@ -10,7 +10,7 @@ import {
 } from "../ooxml/name";
 import type { DefinedName } from "../ooxml/workbook";
 import { encodeXstring } from "../ooxml/xstring";
-import { escapeAttr, escapeText, isPlainRecord, isXmlSafe } from "./xml";
+import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, ownValue } from "./xml";
 
 /**
  * Serialize trusted defined names for workbook.xml.
@@ -22,8 +22,10 @@ export function definedNamesXml(names: readonly DefinedName[]): string {
 		.map((dn) => {
 			// CT_DefinedName attribute order: name, …, localSheetId, hidden. Both @name and the
 			// complete logical formula use ST_Xstring before their XML context is escaped.
-			const scope = dn.localSheetId !== undefined ? ` localSheetId="${dn.localSheetId}"` : "";
-			const hidden = dn.hidden ? ' hidden="1"' : "";
+			// Validation omits absent optional fields; they must stay absent during emission too.
+			const localSheetId = ownValue(dn, "localSheetId");
+			const scope = localSheetId !== undefined ? ` localSheetId="${localSheetId}"` : "";
+			const hidden = ownValue(dn, "hidden") ? ' hidden="1"' : "";
 			return `<definedName name="${escapeAttr(encodeXstring(dn.name))}"${scope}${hidden}>${escapeText(encodeXstring(dn.refersTo))}</definedName>`;
 		})
 		.join("");
@@ -65,7 +67,7 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 	// XML-safe, so the NUL separator cannot merge distinct scope/name pairs.
 	const seen = new Set<string>();
 	for (let i = 0; i < raw.length; i++) {
-		const entry = raw[i];
+		const entry = ownValue(raw, i);
 		if (!isPlainRecord(entry)) {
 			throw new XlsxError("invalid-input", `definedNames[${i}] must be an object`);
 		}
@@ -82,10 +84,10 @@ export function validateDefinedNames(raw: unknown, sheetCount: number): DefinedN
 				);
 			}
 		}
-		const name = entry.name;
-		const refersTo = entry.refersTo;
-		const localSheetId = entry.localSheetId;
-		const hidden = entry.hidden;
+		const name = ownValue(entry, "name");
+		const refersTo = ownValue(entry, "refersTo");
+		const localSheetId = ownValue(entry, "localSheetId");
+		const hidden = ownValue(entry, "hidden");
 		if (typeof name !== "string") {
 			throw new XlsxError("invalid-input", `definedNames[${i}].name must be a string`);
 		}

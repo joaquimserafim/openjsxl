@@ -16,6 +16,8 @@ import { createTableContext, streamWorksheet } from "./sheet";
 import { type StreamPart, streamZip } from "./stream-zip";
 import { createStyleRegistry } from "./styles";
 import type { StreamSheetInput, StreamWorkbookInput, WriteOptions } from "./types";
+import { snapshotSheets } from "./workbook";
+import { ownValue } from "./xml";
 
 // streamXlsx (F5.1) — the constant-memory sibling of writeXlsx. It emits the same OPC parts (built by
 // the shared helpers in parts.ts), but each worksheet's rows flow through the streaming zip instead
@@ -30,7 +32,7 @@ import type { StreamSheetInput, StreamWorkbookInput, WriteOptions } from "./type
 
 // The streaming analogue of the buffered writer's Array.isArray(rows) check: rows must be iterable
 // (a materialized array, or a sync/async iterable such as a DB cursor).
-function isIterableRows(rows: unknown): boolean {
+function isIterableRows(rows: unknown): rows is StreamSheetInput["rows"] {
 	if (rows === null || typeof rows !== "object") return false;
 	const r = rows as { [Symbol.iterator]?: unknown; [Symbol.asyncIterator]?: unknown };
 	return (
@@ -46,11 +48,11 @@ async function* buildStreamParts(
 	// read the caller's `sheets` ONCE (single-read TOCTOU, matching writeXlsx), and validate and emit
 	// from that single array and the resolved names/states.
 	requireWorkbookObject(workbook);
-	const sheets = workbook.sheets;
+	const sheets = snapshotSheets(ownValue(workbook, "sheets"));
 	const { states, names } = validateSheetMeta(sheets);
 	const rows: StreamSheetInput["rows"][] = [];
 	for (let i = 0; i < sheets.length; i++) {
-		const sheetRows = (sheets[i] as StreamSheetInput).rows;
+		const sheetRows = ownValue(sheets[i] as StreamSheetInput, "rows");
 		if (!isIterableRows(sheetRows)) {
 			throw new XlsxError(
 				"invalid-input",
@@ -62,17 +64,18 @@ async function* buildStreamParts(
 	}
 	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
 	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
-	const inputDate1904 = workbook.date1904;
+	const inputDate1904 = ownValue(workbook, "date1904");
 	if (inputDate1904 !== undefined && typeof inputDate1904 !== "boolean") {
 		throw new XlsxError("invalid-input", "workbook.date1904 must be a boolean when present");
 	}
-	const date1904 = options?.date1904 ?? inputDate1904 ?? false;
+	const optionDate1904 = options == null ? undefined : ownValue(options, "date1904");
+	const date1904 = optionDate1904 ?? inputDate1904 ?? false;
 	// Read the caller's optional carried theme ONCE (single-read TOCTOU, matching writeXlsx).
-	const carriedTheme = workbook.themeXml;
+	const carriedTheme = ownValue(workbook, "themeXml");
 	// Read + validate the optional defined names ONCE (F10.1), matching writeXlsx — absent → byte-identical.
-	const definedNames = validateDefinedNames(workbook.definedNames, names.length);
+	const definedNames = validateDefinedNames(ownValue(workbook, "definedNames"), names.length);
 	// Read the caller's optional workbook protection ONCE (single-read TOCTOU), matching writeXlsx.
-	const protection = workbook.protection;
+	const protection = ownValue(workbook, "protection");
 	const styles = createStyleRegistry();
 	const media = createMediaRegistry();
 	const tableCtx = createTableContext();
@@ -90,6 +93,7 @@ async function* buildStreamParts(
 			styles,
 			media,
 			tableCtx,
+			names[i] as string,
 		),
 	);
 

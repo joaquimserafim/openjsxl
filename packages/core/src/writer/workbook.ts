@@ -16,6 +16,7 @@ import {
 import { createTableContext, worksheetXml } from "./sheet";
 import { createStyleRegistry } from "./styles";
 import type { SheetInput, WorkbookInput, WriteOptions } from "./types";
+import { ownValue } from "./xml";
 import { writeZip, type ZipInput } from "./zip";
 
 // writeXlsx — the public workbook writer (F3.2, styled cells F4.2). Given a workbook described as
@@ -38,10 +39,47 @@ import { writeZip, type ZipInput } from "./zip";
 // "value extractor" trade-off: a touch more bytes on disk for a single streaming pass and no table.
 // The per-part XML builders live in parts.ts, shared verbatim with the streaming writer (F5.1).
 
-// Validate the workbook's sheets (already read once by the caller): shared name/state checks
-// (parts.ts) plus the buffered writer's own requirement that each sheet's `rows` is a materialized
-// array (the streaming writer accepts an iterable instead). Returns the resolved names, visibility
-// states, and captured row arrays for single-read emission.
+// Cache each own sheet-array item on first access. Validation may stop at an earlier bad sheet;
+// do not invoke a later caller getter until the validator actually reaches that item.
+export function snapshotSheets<T>(input: readonly T[] | undefined): T[] {
+	if (!Array.isArray(input)) {
+		throw new XlsxError("invalid-input", "a workbook needs at least one sheet");
+	}
+	const source = input;
+	const length = source.length;
+	if (!Number.isInteger(length) || length <= 0 || length > 0xffffffff) {
+		throw new XlsxError("invalid-input", "a workbook needs at least one sheet");
+	}
+	const sheets: T[] = [];
+	function prepare(i: number): void {
+		Object.defineProperty(sheets, i, {
+			get() {
+				const value = ownValue(source, i);
+				// An absent index stays undefined for validation. Defining the cached value directly
+				// also avoids inherited array setters and prevents later reads of the caller getter.
+				Object.defineProperty(sheets, i, {
+					value,
+					writable: true,
+					enumerable: true,
+					configurable: true,
+				});
+				// Prepare only the next item. A huge sparse array must fail at its first absent
+				// sheet without allocating one getter for every trailing hole.
+				if (i + 1 < length) prepare(i + 1);
+				return value;
+			},
+			enumerable: true,
+			configurable: true,
+		});
+	}
+	prepare(0);
+	// The accessor puts this array in sparse storage before extending its length. new Array(length)
+	// can eagerly allocate millions of unused slots before the first sheet is even validated.
+	sheets.length = length;
+	return sheets;
+}
+
+// Validate names/states and the buffered writer's materialized rows, retaining each row array.
 function validate(sheets: readonly SheetInput[]): {
 	states: SheetState[];
 	names: string[];
@@ -50,7 +88,7 @@ function validate(sheets: readonly SheetInput[]): {
 	const { states, names } = validateSheetMeta(sheets);
 	const rows: SheetInput["rows"][] = [];
 	for (let i = 0; i < sheets.length; i++) {
-		const sheetRows = (sheets[i] as SheetInput).rows;
+		const sheetRows = ownValue(sheets[i] as SheetInput, "rows");
 		if (!Array.isArray(sheetRows)) {
 			throw new XlsxError("invalid-input", `sheet "${names[i]}": rows must be an array`);
 		}
@@ -73,23 +111,24 @@ export async function writeXlsx(
 	// read the caller's `sheets` ONCE (a getter/Proxy must not vary it between validation and emission),
 	// validate that single array, and emit from it and the resolved names/states.
 	requireWorkbookObject(workbook);
-	const sheets = workbook.sheets;
+	const sheets = snapshotSheets(ownValue(workbook, "sheets"));
 	const { states, names, rows } = validate(sheets);
 	// The date system: an explicit option wins, else the input's own flag (what the bridge carries
 	// from Workbook.date1904 — F11.10), else the 1900 default. Read the input flag ONCE (TOCTOU).
-	const inputDate1904 = workbook.date1904;
+	const inputDate1904 = ownValue(workbook, "date1904");
 	if (inputDate1904 !== undefined && typeof inputDate1904 !== "boolean") {
 		throw new XlsxError("invalid-input", "workbook.date1904 must be a boolean when present");
 	}
-	const date1904 = options?.date1904 ?? inputDate1904 ?? false;
+	const optionDate1904 = options == null ? undefined : ownValue(options, "date1904");
+	const date1904 = optionDate1904 ?? inputDate1904 ?? false;
 	// Read the caller's optional carried theme ONCE too. It only matters if a style needs a theme part.
-	const carriedTheme = workbook.themeXml;
+	const carriedTheme = ownValue(workbook, "themeXml");
 	// Read the caller's optional defined names ONCE (single-read TOCTOU) and validate into the trusted
 	// array workbook.xml emits (F10.1). Absent → [] → no <definedNames> → byte-identical output.
-	const definedNames = validateDefinedNames(workbook.definedNames, sheets.length);
+	const definedNames = validateDefinedNames(ownValue(workbook, "definedNames"), sheets.length);
 	// Read the caller's optional workbook protection ONCE (single-read TOCTOU); validated + emitted by
 	// workbookXml. Absent → no <workbookProtection> → byte-identical output.
-	const protection = workbook.protection;
+	const protection = ownValue(workbook, "protection");
 
 	// Render every worksheet up front — this is also where invalid cell values and styles surface —
 	// interning every style into one shared registry. What the registry saw decides whether
@@ -103,7 +142,16 @@ export async function writeXlsx(
 	const tableCtx = createTableContext();
 	const worksheets = sheets.map((sheet, i) =>
 		// One captured row array per validated sheet, in the same order.
-		worksheetXml(sheet, rows[i] as SheetInput["rows"], i, date1904, styles, media, tableCtx),
+		worksheetXml(
+			sheet,
+			rows[i] as SheetInput["rows"],
+			i,
+			date1904,
+			styles,
+			media,
+			tableCtx,
+			names[i] as string,
+		),
 	);
 	const needStyles = styles.needed();
 	const needTheme = styles.usesTheme();

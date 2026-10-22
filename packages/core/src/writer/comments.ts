@@ -2,7 +2,7 @@ import { parseCanonicalCell } from "../ooxml/a1";
 import { encodeXstring } from "../ooxml/xstring";
 import type { Comment } from "../types";
 import { checkKeys, sheetInvalid, shortened } from "./sheet-validation";
-import { escapeText, isPlainRecord, isXmlSafe, preserveAttr } from "./xml";
+import { escapeText, isPlainRecord, isXmlSafe, ownValue, preserveAttr } from "./xml";
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -60,12 +60,12 @@ export function commentsParts(
 		readonly col: number;
 	}[] = [];
 	for (let i = 0; i < comments.length; i++) {
-		const raw = comments[i] as unknown;
+		const raw: unknown = ownValue(comments, i);
 		const what = `comments[${i}]`;
 		if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what} must be an object`);
 		checkKeys(sheetName, what, raw, ["ref", "author", "text"]);
 
-		const ref = raw.ref;
+		const ref = ownValue(raw, "ref");
 		if (typeof ref !== "string") sheetInvalid(sheetName, `${what}.ref must be a string`);
 		const cell = parseCanonicalCell(ref);
 		if (cell === undefined) {
@@ -75,11 +75,11 @@ export function commentsParts(
 			);
 		}
 
-		const rawText = raw.text;
+		const rawText = ownValue(raw, "text");
 		if (typeof rawText !== "string") sheetInvalid(sheetName, `${what}.text must be a string`);
 		const text = encodeXstring(rawText);
 
-		const rawAuthor = raw.author;
+		const rawAuthor = ownValue(raw, "author");
 		let key: string;
 		if (rawAuthor === undefined) key = "";
 		else {

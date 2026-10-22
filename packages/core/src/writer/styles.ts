@@ -25,7 +25,7 @@ import type {
 	PatternType,
 	VerticalAlignment,
 } from "../types";
-import { escapeAttr, isXmlSafe } from "./xml";
+import { escapeAttr, isXmlSafe, ownValue } from "./xml";
 
 // The writer's style registry (F4.2): validates CellStyle input, interns each distinct component
 // (font / fill / border / alignment) and cell format (xf) STRUCTURALLY — identical styles collapse
@@ -103,23 +103,33 @@ function checkKeys(
 // the component normalizes to nothing. The normalized object is both the intern identity (its
 // canonical key) and the emission source.
 
+// Only fresh internal records pass through here. A null prototype prevents inherited setters
+// during construction and inherited optional fields/toJSON during emission and interning.
+function normalized<T extends object>(value: T): T {
+	Object.setPrototypeOf(value, null);
+	return value;
+}
+
 // NOTE for every validator below: each input property is read EXACTLY ONCE into a local, and the
 // normalized object is built from the locals. A getter (or Proxy) could otherwise return a valid
 // value for the check reads and something else — up to raw markup — for the emission read
 // (adversarial review demonstrated attribute injection into styles.xml that way).
 export function validateColor(fail: Fail, what: string, raw: unknown): Color {
 	if (!isPlainObject(raw)) fail(`${what} must be a color object`);
-	if ("rgb" in raw) {
+	if (Object.hasOwn(raw, "rgb")) {
 		checkKeys(fail, what, raw, ["rgb"]);
-		const rgb = raw.rgb;
+		const rgb = ownValue(raw, "rgb");
 		if (typeof rgb !== "string" || !HEX_COLOR.test(rgb)) {
-			fail(`${what}.rgb must be 6- or 8-digit hex (got ${JSON.stringify(rgb)})`);
+			// Invalid objects may inherit toJSON, and BigInt cannot be JSON-serialized. Describe
+			// their type without running caller code while constructing the typed error.
+			const got = typeof rgb === "string" ? JSON.stringify(rgb) : typeof rgb;
+			fail(`${what}.rgb must be 6- or 8-digit hex (got ${got})`);
 		}
-		return { rgb };
+		return normalized({ rgb });
 	}
-	if ("theme" in raw) {
+	if (Object.hasOwn(raw, "theme")) {
 		checkKeys(fail, what, raw, ["theme", "tint"]);
-		const theme = raw.theme;
+		const theme = ownValue(raw, "theme");
 		if (
 			typeof theme !== "number" ||
 			!Number.isInteger(theme) ||
@@ -128,16 +138,16 @@ export function validateColor(fail: Fail, what: string, raw: unknown): Color {
 		) {
 			fail(`${what}.theme must be an integer between 0 and ${MAX_COLOR_INDEX}`);
 		}
-		const tint = raw.tint;
-		if (tint === undefined) return { theme };
+		const tint = ownValue(raw, "tint");
+		if (tint === undefined) return normalized({ theme });
 		if (typeof tint !== "number" || !Number.isFinite(tint)) {
 			fail(`${what}.tint must be a finite number`);
 		}
-		return { theme, tint };
+		return normalized({ theme, tint });
 	}
-	if ("indexed" in raw) {
+	if (Object.hasOwn(raw, "indexed")) {
 		checkKeys(fail, what, raw, ["indexed"]);
-		const indexed = raw.indexed;
+		const indexed = ownValue(raw, "indexed");
 		if (
 			typeof indexed !== "number" ||
 			!Number.isInteger(indexed) ||
@@ -146,12 +156,12 @@ export function validateColor(fail: Fail, what: string, raw: unknown): Color {
 		) {
 			fail(`${what}.indexed must be an integer between 0 and ${MAX_COLOR_INDEX}`);
 		}
-		return { indexed };
+		return normalized({ indexed });
 	}
-	if ("auto" in raw) {
+	if (Object.hasOwn(raw, "auto")) {
 		checkKeys(fail, what, raw, ["auto"]);
-		if (raw.auto !== true) fail(`${what}.auto must be true`);
-		return { auto: true };
+		if (ownValue(raw, "auto") !== true) fail(`${what}.auto must be true`);
+		return normalized({ auto: true });
 	}
 	fail(`${what} needs one of rgb / theme / indexed / auto`);
 }
@@ -175,8 +185,8 @@ function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
 		underline?: "single" | "double";
 		strike?: boolean;
 		color?: Color;
-	} = {};
-	const name = raw.name;
+	} = normalized({});
+	const name = ownValue(raw, "name");
 	if (name !== undefined) {
 		// The one free-form string in the whole style path — gate it like cell strings and sheet
 		// names, or a control character / lone surrogate would corrupt styles.xml itself.
@@ -190,7 +200,7 @@ function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
 		}
 		out.name = name;
 	}
-	const size = raw.size;
+	const size = ownValue(raw, "size");
 	if (size !== undefined) {
 		if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
 			fail("style.font.size must be a positive number");
@@ -198,13 +208,13 @@ function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
 		out.size = size;
 	}
 	for (const flag of ["bold", "italic", "strike"] as const) {
-		const value = raw[flag];
+		const value = ownValue(raw, flag);
 		if (value !== undefined) {
 			if (typeof value !== "boolean") fail(`style.font.${flag} must be a boolean`);
 			if (value) out[flag] = true; // false is the default — normalizes away
 		}
 	}
-	const underline = raw.underline;
+	const underline = ownValue(raw, "underline");
 	if (underline !== undefined) {
 		if (underline !== "single" && underline !== "double") {
 			fail(
@@ -213,7 +223,7 @@ function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
 		}
 		out.underline = underline;
 	}
-	const color = raw.color;
+	const color = ownValue(raw, "color");
 	if (color !== undefined) out.color = validateColor(fail, "style.font.color", color);
 	return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -221,14 +231,14 @@ function validateFont(fail: Fail, raw: unknown): FontStyle | undefined {
 function validateFill(fail: Fail, raw: unknown): FillStyle | undefined {
 	if (!isPlainObject(raw)) fail("style.fill must be an object");
 	checkKeys(fail, "style.fill", raw, ["patternType", "fgColor", "bgColor"]);
-	const patternType = raw.patternType;
+	const patternType = ownValue(raw, "patternType");
 	if (typeof patternType !== "string" || !PATTERN_TYPES.has(patternType as never)) {
 		fail(`style.fill.patternType must be one of the OOXML pattern types`);
 	}
-	const rawFg = raw.fgColor;
+	const rawFg = ownValue(raw, "fgColor");
 	const fgColor =
 		rawFg === undefined ? undefined : validateColor(fail, "style.fill.fgColor", rawFg);
-	const rawBg = raw.bgColor;
+	const rawBg = ownValue(raw, "bgColor");
 	const bgColor =
 		rawBg === undefined ? undefined : validateColor(fail, "style.fill.bgColor", rawBg);
 	if (patternType === "none") {
@@ -238,9 +248,9 @@ function validateFill(fail: Fail, raw: unknown): FillStyle | undefined {
 		}
 		return undefined; // no fill at all — interns to the reserved fill 0
 	}
-	const out: { patternType: PatternType; fgColor?: Color; bgColor?: Color } = {
+	const out: { patternType: PatternType; fgColor?: Color; bgColor?: Color } = normalized({
 		patternType: patternType as PatternType,
-	};
+	});
 	if (fgColor !== undefined) out.fgColor = fgColor;
 	if (bgColor !== undefined) out.bgColor = bgColor;
 	return out;
@@ -249,16 +259,16 @@ function validateFill(fail: Fail, raw: unknown): FillStyle | undefined {
 function validateEdge(fail: Fail, what: string, raw: unknown): BorderEdge {
 	if (!isPlainObject(raw)) fail(`${what} must be an object`);
 	checkKeys(fail, what, raw, ["style", "color"]);
-	const style = raw.style;
+	const style = ownValue(raw, "style");
 	if (typeof style !== "string" || !BORDER_LINE_STYLES.has(style as never)) {
 		fail(`${what}.style must be one of the OOXML border line styles`);
 	}
-	const color = raw.color;
-	if (color === undefined) return { style: style as BorderLineStyle };
-	return {
+	const color = ownValue(raw, "color");
+	if (color === undefined) return normalized({ style: style as BorderLineStyle });
+	return normalized({
 		style: style as BorderLineStyle,
 		color: validateColor(fail, `${what}.color`, color),
-	};
+	});
 }
 
 function validateBorder(fail: Fail, raw: unknown): BorderStyle | undefined {
@@ -266,9 +276,9 @@ function validateBorder(fail: Fail, raw: unknown): BorderStyle | undefined {
 	// Diagonal borders are deferred (they need diagonalUp/Down flags the model doesn't carry).
 	checkKeys(fail, "style.border", raw, ["top", "right", "bottom", "left"]);
 	const out: { top?: BorderEdge; right?: BorderEdge; bottom?: BorderEdge; left?: BorderEdge } =
-		{};
+		normalized({});
 	for (const edge of ["top", "right", "bottom", "left"] as const) {
-		const value = raw[edge];
+		const value = ownValue(raw, edge);
 		if (value !== undefined) out[edge] = validateEdge(fail, `style.border.${edge}`, value);
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
@@ -277,11 +287,11 @@ function validateBorder(fail: Fail, raw: unknown): BorderStyle | undefined {
 function validateProtection(fail: Fail, raw: unknown): CellProtection | undefined {
 	if (!isPlainObject(raw)) fail("style.protection must be an object");
 	checkKeys(fail, "style.protection", raw, ["locked", "hidden"]);
-	const out: { locked?: boolean; hidden?: boolean } = {};
+	const out: { locked?: boolean; hidden?: boolean } = normalized({});
 	// Both flags carry their EXACT value (unlike alignment's true-only flags): `locked: false` is
 	// meaningful — an explicitly UNLOCKED cell, editable while the sheet is protected.
 	for (const flag of ["locked", "hidden"] as const) {
-		const value = raw[flag];
+		const value = ownValue(raw, flag);
 		if (value !== undefined) {
 			if (typeof value !== "boolean") fail(`style.protection.${flag} must be a boolean`);
 			out[flag] = value;
@@ -309,15 +319,15 @@ function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
 		shrinkToFit?: boolean;
 		indent?: number;
 		textRotation?: number;
-	} = {};
-	const horizontal = raw.horizontal;
+	} = normalized({});
+	const horizontal = ownValue(raw, "horizontal");
 	if (horizontal !== undefined) {
 		if (typeof horizontal !== "string" || !H_ALIGNMENTS.has(horizontal as never)) {
 			fail("style.alignment.horizontal is not a valid value");
 		}
 		out.horizontal = horizontal as HorizontalAlignment;
 	}
-	const vertical = raw.vertical;
+	const vertical = ownValue(raw, "vertical");
 	if (vertical !== undefined) {
 		if (typeof vertical !== "string" || !V_ALIGNMENTS.has(vertical as never)) {
 			fail("style.alignment.vertical is not a valid value");
@@ -325,13 +335,13 @@ function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
 		out.vertical = vertical as VerticalAlignment;
 	}
 	for (const flag of ["wrapText", "shrinkToFit"] as const) {
-		const value = raw[flag];
+		const value = ownValue(raw, flag);
 		if (value !== undefined) {
 			if (typeof value !== "boolean") fail(`style.alignment.${flag} must be a boolean`);
 			if (value) out[flag] = true;
 		}
 	}
-	const indent = raw.indent;
+	const indent = ownValue(raw, "indent");
 	if (indent !== undefined) {
 		if (
 			typeof indent !== "number" ||
@@ -343,7 +353,7 @@ function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
 		}
 		if (indent > 0) out.indent = indent;
 	}
-	const textRotation = raw.textRotation;
+	const textRotation = ownValue(raw, "textRotation");
 	if (textRotation !== undefined) {
 		if (
 			typeof textRotation !== "number" ||
@@ -364,17 +374,17 @@ function validateAlignment(fail: Fail, raw: unknown): Alignment | undefined {
 function validateDxfFill(fail: Fail, raw: unknown): DxfFill | undefined {
 	if (!isPlainObject(raw)) fail("dxf.fill must be an object");
 	checkKeys(fail, "dxf.fill", raw, ["patternType", "fgColor", "bgColor"]);
-	const out: { patternType?: PatternType; fgColor?: Color; bgColor?: Color } = {};
-	const patternType = raw.patternType;
+	const out: { patternType?: PatternType; fgColor?: Color; bgColor?: Color } = normalized({});
+	const patternType = ownValue(raw, "patternType");
 	if (patternType !== undefined) {
 		if (typeof patternType !== "string" || !PATTERN_TYPES.has(patternType as never)) {
 			fail("dxf.fill.patternType must be one of the OOXML pattern types");
 		}
 		out.patternType = patternType as PatternType;
 	}
-	const rawFg = raw.fgColor;
+	const rawFg = ownValue(raw, "fgColor");
 	if (rawFg !== undefined) out.fgColor = validateColor(fail, "dxf.fill.fgColor", rawFg);
-	const rawBg = raw.bgColor;
+	const rawBg = ownValue(raw, "bgColor");
 	if (rawBg !== undefined) out.bgColor = validateColor(fail, "dxf.fill.bgColor", rawBg);
 	return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -510,7 +520,7 @@ export function createStyleRegistry(): StyleRegistry {
 	// table pairs the emitted XML per slot with an intern map from canonical key → slot.
 	const fonts: string[] = ['<font><sz val="11"/><name val="Calibri"/></font>'];
 	const fontIndex = new Map<string, number>([
-		[keyOf({ name: "Calibri", size: 11 }), 0],
+		[keyOf(normalized({ name: "Calibri", size: 11 })), 0],
 		["", 0],
 	]);
 
@@ -520,7 +530,7 @@ export function createStyleRegistry(): StyleRegistry {
 	];
 	const fillIndex = new Map<string, number>([
 		["", 0],
-		[keyOf({ patternType: "gray125" }), 1],
+		[keyOf(normalized({ patternType: "gray125" })), 1],
 	]);
 
 	const borders: string[] = ["<border/>"];
@@ -626,14 +636,14 @@ export function createStyleRegistry(): StyleRegistry {
 		const record = dxf;
 		checkKeys(fail, "dxf", record, ["numberFormat", "font", "fill", "border", "alignment"]);
 		// Validate + normalize each component (single-read TOCTOU, like the cell-style path).
-		const normalized: {
+		const output: {
 			numberFormat?: string;
 			font?: FontStyle;
 			fill?: DxfFill;
 			border?: BorderStyle;
 			alignment?: Alignment;
-		} = {};
-		const rawCode = record.numberFormat;
+		} = normalized({});
+		const rawCode = ownValue(record, "numberFormat");
 		if (rawCode !== undefined) {
 			if (typeof rawCode !== "string" || rawCode.length === 0) {
 				fail("dxf.numberFormat must be a non-empty format code string");
@@ -641,43 +651,43 @@ export function createStyleRegistry(): StyleRegistry {
 			if (!isXmlSafe(rawCode)) {
 				fail("dxf.numberFormat contains a character not allowed in XML");
 			}
-			normalized.numberFormat = rawCode;
+			output.numberFormat = rawCode;
 		}
-		const font = record.font;
+		const font = ownValue(record, "font");
 		if (font !== undefined) {
 			const v = validateFont(fail, font);
-			if (v !== undefined) normalized.font = v;
+			if (v !== undefined) output.font = v;
 		}
-		const fill = record.fill;
+		const fill = ownValue(record, "fill");
 		if (fill !== undefined) {
 			const v = validateDxfFill(fail, fill);
 			if (v !== undefined) {
-				normalized.fill = v;
+				output.fill = v;
 				if (colorUsesTheme(v.fgColor) || colorUsesTheme(v.bgColor)) themeUsed = true;
 			}
 		}
-		const border = record.border;
+		const border = ownValue(record, "border");
 		if (border !== undefined) {
 			const v = validateBorder(fail, border);
 			if (v !== undefined) {
-				normalized.border = v;
+				output.border = v;
 				for (const edge of [v.top, v.right, v.bottom, v.left]) {
 					if (edge !== undefined && colorUsesTheme(edge.color)) themeUsed = true;
 				}
 			}
 		}
-		const alignment = record.alignment;
+		const alignment = ownValue(record, "alignment");
 		if (alignment !== undefined) {
 			const v = validateAlignment(fail, alignment);
-			if (v !== undefined) normalized.alignment = v;
+			if (v !== undefined) output.alignment = v;
 		}
-		if (colorUsesTheme(normalized.font?.color)) themeUsed = true;
+		if (colorUsesTheme(output.font?.color)) themeUsed = true;
 
-		const key = keyOf(normalized);
+		const key = keyOf(output);
 		let index = dxfIndex.get(key);
 		if (index === undefined) {
 			index = dxfs.length;
-			dxfs.push(dxfXml(normalized));
+			dxfs.push(dxfXml(output));
 			dxfIndex.set(key, index);
 		}
 		return index;
@@ -702,7 +712,7 @@ export function createStyleRegistry(): StyleRegistry {
 				"protection",
 			]);
 			// Single-read each component (see the validator note above) before validating it.
-			const rawCode = style.numberFormat;
+			const rawCode = ownValue(style, "numberFormat");
 			if (rawCode !== undefined) {
 				// A format CODE string — what Excel's Custom dialog shows and numberFormat(ref)
 				// returns. Ids are file-internal and never part of the API.
@@ -717,17 +727,17 @@ export function createStyleRegistry(): StyleRegistry {
 				}
 				numFmtCode = rawCode;
 			}
-			const font = style.font;
+			const font = ownValue(style, "font");
 			fontId = internFont(font === undefined ? undefined : validateFont(fail, font));
-			const fill = style.fill;
+			const fill = ownValue(style, "fill");
 			fillId = internFill(fill === undefined ? undefined : validateFill(fail, fill));
-			const border = style.border;
+			const border = ownValue(style, "border");
 			borderId = internBorder(
 				border === undefined ? undefined : validateBorder(fail, border),
 			);
-			const align = style.alignment;
+			const align = ownValue(style, "alignment");
 			alignment = align === undefined ? undefined : validateAlignment(fail, align);
-			const prot = style.protection;
+			const prot = ownValue(style, "protection");
 			protection = prot === undefined ? undefined : validateProtection(fail, prot);
 		}
 		// A user code wins even on a Date — the implicit date format (id 14) applies only when the
