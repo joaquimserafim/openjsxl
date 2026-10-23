@@ -8,6 +8,8 @@ import { machineStamp } from "./machine.mjs";
 const require = createRequire(import.meta.url);
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const BENCH = fileURLToPath(new URL("../package.json", import.meta.url));
+// The workspace facade is read from its source manifest: resolving its entry would need a build.
+const WORKSPACE_FACADE = fileURLToPath(new URL("../../openjsxl/package.json", import.meta.url));
 export const PROVENANCE_VERSION = 1;
 export const FIXTURE_REVISION = 1;
 
@@ -83,7 +85,13 @@ export function librarySnapshot(lockfile = readFileSync(join(ROOT, "pnpm-lock.ya
 		{ id: "xlsx", name: "SheetJS", packageName: "xlsx", source: manifest.devDependencies.xlsx },
 	];
 	return libraries.map((library) => {
-		const { pkg, path } = installedPackage(library.packageName);
+		const { pkg, path } =
+			library.source === "workspace"
+				? {
+						pkg: JSON.parse(readFileSync(WORKSPACE_FACADE, "utf8")),
+						path: WORKSPACE_FACADE,
+					}
+				: installedPackage(library.packageName);
 		const overrides =
 			library.id === "exceljs"
 				? { uuid: createRequire(path)("uuid/package.json").version }

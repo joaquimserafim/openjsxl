@@ -34,7 +34,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - run: pnpm install --frozen-lockfile
+      - id: install
+        run: pnpm install --frozen-lockfile
 
       - name: Workspace dependency audit (nonblocking triage)
         id: workspace_audit
@@ -66,14 +67,20 @@ jobs:
             echo '::warning title=Workspace dependency audit requires triage::Advisories were found or the audit could not complete. Review the workspace audit log and docs/dependency-audit.md.'
           fi
 
+      # Code checks still run after a failed audit, which still fails the job, so advisories or an
+      # audit-endpoint outage never hide their results. Test stays before Build: tests run from source.
       - name: Lint (Biome)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm check
 
       - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm typecheck
 
       - name: Test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm test
 
       - name: Build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm build
