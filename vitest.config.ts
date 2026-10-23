@@ -35,6 +35,7 @@ export default defineConfig({
 	test: {
 		include: ["packages/*/src/**/*.test.ts", "scripts/**/*.test.ts"],
 		// `pnpm test` is the full local/CI gate. Focused direct Vitest and the two-test long fuzz run
-		// deliberately omit the 900-test floor, while no-test discovery still fails for every command.
+		// deliberately omit the executed-test floor and skip allowlist, while no-test discovery still
+		// fails for every command.
 	},
 });

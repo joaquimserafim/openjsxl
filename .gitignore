@@ -18,6 +18,10 @@ IMPLEMENTATION.md
 # Local operating contract for agents/humans (kept local, not published to the remote)
 CLAUDE.md
 
+# Machine-local agent settings. Listed here because Biome reads the repo ignore files but not a
+# global git excludes file, so `pnpm biome check .` stays hermetic on every machine.
+.claude/settings.local.json
+
 # Local competitive-analysis snapshot (not tracked, never published)
 COMPETITIVE-ANALYSIS.md
 
