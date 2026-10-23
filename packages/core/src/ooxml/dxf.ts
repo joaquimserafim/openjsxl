@@ -12,7 +12,14 @@ import type {
 } from "../types";
 import { isXmlSafe, localName } from "../utils";
 import { tokenize } from "../xml";
-import { BORDER_LINE_STYLES, boolAttr, PATTERN_TYPES, parseAlignment, parseColor } from "./styles";
+import {
+	BORDER_LINE_STYLES,
+	boolAttr,
+	MAX_NUMBER_FORMAT_LEN,
+	PATTERN_TYPES,
+	parseAlignment,
+	parseColor,
+} from "./styles";
 
 // Differential-style (`<dxfs>`) parser (F9.3). A conditional-formatting rule (or a table region)
 // references a dxf by a numeric `dxfId` — an index into styles.xml's `<dxfs>` table. This reads that
@@ -140,8 +147,16 @@ export function parseDxfs(xml: string): DxfStyle[] {
 				}
 			} else if (name === "numFmt") {
 				const code = token.attrs.formatCode;
-				// Match the cell-style model: carry the CODE string, and only when it is writable.
-				if (code !== undefined && code !== "" && isXmlSafe(code)) dxf.numberFormat = code;
+				// Match the cell-style model: carry the CODE string, and only when it is writable
+				// (XML-safe and within Excel's length limit, F11.50).
+				if (
+					code !== undefined &&
+					code !== "" &&
+					code.length <= MAX_NUMBER_FORMAT_LEN &&
+					isXmlSafe(code)
+				) {
+					dxf.numberFormat = code;
+				}
 			} else if (name === "fill") {
 				dxf.fill = {};
 				inFill = !token.selfClosing;

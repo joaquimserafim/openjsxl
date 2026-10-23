@@ -116,13 +116,95 @@ const ELAPSED_TIME = /\[(?:h+|m+|s+)\]/i;
 // Quoted literals, backslash escapes, and the ECMA-376 skip (_x) / fill (*x) tokens: their
 // characters render literally (or pad), so an m/d/h inside them is not a date token ("0.00_m").
 const LITERALS = /"[^"]*"|\\.|[_*]./g;
-const BRACKETS = /\[[^\]]*\]/g;
 const DATE_TOKEN = /[dmyhs]/i;
 
+/**
+ * Remove every bracketed section (`[Red]`, `[$-409]`, `[>100]`) in one linear pass (F11.50). The
+ * result equals `code.replace(/\[[^\]]*\]/g, "")` — a `[` with no later `]` stays, with the rest —
+ * without that pattern's quadratic backtracking over unclosed brackets.
+ *
+ * @example stripBracketSections("0.00") // "0.00" (no bracket)
+ * @example stripBracketSections("[Red]0.00") // "0.00"
+ * @example stripBracketSections("[a]b[c") // "b[c" (the last `[` has no `]`)
+ */
+export function stripBracketSections(code: string): string {
+	let out = "";
+	let from = 0;
+	for (;;) {
+		const open = code.indexOf("[", from);
+		if (open === -1) return out + code.slice(from);
+		const close = code.indexOf("]", open + 1);
+		if (close === -1) return out + code.slice(from);
+		out += code.slice(from, open);
+		from = close + 1;
+	}
+}
+
+/**
+ * Whether a number-format code renders a date or time (see the rules above).
+ *
+ * @example isDateFormatCode("yyyy-mm-dd") // true
+ * @example isDateFormatCode("[h]:mm") // true (elapsed time)
+ * @example isDateFormatCode('"day"0') // false (the letters are a quoted literal)
+ */
 export function isDateFormatCode(formatCode: string): boolean {
 	const withoutLiterals = formatCode.replace(LITERALS, "");
 	if (ELAPSED_TIME.test(withoutLiterals)) return true;
-	return DATE_TOKEN.test(withoutLiterals.replace(BRACKETS, ""));
+	return DATE_TOKEN.test(stripBracketSections(withoutLiterals));
+}
+
+/**
+ * Excel's longest number-format code, in characters (F11.50). Shared bound: the reader drops a
+ * longer code to absent (no format, never a date) and the writer rejects one (invalid-input).
+ */
+export const MAX_NUMBER_FORMAT_LEN = 255;
+
+/**
+ * A style table's custom number formats by id. `null` marks a code dropped for exceeding
+ * `MAX_NUMBER_FORMAT_LEN`: the id then has no format at all, not its built-in one.
+ */
+export type CustomNumberFormats = ReadonlyMap<number, string | null>;
+
+/**
+ * The format code for a number-format id: a custom code wins over the built-in table, and a dropped
+ * custom code stays absent.
+ *
+ * @example resolveNumberFormat(new Map([[164, "0.0"]]), 164) // "0.0"
+ * @example resolveNumberFormat(new Map([[14, null]]), 14) // undefined (dropped; no built-in fallback)
+ * @example resolveNumberFormat(new Map(), 2) // "0.00" (built-in)
+ */
+export function resolveNumberFormat(
+	customFormats: CustomNumberFormats,
+	numFmtId: number,
+): string | undefined {
+	const custom = customFormats.get(numFmtId);
+	if (custom === null) return undefined;
+	return custom ?? BUILTIN_FORMATS[numFmtId];
+}
+
+/**
+ * A date test by number-format id that decides each id once (F11.50), so a cell's date typing costs
+ * a map lookup however long its format code is.
+ *
+ * @example dateFormatDecider(new Map([[164, "yyyy-mm-dd"]]))(164) // true (custom date code)
+ * @example const isDateId = dateFormatDecider(new Map([[164, "0.0"]])); isDateId(164); isDateId(164) // false; the second call is a cache hit
+ * @example dateFormatDecider(new Map())(14) // true (built-in date id)
+ * @example dateFormatDecider(new Map([[14, null]]))(14) // false (dropped code)
+ */
+export function dateFormatDecider(
+	customFormats: CustomNumberFormats,
+	detect: (formatCode: string) => boolean = isDateFormatCode,
+): (numFmtId: number) => boolean {
+	const decided = new Map<number, boolean>();
+	return (numFmtId) => {
+		const known = decided.get(numFmtId);
+		if (known !== undefined) return known;
+		const custom = customFormats.get(numFmtId);
+		const isDate =
+			custom === undefined ? isBuiltinDateId(numFmtId) : custom !== null && detect(custom);
+		decided.set(numFmtId, isDate);
+		return isDate;
+	};
 }
 
 // ── Attribute parsing helpers ──────────────────────────────────────────────────────────────────
@@ -317,8 +399,17 @@ function parseProtection(attrs: Readonly<Record<string, string>>): CellProtectio
 	return out.locked !== undefined || out.hidden !== undefined ? out : undefined;
 }
 
-export function parseStyles(xml: string): StyleTable {
-	const customFormats = new Map<number, string>();
+/**
+ * Parse styles.xml into the reader's style table. `detect` decides whether a custom format code is a
+ * date; it defaults to `isDateFormatCode` and exists so tests can count decisions (one per id).
+ *
+ * @example parseStyles(stylesXml).isDateStyle(1) // true when xf 1 uses a date format
+ */
+export function parseStyles(
+	xml: string,
+	detect: (formatCode: string) => boolean = isDateFormatCode,
+): StyleTable {
+	const customFormats = new Map<number, string | null>();
 	const xfs: XfRecord[] = [];
 	// Component tables by index. A slot is undefined when the record isn't representable in the
 	// model (a gradient fill) — a cell referencing it simply has no such component.
@@ -382,7 +473,9 @@ export function parseStyles(xml: string): StyleTable {
 			} else if (name === "numFmt" && inNumFmts) {
 				const id = Number(token.attrs.numFmtId);
 				const code = token.attrs.formatCode;
-				if (Number.isInteger(id) && code !== undefined) customFormats.set(id, code);
+				if (Number.isInteger(id) && code !== undefined) {
+					customFormats.set(id, code.length <= MAX_NUMBER_FORMAT_LEN ? code : null);
+				}
 			} else if (name === "fonts") {
 				if (!token.selfClosing) inFonts = true;
 			} else if (name === "font" && inFonts) {
@@ -554,12 +647,13 @@ export function parseStyles(xml: string): StyleTable {
 		}
 	}
 
+	const isDateFormatId = dateFormatDecider(customFormats, detect);
+
 	function isDateStyle(styleIndex: number | undefined): boolean {
 		// An omitted `s` means style 0, the implicit default format.
 		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId;
 		if (numFmtId === undefined) return false;
-		const custom = customFormats.get(numFmtId);
-		return custom !== undefined ? isDateFormatCode(custom) : isBuiltinDateId(numFmtId);
+		return isDateFormatId(numFmtId);
 	}
 
 	function formatCode(styleIndex: number | undefined): string | undefined {
@@ -567,7 +661,7 @@ export function parseStyles(xml: string): StyleTable {
 		// wins over the built-in table (a file may redefine one); unknown ids stay undefined.
 		const numFmtId = xfs[styleIndex ?? 0]?.numFmtId;
 		if (numFmtId === undefined) return undefined;
-		return customFormats.get(numFmtId) ?? BUILTIN_FORMATS[numFmtId];
+		return resolveNumberFormat(customFormats, numFmtId);
 	}
 
 	// Materialize (and cache) the resolved CellStyle for an xf index. The cache makes results
@@ -597,7 +691,7 @@ export function parseStyles(xml: string): StyleTable {
 			// style model symmetric with the writer, which reverse-maps 'General' to id 0. Locale
 			// ids with no portable code stay absent too (documented; nothing faithful to return).
 			if (xf.numFmtId !== 0) {
-				const code = customFormats.get(xf.numFmtId) ?? BUILTIN_FORMATS[xf.numFmtId];
+				const code = resolveNumberFormat(customFormats, xf.numFmtId);
 				// An EMPTY custom code is as meaningless as General — degrade both to "no format".
 				// An XML-UNSAFE code (a control character can arrive via a decoded numeric
 				// reference in formatCode) is unwritable, exactly like an unsafe font name —

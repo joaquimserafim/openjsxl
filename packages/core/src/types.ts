@@ -732,7 +732,10 @@ export interface Worksheet {
 	readonly rowProperties: ReadonlyMap<number, RowProps>;
 	/** The sheet's frozen pane, or `undefined` when nothing is frozen (or unsupported). */
 	readonly freeze: FreezePane | undefined;
-	/** The number-format code applied at `ref`, or `undefined` (also when the format has no styles). */
+	/**
+	 * The number-format code applied at `ref`, or `undefined` (also when the format has no styles, or
+	 * when the file's code exceeds Excel's 255-character limit).
+	 */
 	numberFormat(ref: string): string | undefined;
 	/** The resolved style at `ref`, or `undefined` (also when the format has no styles). */
 	style(ref: string): CellStyle | undefined;

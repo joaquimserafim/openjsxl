@@ -6,6 +6,7 @@ import {
 	HEX_COLOR,
 	MAX_COLOR_INDEX,
 	MAX_INDENT,
+	MAX_NUMBER_FORMAT_LEN,
 	PATTERN_TYPES,
 	V_ALIGNMENTS,
 } from "../ooxml/styles";
@@ -651,6 +652,9 @@ export function createStyleRegistry(): StyleRegistry {
 			if (!isXmlSafe(rawCode)) {
 				fail("dxf.numberFormat contains a character not allowed in XML");
 			}
+			if (rawCode.length > MAX_NUMBER_FORMAT_LEN) {
+				fail(`dxf.numberFormat exceeds Excel's ${MAX_NUMBER_FORMAT_LEN}-character limit`);
+			}
 			output.numberFormat = rawCode;
 		}
 		const font = ownValue(record, "font");
@@ -723,6 +727,12 @@ export function createStyleRegistry(): StyleRegistry {
 					invalid(
 						ref,
 						"style.numberFormat contains a character not allowed in XML (a control character or lone surrogate)",
+					);
+				}
+				if (rawCode.length > MAX_NUMBER_FORMAT_LEN) {
+					invalid(
+						ref,
+						`style.numberFormat exceeds Excel's ${MAX_NUMBER_FORMAT_LEN}-character limit`,
 					);
 				}
 				numFmtCode = rawCode;

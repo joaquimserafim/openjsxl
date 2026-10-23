@@ -1,5 +1,10 @@
 import { RecordData, readRecords } from "../biff";
-import { BUILTIN_FORMATS, isBuiltinDateId, isDateFormatCode } from "../ooxml";
+import {
+	dateFormatDecider,
+	isDateFormatCode,
+	MAX_NUMBER_FORMAT_LEN,
+	resolveNumberFormat,
+} from "../ooxml";
 import type { SheetState } from "../types";
 import * as R from "./records";
 
@@ -71,11 +76,17 @@ export interface XlsbStyleTable {
 /**
  * Parse styles.bin → a style table. It collects custom number formats (BrtFmt, id ≥ 164) and each
  * cellXfs entry's numFmtId (BrtXF iFmt, at offset 2 after ixfeParent), then resolves a cell's style
- * index to its format code and reuses the SAME `isDateFormatCode`/`isBuiltinDateId` the xlsx reader
- * uses, so date detection is identical across formats.
+ * index to its format code and reuses the SAME cached date decision and 255-character format limit
+ * the xlsx reader uses (F11.50), so date detection is identical across formats. `detect` defaults
+ * to `isDateFormatCode` and exists so tests can count decisions (one per id).
+ *
+ * @example parseXlsbStyles(stylesBin).formatCode(1) // the code xf 1 uses, or undefined
  */
-export function parseXlsbStyles(bytes: Uint8Array): XlsbStyleTable {
-	const customFormats = new Map<number, string>();
+export function parseXlsbStyles(
+	bytes: Uint8Array,
+	detect: (formatCode: string) => boolean = isDateFormatCode,
+): XlsbStyleTable {
+	const customFormats = new Map<number, string | null>();
 	const xfNumFmt: number[] = []; // cellXfs index → numFmtId
 	let inCellXfs = false;
 	for (const rec of readRecords(bytes)) {
@@ -83,7 +94,9 @@ export function parseXlsbStyles(bytes: Uint8Array): XlsbStyleTable {
 			const d = new RecordData(rec.data);
 			const ifmt = d.u16();
 			const code = d.wideString();
-			if (code !== undefined) customFormats.set(ifmt, code);
+			if (code !== undefined) {
+				customFormats.set(ifmt, code.length <= MAX_NUMBER_FORMAT_LEN ? code : null);
+			}
 		} else if (rec.id === R.CELLXFS) {
 			inCellXfs = true;
 		} else if (rec.id === R.CELLXFS_END) {
@@ -95,17 +108,17 @@ export function parseXlsbStyles(bytes: Uint8Array): XlsbStyleTable {
 		}
 	}
 	const numFmtId = (styleRef: number | undefined): number | undefined => xfNumFmt[styleRef ?? 0];
+	const isDateFormatId = dateFormatDecider(customFormats, detect);
 	return {
 		isDateStyle(styleRef) {
 			const id = numFmtId(styleRef);
 			if (id === undefined) return false;
-			const custom = customFormats.get(id);
-			return custom !== undefined ? isDateFormatCode(custom) : isBuiltinDateId(id);
+			return isDateFormatId(id);
 		},
 		formatCode(styleRef) {
 			const id = numFmtId(styleRef);
 			if (id === undefined) return undefined;
-			return customFormats.get(id) ?? BUILTIN_FORMATS[id];
+			return resolveNumberFormat(customFormats, id);
 		},
 	};
 }

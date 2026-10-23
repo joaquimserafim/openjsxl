@@ -248,9 +248,10 @@ export class XlsxWorksheet implements Worksheet {
 
 	/**
 	 * The number-format code applied to the cell at `ref` — a custom code like `"yyyy-mm-dd"`
-	 * or `"0.00%"`, or a built-in one. `undefined` when the workbook has no style table or the
-	 * id has no portable code. An unstyled or absent cell resolves to the default format (style
-	 * 0, usually `"General"`), mirroring how date detection defaults.
+	 * or `"0.00%"`, or a built-in one. `undefined` when the workbook has no style table, the
+	 * id has no portable code, or the file's code exceeds Excel's 255-character limit (such a
+	 * cell never reads as a date). An unstyled or absent cell resolves to the default format
+	 * (style 0, usually `"General"`), mirroring how date detection defaults.
 	 */
 	numberFormat(ref: string): string | undefined {
 		return this.#context.styles?.formatCode(this.#cellStyleMap().get(ref));
