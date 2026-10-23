@@ -174,8 +174,9 @@ describe("conditional aggregates require aligned *IFS shapes (F11.11)", () => {
 	});
 
 	it("keeps explicit empty criterion slots when the complete pair count is valid", async () => {
-		// Empty AST arguments already evaluate to null (a blank criterion). This task rejects
-		// incomplete pairs, not valid pairs whose criterion was explicitly left empty.
+		// This task rejects incomplete pairs, not valid pairs whose criterion was explicitly left
+		// empty. An omitted criterion means `= 0`, like an empty-cell reference (F11.31, owner ruling;
+		// unsourced: no Microsoft page states Excel's omitted-argument behavior).
 		const values = await evaluate(
 			[
 				"COUNTIFS(Data!A1:A3,)",
@@ -190,7 +191,7 @@ describe("conditional aggregates require aligned *IFS shapes (F11.11)", () => {
 				[null, 30],
 			],
 		);
-		expect(values).toEqual([1, 30, 30, 1, 30]);
+		expect(values).toEqual([1, 10, 10, 1, 10]);
 	});
 
 	it("preserves aligned error propagation and no-match results", async () => {

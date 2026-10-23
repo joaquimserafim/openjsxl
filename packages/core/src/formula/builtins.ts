@@ -147,8 +147,7 @@ type Criteria =
 			readonly op: CritOp;
 			readonly operand: string;
 			readonly glob: readonly GlobToken[] | null;
-	  }
-	| { readonly kind: "blank"; readonly op: CritOp };
+	  };
 
 function splitOp(s: string): { op: CritOp; rest: string } {
 	if (s.startsWith("<=")) return { op: "<=", rest: s.slice(2) };
@@ -226,7 +225,9 @@ function parseCriteria(raw: EvalValue): Criteria | FormulaErrorValue {
 	if (isErrorValue(s)) return s;
 	if (typeof s === "number") return { kind: "number", op: "=", operand: s };
 	if (typeof s === "boolean") return { kind: "boolean", op: "=", operand: s };
-	if (s === null) return { kind: "blank", op: "=" };
+	// An empty-cell criterion is 0 (Microsoft COUNTIFS/AVERAGEIF). An omitted argument evaluates to the
+	// same null and is treated alike (F11.31 owner ruling; unsourced for Excel).
+	if (s === null) return { kind: "number", op: "=", operand: 0 };
 	const { op, rest } = splitOp(s);
 	const num = numericStringValue(rest);
 	if (num !== undefined) return { kind: "number", op, operand: num };
@@ -271,23 +272,25 @@ function matchesCriteria(cell: EvalValue, c: Criteria): boolean {
 			const eq = v === c.operand;
 			return c.op === "<>" ? !eq : c.op === "=" ? eq : false;
 		}
-		case "blank": {
-			const isBlank = v === null || v === "";
-			return c.op === "<>" ? !isBlank : isBlank;
-		}
 		case "text": {
-			const rendered = toText(v);
-			if (isErrorValue(rendered)) return false;
-			if (c.op === "=" || c.op === "<>") {
-				const eq =
-					c.glob !== null
-						? globMatch(rendered, c.glob)
-						: rendered.toUpperCase() === c.operand.toUpperCase();
+			// Wildcard text criteria test text cells only (Microsoft COUNTIF: "*" counts cells
+			// containing any text), so `"<>*"` matches every non-text, non-error cell. Relational text
+			// criteria test text only too, and a formula's "" result is text (F11.31 owner rulings,
+			// unsourced). Plain `=`/`<>` text keeps its rendered match (F11.48).
+			if (c.glob !== null) {
+				const eq = typeof v === "string" && globMatch(v, c.glob);
 				return c.op === "<>" ? !eq : eq;
 			}
-			const a = rendered.toUpperCase();
-			const b = c.operand.toUpperCase();
-			return opSign(a < b ? -1 : a > b ? 1 : 0, c.op);
+			if (c.op !== "=" && c.op !== "<>") {
+				if (typeof v !== "string") return false;
+				const a = v.toUpperCase();
+				const b = c.operand.toUpperCase();
+				return opSign(a < b ? -1 : a > b ? 1 : 0, c.op);
+			}
+			const rendered = toText(v);
+			if (isErrorValue(rendered)) return false;
+			const eq = rendered.toUpperCase() === c.operand.toUpperCase();
+			return c.op === "<>" ? !eq : eq;
 		}
 	}
 }
