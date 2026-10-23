@@ -83,7 +83,7 @@ function numberToXml(n: number): string {
 
 // Caller properties captured for one cell occurrence. Style registration stays in row order;
 // buffered table headers may retain this record until their cells are emitted.
-interface CapturedCell {
+export interface CapturedCell {
 	readonly value: CellValue;
 	readonly formula: unknown;
 	readonly style: CellStyle | undefined;
@@ -142,11 +142,26 @@ function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 	};
 }
 
-// Render a single cell, or `undefined` for one that produces no output (an empty value with no
-// effective style). Throws `invalid-input` for a value that cannot be represented: a non-finite
-// number, an invalid Date, or a type outside the CellInput union (JS callers can pass anything).
-// `date1904` selects the serial epoch so it matches the workbook's declared <workbookPr date1904>.
-function renderCell(
+/**
+ * Render a single cell, or `undefined` for one that produces no output (an empty value with no
+ * effective style). Throws `invalid-input` for a value that cannot be represented: a non-finite
+ * number, an invalid Date, or a type outside the CellInput union (JS callers can pass anything).
+ * `date1904` selects the serial epoch so it matches the workbook's declared <workbookPr date1904>.
+ * An empty cell with no style and no formula returns before its A1 ref is built (F11.54).
+ *
+ * Each example passes a fresh `createStyleRegistry()` as `styles`:
+ * @example renderCell(1, 1, { value: undefined, formula: undefined, style: undefined }, false, styles) // undefined
+ * @example renderCell(2, 1, { value: null, formula: undefined, style: { font: { bold: true } } }, false, styles) // '<c r="B1" s="1"/>'
+ * @example renderCell(1, 1, { value: "a", formula: undefined, style: undefined }, false, styles) // '<c r="A1" t="inlineStr"><is><t>a</t></is></c>'
+ * @example renderCell(1, 1, { value: true, formula: undefined, style: undefined }, false, styles) // '<c r="A1" t="b"><v>1</v></c>'
+ * @example renderCell(1, 1, { value: 2.5, formula: undefined, style: undefined }, false, styles) // '<c r="A1"><v>2.5</v></c>'
+ * @example renderCell(1, 1, { value: new Date(Date.UTC(2020, 0, 1)), formula: undefined, style: undefined }, false, styles) // '<c r="A1" s="1"><v>43831</v></c>'
+ * @example renderCell(1, 1, { value: 2, formula: "1+1", style: undefined }, false, styles) // '<c r="A1"><f>1+1</f><v>2</v></c>'
+ * @example renderCell(1, 1, { value: Number.NaN, formula: undefined, style: undefined }, false, styles) // throws XlsxError invalid-input: cell A1: NaN is not a finite number
+ * @example renderCell(1, 1, { value: new Date(Number.NaN), formula: undefined, style: undefined }, false, styles) // throws XlsxError invalid-input: cell A1: invalid Date
+ * @example renderCell(1, 1, { value: 1n, formula: undefined, style: undefined }, false, styles) // throws XlsxError invalid-input: cell A1: unsupported cell value type
+ */
+export function renderCell(
 	col: number,
 	row: number,
 	cell: CapturedCell,
@@ -154,6 +169,9 @@ function renderCell(
 	styles: StyleRegistry,
 ): string | undefined {
 	const { value, style, formula } = cell;
+	if (formula === undefined && style === undefined && (value === null || value === undefined)) {
+		return undefined;
+	}
 	const ref = formatRef({ col, row });
 
 	// Resolve the xf index. Bare non-date values never touch the registry (zero overhead on the
@@ -203,6 +221,83 @@ function renderCell(
 		return `<c r="${ref}"${sAttr}><v>${numberToXml(serial)}</v></c>`;
 	}
 	throw new XlsxError("invalid-input", `cell ${ref}: unsupported cell value type`);
+}
+
+/** Holes a row may show beyond its visited columns before the rest comes from its keys (F11.54). */
+export const SPARSE_ROW_SLACK = 32;
+
+/** A row's own column indices from one key listing, ascending, under the length they were listed for. */
+export interface RowListing {
+	readonly length: number;
+	readonly indices: readonly number[];
+}
+
+/** Key listings kept per row object for one sheet, so a row object reused across rows is listed once. */
+export type RowListings = WeakMap<object, RowListing>;
+
+/**
+ * Visit a row's columns in ascending order: `visit(column, own)` for each own index below `length`
+ * and each `captured` column below `length` (a table-header cell read before emission, which
+ * renders from its capture). `own` is the `Object.hasOwn` probe made just before the visit, so the
+ * caller reads `cells[column]` only when it is true. Holes are skipped, so a sparse row costs its
+ * populated columns, not its length (F11.54).
+ *
+ * Columns are probed in order, each just before its visit, so a dense row reads exactly as an
+ * index loop would. Once a row's holes outnumber its visited columns by more than
+ * `SPARSE_ROW_SLACK`, the rest of the row comes from one listing of its own keys, kept in
+ * `listings` for that row object; each listed column is probed again just before its visit.
+ *
+ * @example forEachRowColumn([1, , 3], 3, visit) // visit(0, true), visit(2, true)
+ * @example forEachRowColumn(Object.assign([], { 16383: "x" }), 16384, visit) // visit(16383, true), after 33 probes and one key listing
+ * @example forEachRowColumn([, "h"], 2, visit, new Set([0, 5])) // visit(0, false), visit(1, true); column 5 is past the row
+ * @example forEachRowColumn([], 0, visit) // no visits
+ */
+export function forEachRowColumn(
+	cells: readonly unknown[],
+	length: number,
+	visit: (column: number, own: boolean) => void,
+	captured?: ReadonlySet<number>,
+	listings?: RowListings,
+): void {
+	let visited = 0;
+	let holes = 0;
+	let next = 0;
+	for (; next < length; next++) {
+		const own = Object.hasOwn(cells, next);
+		if (own || captured?.has(next) === true) {
+			visited++;
+			visit(next, own);
+		} else if (++holes > visited + SPARSE_ROW_SLACK) {
+			break;
+		}
+	}
+	if (next >= length) return;
+	let listing = listings?.get(cells);
+	if (listing === undefined || listing.length !== length) {
+		const indices: number[] = [];
+		for (const key of Object.getOwnPropertyNames(cells)) {
+			const index = Number(key);
+			// Only canonical array indices: "length", "01", "-0" and "1e3" are other own keys.
+			if (Number.isInteger(index) && index >= 0 && index < length && String(index) === key) {
+				indices.push(index);
+			}
+		}
+		// An ordinary array lists its indices ascending; a Proxy's ownKeys need not.
+		indices.sort((a, b) => a - b);
+		listing = { length, indices };
+		listings?.set(cells, listing);
+	}
+	const rest = listing.indices.filter((index) => index > next);
+	if (captured !== undefined) {
+		for (const index of captured) if (index > next && index < length) rest.push(index);
+		rest.sort((a, b) => a - b);
+	}
+	for (let i = 0; i < rest.length; i++) {
+		const column = rest[i] as number;
+		if (i > 0 && column === rest[i - 1]) continue;
+		const own = Object.hasOwn(cells, column);
+		if (own || captured?.has(column) === true) visit(column, own);
+	}
 }
 
 // The cached result of a formula, as a `t` attribute + `<v>` element (empty pair when there is no
@@ -2116,6 +2211,7 @@ export function worksheetXml(
 		throw new XlsxError("invalid-input", `a sheet cannot have more than ${MAX_ROW} rows`);
 	}
 
+	const listings: RowListings = new WeakMap();
 	for (let r = 0; r < rows.length; r++) {
 		const cells = headerRows.has(r) ? headerRows.get(r) : ownValue(rows, r);
 		// A missing row (array hole / undefined) is an empty row — skip it. Anything else that isn't
@@ -2129,8 +2225,9 @@ export function worksheetXml(
 				`sheet row ${r + 1}: a row must be an array of cell values`,
 			);
 		}
-		if (cells.length === 0) continue;
-		if (cells.length > MAX_COL) {
+		const length = cells.length;
+		if (length === 0) continue;
+		if (length > MAX_COL) {
 			throw new XlsxError(
 				"invalid-input",
 				`sheet row ${r + 1}: a row cannot have more than ${MAX_COL} cells`,
@@ -2138,19 +2235,30 @@ export function worksheetXml(
 		}
 		const rowNum = r + 1;
 		const capturedRow = headerCells.get(rowNum);
+		const captured =
+			capturedRow === undefined
+				? undefined
+				: new Set([...capturedRow.keys()].map((col) => col - 1));
 		const cellXmls: string[] = [];
-		for (let c = 0; c < cells.length; c++) {
-			const colNum = c + 1;
-			const cell =
-				capturedRow?.get(colNum)?.cell ?? splitInput(colNum, rowNum, ownValue(cells, c));
-			const rendered = renderCell(colNum, rowNum, cell, date1904, styles);
-			if (rendered === undefined) continue;
-			if (minRow === 0 || rowNum < minRow) minRow = rowNum;
-			if (rowNum > maxRow) maxRow = rowNum;
-			if (minCol === 0 || colNum < minCol) minCol = colNum;
-			if (colNum > maxCol) maxCol = colNum;
-			cellXmls.push(rendered);
-		}
+		forEachRowColumn(
+			cells,
+			length,
+			(c, own) => {
+				const colNum = c + 1;
+				const cell =
+					capturedRow?.get(colNum)?.cell ??
+					splitInput(colNum, rowNum, own ? cells[c] : undefined);
+				const rendered = renderCell(colNum, rowNum, cell, date1904, styles);
+				if (rendered === undefined) return;
+				if (minRow === 0 || rowNum < minRow) minRow = rowNum;
+				if (rowNum > maxRow) maxRow = rowNum;
+				if (minCol === 0 || colNum < minCol) minCol = colNum;
+				if (colNum > maxCol) maxCol = colNum;
+				cellXmls.push(rendered);
+			},
+			captured,
+			listings,
+		);
 		if (cellXmls.length > 0) {
 			const attrs = rowAttrs.get(rowNum) ?? "";
 			rowAttrs.delete(rowNum); // consumed — whatever remains becomes a property-only row
@@ -2224,16 +2332,26 @@ export interface StreamedWorksheet extends SheetSideParts {
 	readonly chunks: AsyncGenerator<Uint8Array>;
 }
 
-// Render one streamed row. Its number is the 1-based position in the stream. Mirrors the buffered
-// per-row logic: an empty row with no properties emits nothing; a property-only row emits `<row r/>`;
-// otherwise `<row r>cells</row>`. Interns styles into the shared registry as it renders.
-function renderStreamRow(
+/**
+ * Render one streamed row. Its number is the 1-based position in the stream. Mirrors the buffered
+ * per-row logic: an empty row with no properties emits nothing; a property-only row emits `<row r/>`;
+ * otherwise `<row r>cells</row>`. Interns styles into the shared registry as it renders, and visits
+ * only the row's populated columns (F11.54); `listings` keeps key listings across one sheet's rows.
+ *
+ * @example renderStreamRow("S", 3, undefined, new Map(), false, styles) // ""
+ * @example renderStreamRow("S", 3, [], new Map([[3, ' ht="20" customHeight="1"']]), false, styles) // '<row r="3" ht="20" customHeight="1"/>'
+ * @example renderStreamRow("S", 3, [, 7], new Map(), false, styles) // '<row r="3"><c r="B3"><v>7</v></c></row>'
+ * @example renderStreamRow("S", 3, "abc", new Map(), false, styles) // throws XlsxError invalid-input: a row must be an array of cell values
+ * @example renderStreamRow("S", 3, new Array(16385), new Map(), false, styles) // throws XlsxError invalid-input: more than 16384 cells
+ */
+export function renderStreamRow(
 	sheetName: string,
 	rowNum: number,
 	cells: readonly CellInput[] | undefined,
 	rowAttrs: Map<number, string>,
 	date1904: boolean,
 	styles: StyleRegistry,
+	listings?: RowListings,
 ): string {
 	const attrs = rowAttrs.get(rowNum) ?? "";
 	rowAttrs.delete(rowNum); // consumed — whatever remains becomes a trailing property-only row
@@ -2244,18 +2362,25 @@ function renderStreamRow(
 			`sheet "${sheetName}" row ${rowNum}: a row must be an array of cell values`,
 		);
 	}
-	if (cells.length > MAX_COL) {
+	const length = cells.length;
+	if (length > MAX_COL) {
 		throw new XlsxError(
 			"invalid-input",
 			`sheet "${sheetName}" row ${rowNum}: a row cannot have more than ${MAX_COL} cells`,
 		);
 	}
 	const cellXmls: string[] = [];
-	for (let c = 0; c < cells.length; c++) {
-		const cell = splitInput(c + 1, rowNum, ownValue(cells, c));
-		const rendered = renderCell(c + 1, rowNum, cell, date1904, styles);
-		if (rendered !== undefined) cellXmls.push(rendered);
-	}
+	forEachRowColumn(
+		cells,
+		length,
+		(c, own) => {
+			const cell = splitInput(c + 1, rowNum, own ? cells[c] : undefined);
+			const rendered = renderCell(c + 1, rowNum, cell, date1904, styles);
+			if (rendered !== undefined) cellXmls.push(rendered);
+		},
+		undefined,
+		listings,
+	);
 	if (cellXmls.length === 0) return attrs !== "" ? `<row r="${rowNum}"${attrs}/>` : "";
 	return `<row r="${rowNum}"${attrs}>${cellXmls.join("")}</row>`;
 }
@@ -2298,6 +2423,7 @@ async function* streamRowChunks(
 ): AsyncGenerator<Uint8Array> {
 	yield encoder.encode(header);
 	let rowNum = 0;
+	const listings: RowListings = new WeakMap();
 	let buf = "";
 	// `for await` iterates both a sync iterable (an array) and an async one (a DB cursor).
 	for await (const cells of streamRowSource(rows)) {
@@ -2308,7 +2434,7 @@ async function* streamRowChunks(
 				`sheet "${sheetName}": a sheet cannot have more than ${MAX_ROW} rows`,
 			);
 		}
-		buf += renderStreamRow(sheetName, rowNum, cells, rowAttrs, date1904, styles);
+		buf += renderStreamRow(sheetName, rowNum, cells, rowAttrs, date1904, styles, listings);
 		if (buf.length >= ROW_CHUNK_BYTES) {
 			yield encoder.encode(buf);
 			buf = "";
