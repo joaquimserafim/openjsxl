@@ -153,8 +153,9 @@ function looksLikeText(b: Uint8Array): boolean {
 }
 
 // Read up to MAX_SNIFF_BYTES DECOMPRESSED bytes of a zip part, streaming and stopping early —
-// or `undefined` when the entry cannot be read (a corrupt local header, entry data past EOF, a
-// broken deflate stream, an unsupported compression method, or a caller `maxPartBytes` refusal).
+// or `undefined` when the entry cannot be read (a corrupt local header, a broken deflate stream, an
+// unsupported compression method, or a caller `maxPartBytes` refusal; entry data that runs past its
+// own bytes already failed openZip).
 // The decompression is the one throwing operation in a part read, so ITS shield lives here; the
 // classification logic above stays try-free. The early break cancels the underlying inflate
 // (inflateRawStream's `finally`), so a bomb part inflates at most ~one chunk past the cap instead

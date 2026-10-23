@@ -17,7 +17,9 @@ import { inflateRaw, inflateRawStream } from "./inflate";
 // ciphertext (stored entries) or as an inflate/corrupt error (deflated entries).
 //
 // Entry policy: directory placeholders (`name/`) are skipped; duplicate part names are refused
-// (OPC forbids them, and an ambiguous package is a zip-confusion vector).
+// (OPC forbids them, and an ambiguous package is a zip-confusion vector). No two entries may share
+// bytes, and no entry's data may reach the central directory (F11.52): many entries aliasing one
+// small deflate stream would otherwise inflate it once per entry.
 
 export interface ZipEntry {
 	readonly name: string;
@@ -60,6 +62,64 @@ export const DEFAULT_MAX_PART_BYTES = 2 * 1024 * 1024 * 1024;
 export const DEFAULT_MAX_COMPRESSION_RATIO = 300;
 /** The ratio cap never applies below this output size, so a small part with a high ratio is fine. */
 export const RATIO_FLOOR_BYTES = 8 * 1024 * 1024;
+
+/** Where an entry's local record lies: its local header through the end of its data. */
+export interface EntrySpan {
+	readonly name: string;
+	/** Offset of the local file header. */
+	readonly start: number;
+	/** Offset of the entry's data, after the local header's name and extra field. */
+	readonly dataStart: number;
+	/** One past the entry's last data byte (`dataStart + compressedSize`). */
+	readonly end: number;
+}
+
+/**
+ * The span of `entry`'s local record, read from the local header at its offset, or `undefined` when
+ * no local header is there. The local header's name and extra-field lengths, which may differ from
+ * the central directory's, decide where the data starts.
+ *
+ * @example localEntrySpan(view, entry) // { name, start: 0, dataStart: 39, end: 139 } for a 9-byte name and 100 data bytes
+ * @example localEntrySpan(view, { ...entry, localHeaderOffset: view.byteLength }) // undefined
+ */
+export function localEntrySpan(view: DataView, entry: ZipEntry): EntrySpan | undefined {
+	const start = entry.localHeaderOffset;
+	if (start + 30 > view.byteLength || view.getUint32(start, true) !== SIG_LOCAL) return undefined;
+	const nameLen = view.getUint16(start + 26, true);
+	const extraLen = view.getUint16(start + 28, true);
+	const dataStart = start + 30 + nameLen + extraLen;
+	return { name: entry.name, start, dataStart, end: dataStart + entry.compressedSize };
+}
+
+/** Why a set of entry spans is not a valid archive layout. */
+export type SpanConflict =
+	| { readonly kind: "shared-bytes"; readonly first: string; readonly second: string }
+	| { readonly kind: "into-central-directory"; readonly name: string };
+
+/**
+ * The first conflict among `spans` in local-header order: a span that reaches `cdOffset`, or two
+ * spans that share bytes. `undefined` when the spans are disjoint and all end at or before
+ * `cdOffset`. Spans are sorted first, so the central directory may list entries in any order.
+ *
+ * @example findSpanConflict([a, b], cdOffset) // undefined: a ends at or before b starts, b at or before cdOffset
+ * @example findSpanConflict([a, { ...b, start: a.start }], cdOffset) // { kind: "shared-bytes", first: "a", second: "b" }
+ * @example findSpanConflict([a], a.end - 1) // { kind: "into-central-directory", name: "a" }
+ */
+export function findSpanConflict(
+	spans: readonly EntrySpan[],
+	cdOffset: number,
+): SpanConflict | undefined {
+	const sorted = [...spans].sort((x, y) => x.start - y.start);
+	let previous: EntrySpan | undefined;
+	for (const span of sorted) {
+		if (span.end > cdOffset) return { kind: "into-central-directory", name: span.name };
+		if (previous !== undefined && previous.end > span.start) {
+			return { kind: "shared-bytes", first: previous.name, second: span.name };
+		}
+		previous = span;
+	}
+	return undefined;
+}
 
 // The EOCD record sits at the very end, after an optional ≤64 KB comment. Scan backwards
 // for its signature and confirm the comment length lands exactly on the end of file (so a
@@ -196,9 +256,28 @@ export function openZip(
 		);
 	}
 
-	// Find an entry's raw (still-compressed) payload. The local header repeats name/extra
-	// lengths, which may differ from the central directory's — trust the local header to find
-	// where the data actually starts.
+	// Every readable entry's span, checked before any part is read. An entry without a local header
+	// has no span; it cannot be read (locate reports it), so it cannot share bytes either.
+	const spans = new Map<string, EntrySpan>();
+	for (const entry of entries.values()) {
+		const span = localEntrySpan(view, entry);
+		if (span !== undefined) spans.set(entry.name, span);
+	}
+	const conflict = findSpanConflict([...spans.values()], cdOffset);
+	if (conflict?.kind === "shared-bytes") {
+		throw new XlsxError(
+			"corrupt-zip",
+			`corrupt zip: entries ${conflict.first} and ${conflict.second} share bytes`,
+		);
+	}
+	if (conflict !== undefined) {
+		throw new XlsxError(
+			"corrupt-zip",
+			`corrupt zip: entry data for ${conflict.name} runs past the start of the central directory`,
+		);
+	}
+
+	// Find an entry's raw (still-compressed) payload through the span validated above.
 	function locate(name: string): { entry: ZipEntry; payload: Uint8Array } {
 		const entry = entries.get(name);
 		if (entry === undefined)
@@ -214,20 +293,11 @@ export function openZip(
 				`zip part ${name} declares ${declaredOutput} bytes, over the ${maxPartBytes}-byte limit`,
 			);
 		}
-		const header = entry.localHeaderOffset;
-		if (header + 30 > len || view.getUint32(header, true) !== SIG_LOCAL) {
+		const span = spans.get(name);
+		if (span === undefined) {
 			throw new XlsxError("corrupt-zip", `corrupt zip: bad local header for ${name}`);
 		}
-		const nameLen = view.getUint16(header + 26, true);
-		const extraLen = view.getUint16(header + 28, true);
-		const dataStart = header + 30 + nameLen + extraLen;
-		if (dataStart + entry.compressedSize > len) {
-			throw new XlsxError(
-				"corrupt-zip",
-				`corrupt zip: entry data for ${name} runs past end of file`,
-			);
-		}
-		return { entry, payload: bytes.subarray(dataStart, dataStart + entry.compressedSize) };
+		return { entry, payload: bytes.subarray(span.dataStart, span.end) };
 	}
 
 	// The tightest output cap for inflating `entry`: the declared size, the absolute ceiling, and
