@@ -18,12 +18,18 @@ import {
 //     case-insensitive); so `1 = "1"` is FALSE and `1 < "1"` is TRUE.
 //   • errors are values and propagate left-first.
 
-const EN_US_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+// The fraction digits follow a mandatory point, so a digit run has exactly one way to match and a
+// failing one is rejected in linear time (`\d+\.?\d*` split it between two quantifiers: F11.51).
+const EN_US_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 /**
  * The numeric value of a string that is a plain en-US number literal, or `undefined` when it is not
  * one. Locale-invariant (no thousands separators, no currency). Shared by {@link toNumber} and the
  * function library's COUNT/criteria logic, which must decide "is this text numeric?" without coercing.
+ *
+ * @example numericStringValue(" 1.5e3 ") // 1500
+ * @example numericStringValue("1,000") // undefined (not a plain literal)
+ * @example numericStringValue("1e999") // undefined (not finite)
  */
 export function numericStringValue(s: string): number | undefined {
 	const t = s.trim();
