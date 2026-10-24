@@ -147,6 +147,19 @@ function decodeOdsCell(
 }
 
 /**
+ * Whether an element inside a cell holds content that is not the cell's own text (F11.56): a comment
+ * (`office:annotation`) or a shape anchored in the cell (any `draw:` element). Their paragraphs,
+ * links and text never reach the cell's value or hyperlink.
+ *
+ * @example isNonCellContent("office:annotation") // true
+ * @example isNonCellContent("draw:frame") // true
+ * @example isNonCellContent("text:p") // false
+ */
+export function isNonCellContent(name: string): boolean {
+	return name === "office:annotation" || name.startsWith("draw:");
+}
+
+/**
  * Parse the whole content.xml (every sheet lives in this one part) into typed cell tables.
  * Tolerant by construction: unparseable cells degrade to empty, and no throw ever escapes here —
  * container-level failures are raised by the caller (`openOds`).
@@ -197,6 +210,9 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 	let cellHref: string | undefined;
 	let sawParagraph = false;
 	let paraDepth = 0; // > 0 while inside a <text:p> (character data counts only there).
+	// The open elements of a comment or an anchored shape in the current cell, outermost first (F11.56).
+	// While it is not empty, nothing is cell text, nested cells and rows included.
+	const ignored: string[] = [];
 
 	const beginSheet = (attrs: Readonly<Record<string, string>>): void => {
 		name = attrs["table:name"] ?? "";
@@ -283,6 +299,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 		cellHref = undefined;
 		sawParagraph = false;
 		paraDepth = 0;
+		ignored.length = 0;
 	};
 
 	const endCell = (): void => {
@@ -333,7 +350,9 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 					}
 				}
 			} else if (spreadsheetDepth > 0 && tableDepth === 1) {
-				if (n === "table:table-row") {
+				if (inCell && (ignored.length > 0 || isNonCellContent(n))) {
+					if (!token.selfClosing) ignored.push(n);
+				} else if (n === "table:table-row") {
 					// A self-closed empty row (`<table:table-row/>`) carries no cells but still occupies
 					// its repeat count of vertical space — advance the cursor so later rows land right.
 					if (token.selfClosing) {
@@ -369,7 +388,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 				}
 			}
 		} else if (token.kind === "text") {
-			if (inCell && paraDepth > 0) appendText(token.value);
+			if (inCell && paraDepth > 0 && ignored.length === 0) appendText(token.value);
 		} else {
 			// close
 			const n = token.name;
@@ -379,6 +398,22 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 				if (tableDepth === 1) endSheet();
 				if (tableDepth > 0) tableDepth--;
 			} else if (spreadsheetDepth > 0 && tableDepth === 1) {
+				// Inside a comment or shape, a close pops its own element. A cell or row close that does
+				// not match ends an unclosed comment and is handled below; any other stray close is dropped.
+				if (inCell && ignored.length > 0) {
+					if (ignored[ignored.length - 1] === n) {
+						ignored.pop();
+						continue;
+					}
+					if (
+						n !== "table:table-cell" &&
+						n !== "table:covered-table-cell" &&
+						n !== "table:table-row"
+					) {
+						continue;
+					}
+					ignored.length = 0;
+				}
 				if (n === "table:table-cell" || n === "table:covered-table-cell") {
 					if (inCell) endCell();
 				} else if (n === "table:table-row") {

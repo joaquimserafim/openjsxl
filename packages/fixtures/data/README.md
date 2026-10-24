@@ -53,6 +53,15 @@ so they are safe to commit and diff.
   merge** (`A3:B4`), a **hidden** sheet (`table:visibility="collapse"`), and an **empty** sheet.
   The `mimetype` is the first stored entry. `reader/__tests__/ods.test.ts` asserts the used range
   stays `A1:F3` (the tail never materializes). Opens cleanly in python-calamine.
+- **`ods-annotations.ods`** — a hand-crafted OpenDocument spreadsheet (F11.56) in LibreOffice's
+  shape, written by hand after LibreOffice's output (no LibreOffice in the build environment). It has
+  cell comments (`office:annotation`, written before the cell's paragraph) on a string, an empty, an
+  error, a number and an unparseable-date cell, a comment holding a link, and a text frame and a
+  custom shape anchored in cells (written after the cell's paragraph, with their end cell). A2 (a
+  comment between two paragraphs of one cell) and D2 (an empty self-closed comment) are robustness
+  cases LibreOffice itself does not write. None of that comment or shape text is cell content:
+  `reader/__tests__/ods-annotations.test.ts` reads every cell verbatim and pins that only B2's own
+  link is a hyperlink.
 - **`ods-encrypted.ods`**, **`ods-not-spreadsheet.ods`**, **`ods-no-content.ods`** — typed-reject
   cases for `openOds`: a manifest declaring `manifest:encryption-data` (→ `unsupported`), a text
   ODF `mimetype` (→ `unsupported`), and a container missing `content.xml` (→ `missing-part`).

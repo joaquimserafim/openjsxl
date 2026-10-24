@@ -353,6 +353,76 @@ const odsEquivBody =
 	"</table:table-row>" +
 	"</table:table>";
 
+// A LibreOffice-shaped sheet with cell comments (`office:annotation`) and shapes anchored in cells
+// (`draw:frame`, `draw:custom-shape`) (F11.56). LibreOffice writes a comment as the cell's first
+// child, before the cell's own paragraph, and a cell-anchored shape last, after it, with its end
+// cell. The comment's and the shapes' paragraphs are not cell text. Hand-written after LibreOffice's
+// output shape (no LibreOffice in the build environment); A2 and D2 are robustness cases that
+// LibreOffice itself does not write.
+const ODF_NS_LO =
+	`${ODF_NS} ` +
+	'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" ' +
+	'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" ' +
+	'xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+	'xmlns:calcext="urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0"';
+const odfContentLo = (body) =>
+	`${XMLD}\n<office:document-content ${ODF_NS_LO} office:version="1.3"><office:body><office:spreadsheet>${body}</office:spreadsheet></office:body></office:document-content>`;
+const annotation = (paragraphs) =>
+	'<office:annotation draw:style-name="gr1" svg:width="28.99mm" svg:height="9.24mm" svg:x="56.5mm" svg:y="0mm">' +
+	"<dc:creator>Reviewer</dc:creator><dc:date>2024-01-15T09:30:00</dc:date>" +
+	paragraphs +
+	"</office:annotation>";
+const odsAnnotationsBody =
+	'<table:table table:name="Notes">' +
+	"<table:table-row>" +
+	// A1: a string cell with a comment.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	annotation("<text:p>check this</text:p>") +
+	"<text:p>Revenue</text:p></table:table-cell>" +
+	// B1: an empty cell with only a comment.
+	`<table:table-cell>${annotation("<text:p>note on an empty cell</text:p>")}</table:table-cell>` +
+	// C1: a formula error with a comment.
+	'<table:table-cell table:formula="of:=1/0" office:value-type="float" office:value="0" calcext:value-type="error">' +
+	annotation("<text:p>why?</text:p>") +
+	"<text:p>#DIV/0!</text:p></table:table-cell>" +
+	// D1: a comment holding a link; the cell itself has none.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	annotation('<text:p>see <text:a xlink:href="https://comment.example/">this</text:a></text:p>') +
+	"<text:p>plain</text:p></table:table-cell>" +
+	// E1: a text frame anchored in the cell.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	"<text:p>anchored</text:p>" +
+	'<draw:frame table:end-cell-address="Notes.F2" table:end-x="5mm" table:end-y="2mm" draw:z-index="0" draw:name="Text Frame 1" svg:width="20mm" svg:height="5mm" svg:x="0mm" svg:y="0mm">' +
+	"<draw:text-box><text:p>frame text</text:p></draw:text-box></draw:frame></table:table-cell>" +
+	// F1: a custom shape with text, anchored in the cell.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	"<text:p>shape</text:p>" +
+	'<draw:custom-shape table:end-cell-address="Notes.G2" table:end-x="5mm" table:end-y="2mm" draw:z-index="1" draw:name="Shape 1" svg:width="20mm" svg:height="5mm" svg:x="0mm" svg:y="0mm">' +
+	'<text:p>shape text</text:p><draw:enhanced-geometry draw:type="rectangle"/></draw:custom-shape></table:table-cell>' +
+	"</table:table-row>" +
+	"<table:table-row>" +
+	// A2: two paragraphs around a two-paragraph comment.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	"<text:p>line 1</text:p>" +
+	annotation("<text:p>a</text:p><text:p>b</text:p>") +
+	"<text:p>line 2</text:p></table:table-cell>" +
+	// B2: a real cell link next to a link in its comment.
+	'<table:table-cell office:value-type="string" calcext:value-type="string">' +
+	annotation('<text:p><text:a xlink:href="https://comment.example/">x</text:a></text:p>') +
+	'<text:p><text:a xlink:href="https://cell.example/">site</text:a></text:p></table:table-cell>' +
+	// C2: a number with a comment.
+	'<table:table-cell office:value-type="float" office:value="5" calcext:value-type="float">' +
+	annotation("<text:p>five</text:p>") +
+	"<text:p>5</text:p></table:table-cell>" +
+	// D2: an empty, self-closed comment element.
+	'<table:table-cell office:value-type="string" calcext:value-type="string"><office:annotation/><text:p>solo</text:p></table:table-cell>' +
+	// E2: an unparseable date falls back to its display text, without the comment.
+	'<table:table-cell office:value-type="date" office:date-value="not a date" calcext:value-type="date">' +
+	annotation("<text:p>odd date</text:p>") +
+	"<text:p>someday</text:p></table:table-cell>" +
+	"</table:table-row>" +
+	"</table:table>";
+
 const ods = [
 	{
 		file: "equiv.ods",
@@ -367,6 +437,14 @@ const ods = [
 		parts: [
 			{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) },
 			{ name: "content.xml", xml: odfContent(odsEdgeBody) },
+			{ name: "META-INF/manifest.xml", xml: odfManifest(MIMETYPE_ODS) },
+		],
+	},
+	{
+		file: "ods-annotations.ods",
+		parts: [
+			{ name: "mimetype", data: new TextEncoder().encode(MIMETYPE_ODS) },
+			{ name: "content.xml", xml: odfContentLo(odsAnnotationsBody) },
 			{ name: "META-INF/manifest.xml", xml: odfManifest(MIMETYPE_ODS) },
 		],
 	},
