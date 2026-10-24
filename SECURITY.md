@@ -24,8 +24,8 @@ development branch are welcome, but unreleased code is not a supported published
 **Version note, 2026-10-22:** the latest published version is **1.0.0**. This branch contains work
 toward **1.0.1**, which is not yet released; its unchanged package version does not make these
 changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
-the exact ZIP-entry size checks and the ZIP entry-overlap check described below are unreleased
-1.0.1 changes, absent from 1.0.0.
+the exact ZIP-entry size checks, the ZIP entry-overlap check and the read-each-part-once rule
+described below are unreleased 1.0.1 changes, absent from 1.0.0.
 
 ## Processing untrusted files
 
@@ -52,11 +52,14 @@ not use these guards and parses its input synchronously.
 On this unreleased 1.0.1 branch, these readers also require every ZIP entry to occupy its own bytes.
 Before any part is read, an archive is rejected with `XlsxError` code `corrupt-zip` when two
 entries share bytes, or when an entry's data reaches the central directory. This stops many ZIP
-entries from naming one small compressed stream so that it inflates once per entry. It is not a
-limit on total decompressed output. Each part read is still bounded only by the per-entry limits
-above, and a package can still name one part many times above the ZIP layer: an xlsx whose sheets
-all refer to one worksheet part decompresses and keeps that part once per sheet, so a file of
-about 10 KB can still cost close to 1 GB of memory.
+entries from naming one small compressed stream so that it inflates once per entry. Above the ZIP
+layer, opening a workbook with `openXlsx` or `openXlsb` reads each worksheet, sheet-relationships,
+comments, table, shared-strings, styles and theme part at most once. A later sheet whose worksheet
+part was already read is left out of `sheets`, and a comments or table part that was already read
+is skipped. Pictures, which `Worksheet.images()` and so `workbookToInput` read on demand, are not
+covered yet. None of this limits total decompressed output: each part read is still bounded only by
+the per-entry limits above, so a workbook of many distinct large parts can still use a large amount
+of memory.
 
 Applications that accept untrusted uploads should:
 

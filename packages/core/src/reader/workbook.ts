@@ -47,6 +47,7 @@ import type {
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
 import { directoryOf, relsPathFor } from "./opc-path";
+import { claimPart } from "./part-claims";
 import {
 	type PrintSetup,
 	parseAutoFilter,
@@ -484,7 +485,12 @@ export class XlsxWorksheet implements Worksheet {
 }
 
 export class Workbook {
-	/** Sheets in tab order. */
+	/**
+	 * Sheets in tab order, as loaded. A declared sheet is left out when its worksheet part is missing,
+	 * external or dangling, or when this open already read that part: an earlier loaded sheet's, or a
+	 * workbook-level part such as the styles part (xlsx and xlsb). An xlsx sheet whose name repeats an
+	 * earlier loaded sheet's is left out too.
+	 */
 	readonly sheets: readonly SheetInfo[];
 	/**
 	 * Defined (named) ranges and constants declared in the workbook, in document order. Empty for
@@ -578,6 +584,8 @@ export class Workbook {
 
 interface LoadedWorkbook {
 	readonly zip: ZipArchive;
+	/** The part paths this open has read so far (F11.95); later loads claim theirs through it. */
+	readonly claimed: Set<string>;
 	/** Shared decode context (shared strings, styles, date system) for every sheet. */
 	readonly context: DecodeContext;
 	/** Sheets in tab order, each with its resolved part path. */
@@ -604,9 +612,14 @@ async function loadWorkbook(
 ): Promise<LoadedWorkbook> {
 	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
 	const zip = openZip(bytes, options);
+	// Every part path this open reads (F11.95). The fixed package parts below are recorded as they are
+	// read; the optional shared-strings, styles and theme parts, and every sheet, sheet-rels, comments
+	// and table load, skip a path already in the set (the part reads as absent).
+	const claimed = new Set<string>();
 
 	// Package relationships → the workbook part.
 	const packageRels = parseRels(await readText(zip, "_rels/.rels"));
+	claimed.add("_rels/.rels");
 	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT));
 	if (office === undefined) {
 		throw new XlsxError("not-xlsx", "not an xlsx: no officeDocument relationship");
@@ -621,6 +634,7 @@ async function loadWorkbook(
 	const macroEnabled =
 		zip.has("[Content_Types].xml") &&
 		(await readText(zip, "[Content_Types].xml")).includes("macroEnabled.main");
+	if (zip.has("[Content_Types].xml")) claimed.add("[Content_Types].xml");
 
 	// Workbook sheet list + date system + the workbook's own relationships.
 	const {
@@ -629,14 +643,16 @@ async function loadWorkbook(
 		definedNames,
 		protection,
 	} = parseWorkbook(await readText(zip, workbookPath));
+	claimed.add(workbookPath);
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
+	claimed.add(relsPathFor(workbookPath));
 
 	// Shared string table (optional — a workbook may use only inline strings).
 	let sharedStrings: string[] = [];
 	const sst = [...workbookRels.values()].find((r) => r.type.endsWith(REL_SHARED_STRINGS));
 	if (sst !== undefined && sst.targetMode !== "External") {
 		const sstPath = resolveTarget(workbookDir, sst.target);
-		if (zip.has(sstPath)) {
+		if (zip.has(sstPath) && claimPart(claimed, sstPath)) {
 			sharedStrings = parseSharedStrings(decodeText(await zip.read(sstPath)));
 		}
 	}
@@ -649,7 +665,7 @@ async function loadWorkbook(
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES));
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const stylesPath = resolveTarget(workbookDir, stylesRel.target);
-		if (zip.has(stylesPath)) {
+		if (zip.has(stylesPath) && claimPart(claimed, stylesPath)) {
 			const stylesText = decodeText(await zip.read(stylesPath));
 			styles = parseStyles(stylesText);
 			dxfs = parseDxfs(stylesText);
@@ -667,7 +683,7 @@ async function loadWorkbook(
 	const themeRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_THEME));
 	if (themeRel !== undefined && themeRel.targetMode !== "External") {
 		const themePath = resolveTarget(workbookDir, themeRel.target);
-		if (zip.has(themePath)) {
+		if (zip.has(themePath) && claimPart(claimed, themePath)) {
 			const decoded = decodeText(await zip.read(themePath));
 			// A present-but-EMPTY theme part (a truncated/corrupt producer) is no usable theme —
 			// treat it as absent so resolveColor degrades to `undefined` and, crucially, the bridge
@@ -679,8 +695,10 @@ async function loadWorkbook(
 
 	// Resolve each sheet's r:id to a part path. A sheet whose worksheet part is missing, external, or
 	// dangling is DROPPED — so the loaded list can be shorter than workbook.xml declared, and the
-	// survivors compact to a new 0-based order. Track raw→loaded so sheet-scoped defined names can be
-	// re-indexed against the sheets that actually loaded.
+	// survivors compact to a new 0-based order. So is a sheet whose part this open already read (an
+	// earlier loaded sheet's, or a workbook-level part): a package that names one worksheet part many
+	// times would otherwise decode and keep it once per sheet (F11.95). Track raw→loaded so
+	// sheet-scoped defined names can be re-indexed against the sheets that actually loaded.
 	const sheets: Array<{ info: SheetInfo; path: string }> = [];
 	const rawToLoaded = new Map<number, number>();
 	const seenNames = new Set<string>();
@@ -698,6 +716,8 @@ async function loadWorkbook(
 		// drop later aliases, and leave them absent from rawToLoaded so scoped names reconcile below.
 		const nameKey = entry.name.toLowerCase();
 		if (seenNames.has(nameKey)) continue;
+		// Only a loaded sheet claims its path, and a sheet dropped for its name claims nothing.
+		if (!claimPart(claimed, path)) continue;
 		seenNames.add(nameKey);
 		rawToLoaded.set(raw, sheets.length);
 		sheets.push({
@@ -725,6 +745,7 @@ async function loadWorkbook(
 
 	return {
 		zip,
+		claimed,
 		context,
 		sheets,
 		themeXml,
@@ -763,8 +784,17 @@ export async function openXlsx(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<Workbook> {
-	const { zip, context, sheets, themeXml, definedNames, protection, macroEnabled, date1904 } =
-		await loadWorkbook(source, options);
+	const {
+		zip,
+		claimed,
+		context,
+		sheets,
+		themeXml,
+		definedNames,
+		protection,
+		macroEnabled,
+		date1904,
+	} = await loadWorkbook(source, options);
 
 	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
 	const infos: SheetInfo[] = [];
@@ -772,18 +802,23 @@ export async function openXlsx(
 	for (const { info, path } of sheets) {
 		const xml = decodeText(await zip.read(path));
 		// The sheet's own relationships (xl/worksheets/_rels/sheetN.xml.rels) resolve hyperlink
-		// r:ids and locate the comments part. Optional — a plain sheet has no rels part.
+		// r:ids and locate the comments part. Optional — a plain sheet has no rels part. This and the
+		// comments and table parts below are each read at most once per open (F11.95): a part this
+		// open already read is skipped, and the sheet loads without it.
 		const relsPath = relsPathFor(path);
-		const rels = zip.has(relsPath)
-			? parseRels(decodeText(await zip.read(relsPath)))
-			: undefined;
+		const rels =
+			zip.has(relsPath) && claimPart(claimed, relsPath)
+				? parseRels(decodeText(await zip.read(relsPath)))
+				: undefined;
 
 		// Comments live in a separate part linked from the worksheet rels.
 		let commentsXml: string | undefined;
 		const commentsRel = rels && [...rels.values()].find((r) => r.type.endsWith(REL_COMMENTS));
 		if (commentsRel !== undefined && commentsRel.targetMode !== "External") {
 			const commentsPath = resolveTarget(directoryOf(path), commentsRel.target);
-			if (zip.has(commentsPath)) commentsXml = decodeText(await zip.read(commentsPath));
+			if (zip.has(commentsPath) && claimPart(claimed, commentsPath)) {
+				commentsXml = decodeText(await zip.read(commentsPath));
+			}
 		}
 
 		// Tables are one part each (a sheet may own several), linked from the worksheet rels.
@@ -792,7 +827,9 @@ export async function openXlsx(
 			for (const rel of rels.values()) {
 				if (!rel.type.endsWith(REL_TABLE) || rel.targetMode === "External") continue;
 				const tablePath = resolveTarget(directoryOf(path), rel.target);
-				if (zip.has(tablePath)) tablesXml.push(decodeText(await zip.read(tablePath)));
+				if (zip.has(tablePath) && claimPart(claimed, tablePath)) {
+					tablesXml.push(decodeText(await zip.read(tablePath)));
+				}
 			}
 		}
 

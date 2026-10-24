@@ -27,6 +27,7 @@ import {
 import { openZip, type ZipArchive } from "../zip";
 import { decodeText } from "./decode";
 import { directoryOf, relsPathFor } from "./opc-path";
+import { claimPart } from "./part-claims";
 import { type ReadOptions, Workbook } from "./workbook";
 
 // The `.xlsb` reader. An Excel Binary Workbook is the SAME OPC container as `.xlsx` — the package
@@ -221,9 +222,13 @@ export async function openXlsb(
 ): Promise<Workbook> {
 	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
 	const zip = openZip(bytes, options);
+	// Every part path this open reads (F11.95), as in openXlsx: the optional shared-strings and styles
+	// parts, and every sheet and sheet-rels load, skip a path already in the set.
+	const claimed = new Set<string>();
 
 	// Package relationships → the workbook part (BIFF12, but the rels are XML).
 	const packageRels = parseRels(await readText(zip, "_rels/.rels"));
+	claimed.add("_rels/.rels");
 	const office = [...packageRels.values()].find((r) => r.type.endsWith(REL_OFFICE_DOCUMENT));
 	if (office === undefined) {
 		throw new XlsxError("not-xlsx", "not a valid xlsb: no officeDocument relationship");
@@ -232,34 +237,42 @@ export async function openXlsb(
 	const workbookDir = directoryOf(workbookPath);
 
 	const { sheets: sheetEntries, date1904 } = parseXlsbWorkbook(await readPart(zip, workbookPath));
+	claimed.add(workbookPath);
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
+	claimed.add(relsPathFor(workbookPath));
 
 	// Shared strings + styles (optional parts, resolved through the workbook rels).
 	let sharedStrings: string[] = [];
 	const sstRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_SHARED_STRINGS));
 	if (sstRel !== undefined && sstRel.targetMode !== "External") {
 		const p = resolveTarget(workbookDir, sstRel.target);
-		if (zip.has(p)) sharedStrings = parseXlsbStrings(await zip.read(p));
+		if (zip.has(p) && claimPart(claimed, p))
+			sharedStrings = parseXlsbStrings(await zip.read(p));
 	}
 	let styles: XlsbStyleTable | undefined;
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES));
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const p = resolveTarget(workbookDir, stylesRel.target);
-		if (zip.has(p)) styles = parseXlsbStyles(await zip.read(p));
+		if (zip.has(p) && claimPart(claimed, p)) styles = parseXlsbStyles(await zip.read(p));
 	}
 
-	const infos: SheetInfo[] = [];
-	const byName = new Map<string, Worksheet>();
+	// Claim every sheet's part before any sheet's rels are read, as openXlsx does. A sheet whose part
+	// this open already read (an earlier sheet's, or a workbook-level part) is dropped (F11.95).
+	const loadable: { readonly entry: (typeof sheetEntries)[number]; readonly path: string }[] = [];
 	for (const entry of sheetEntries) {
 		const rel = workbookRels.get(entry.relId);
 		if (rel === undefined || rel.targetMode === "External") continue;
 		const path = resolveTarget(workbookDir, rel.target);
-		if (!zip.has(path)) continue;
+		if (zip.has(path) && claimPart(claimed, path)) loadable.push({ entry, path });
+	}
 
+	const infos: SheetInfo[] = [];
+	const byName = new Map<string, Worksheet>();
+	for (const { entry, path } of loadable) {
 		const parsed = parseXlsbSheet(await zip.read(path), sharedStrings, styles, date1904);
 
 		// Resolve hyperlink rel ids through the sheet's own rels part.
-		const hyperlinks = await resolveHyperlinks(zip, path, parsed.hyperlinks);
+		const hyperlinks = await resolveHyperlinks(zip, path, parsed.hyperlinks, claimed);
 
 		const info: SheetInfo = {
 			name: entry.name,
@@ -294,16 +307,28 @@ async function readPart(zip: ZipArchive, path: string): Promise<Uint8Array> {
 	return zip.read(path);
 }
 
-// Turn each sheet hyperlink's rel id into a resolved external target / in-workbook location, using
-// the worksheet's own rels part — exactly as the xlsx reader does.
-async function resolveHyperlinks(
+/**
+ * Turn each sheet hyperlink's rel id into a resolved external target / in-workbook location, using
+ * the worksheet's own rels part — exactly as the xlsx reader does. The rels part is claimed for this
+ * open first (F11.95); a part already read is skipped and the links keep only their refs.
+ *
+ * @example await resolveHyperlinks(zip, "xl/worksheets/sheet1.bin", [], claimed) // []
+ * @example await resolveHyperlinks(zip, "xl/worksheets/sheet1.bin", [{ ref: "A1", relId: "rId1" }], claimed) // [{ ref: "A1", target: "https://example.com/" }] for an external rel
+ * @example await resolveHyperlinks(zip, "xl/worksheets/sheet1.bin", [{ ref: "A1", relId: "rId2" }], claimed) // [{ ref: "A1", location: "xl/worksheets/sheet2.bin" }] for an internal rel
+ * @example await resolveHyperlinks(zip, "xl/worksheets/sheet1.bin", [{ ref: "A1", relId: "rId9" }], claimed) // [{ ref: "A1" }]: no such rel, or the rels part already read
+ */
+export async function resolveHyperlinks(
 	zip: ZipArchive,
 	sheetPath: string,
 	refs: readonly { readonly ref: string; readonly relId: string }[],
+	claimed: Set<string>,
 ): Promise<readonly Hyperlink[]> {
 	if (refs.length === 0) return [];
 	const relsPath = relsPathFor(sheetPath);
-	const rels = zip.has(relsPath) ? parseRels(await readText(zip, relsPath)) : undefined;
+	const rels =
+		zip.has(relsPath) && claimPart(claimed, relsPath)
+			? parseRels(await readText(zip, relsPath))
+			: undefined;
 	const sheetDir = directoryOf(sheetPath);
 	const links: Hyperlink[] = [];
 	for (const { ref, relId } of refs) {
