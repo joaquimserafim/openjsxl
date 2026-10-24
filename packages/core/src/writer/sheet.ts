@@ -1212,7 +1212,19 @@ interface BuiltCfRule {
 	readonly children: string;
 }
 
-function conditionalFormattingXml(
+/**
+ * The sheet's `<conditionalFormatting>` elements: each block's validated rules, in document order,
+ * with priorities renumbered densely 1..n across the sheet by (caller priority, document order).
+ * Each block's rules are gathered in one pass after they are built, so emission is linear in rules
+ * plus blocks (F11.55), and it walks the blocks that were validated.
+ *
+ * @example conditionalFormattingXml("S", undefined, styles) // ""
+ * @example conditionalFormattingXml("S", [], styles) // ""
+ * @example conditionalFormattingXml("S", [{ sqref: ["A1"], rules: [{ type: "cellIs", priority: 1, operator: "greaterThan", formulas: ["1"] }] }], styles) // '<conditionalFormatting sqref="A1"><cfRule type="cellIs" priority="1" operator="greaterThan"><formula>1</formula></cfRule></conditionalFormatting>'
+ * @example conditionalFormattingXml("S", {}, styles) // throws XlsxError invalid-input: conditionalFormatting must be an array
+ * @example conditionalFormattingXml("S", [{ sqref: ["A1"], rules: [] }], styles) // throws XlsxError invalid-input: conditionalFormatting[0].rules must have at least one rule
+ */
+export function conditionalFormattingXml(
 	sheetName: string,
 	cfs: readonly ConditionalFormatting[] | undefined,
 	styles: StyleRegistry,
@@ -1264,6 +1276,10 @@ function conditionalFormattingXml(
 		}
 	}
 
+	// Each validated block's rules, in document order, gathered in one pass (F11.55).
+	const blockRules: BuiltCfRule[][] = blockSqref.map(() => []);
+	for (const rule of built) blockRules[rule.block]?.push(rule);
+
 	// Renumber priorities densely 1..n by (caller priority asc, document order asc) — decision 6.
 	const order = [...built].sort((a, z) => a.priority - z.priority || a.doc - z.doc);
 	const assigned = new Map<number, number>();
@@ -1273,10 +1289,9 @@ function conditionalFormattingXml(
 	}
 
 	let out = "";
-	for (let b = 0; b < cfs.length; b++) {
+	for (let b = 0; b < blockRules.length; b++) {
 		let rulesXml = "";
-		for (const rule of built) {
-			if (rule.block !== b) continue;
+		for (const rule of blockRules[b] ?? []) {
 			const p = assigned.get(rule.doc) ?? 1;
 			const head = `${rule.open} priority="${p}"${rule.rest}`;
 			rulesXml +=
