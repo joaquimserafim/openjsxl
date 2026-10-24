@@ -410,7 +410,8 @@ export interface ImageAnchor {
 /**
  * A picture on a worksheet. `bytes` is the raw, undecoded image payload; `mime` is its media type
  * (`image/png`, `image/jpeg`, `image/gif`, …). `name` is the producer's picture name when present.
- * Pictures sharing one media part share one `bytes` buffer on read.
+ * Pictures sharing one media part share one `bytes` buffer on read, across sheets too, so treat `bytes`
+ * as read-only: copy it before mutating or transferring it.
  */
 export interface SheetImage {
 	readonly anchor: ImageAnchor;

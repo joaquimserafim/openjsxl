@@ -56,10 +56,12 @@ entries from naming one small compressed stream so that it inflates once per ent
 layer, opening a workbook with `openXlsx` or `openXlsb` reads each worksheet, sheet-relationships,
 comments, table, shared-strings, styles and theme part at most once. A later sheet whose worksheet
 part was already read is left out of `sheets`, and a comments or table part that was already read
-is skipped. Pictures, which `Worksheet.images()` and so `workbookToInput` read on demand, are not
-covered yet. None of this limits total decompressed output: each part read is still bounded only by
-the per-entry limits above, so a workbook of many distinct large parts can still use a large amount
-of memory.
+is skipped. Pictures, which `Worksheet.images()` and so `workbookToInput` read on demand, follow
+the same rule: each drawing and image part is read at most once per workbook, a drawing part named
+by several sheets belongs to the first sheet in tab order, and pictures that use one image part
+share one buffer. None of this limits total decompressed output: each part read is still bounded
+only by the per-entry limits above, so a workbook of many distinct large parts can still use a large
+amount of memory.
 
 Applications that accept untrusted uploads should:
 

@@ -92,49 +92,96 @@ async function readText(zip: ZipArchive, path: string): Promise<string> {
 	return decodeText(await zip.read(path));
 }
 
+/** A drawing part a sheet owns (F11.96), with its rels part when the sheet owns that too. */
+export interface OwnedDrawing {
+	readonly path: string;
+	/** The drawing's rels part, or `undefined` when it is missing or another role claimed it first. */
+	readonly rels: string | undefined;
+}
+
 /**
- * Collect a sheet's pictures (F6.2). It follows the chain the file uses: the sheet points to a
- * drawing, the drawing lists the pictures, and each picture points to an image file — this reads
- * that image data. Anything broken or missing along the way (no drawing, no image, an odd anchor)
- * just skips that one picture instead of failing. Each image file is read only once, so two pictures
- * using the same file share the same bytes.
+ * The drawing parts a sheet owns (F11.96): each drawing relationship's part, in relationship order,
+ * claimed in this open's set together with the drawing's rels part. The first sheet in tab order
+ * that names a drawing part owns it, and a repeat relationship, on the same sheet or a later one, is
+ * skipped. Nothing is read.
+ *
+ * @example claimDrawings(zip, "xl/worksheets/sheet1.xml", rels, claimed) // [{ path: "xl/drawings/drawing1.xml", rels: "xl/drawings/_rels/drawing1.xml.rels" }]
+ * @example claimDrawings(zip, "xl/worksheets/sheet2.xml", relsNamingDrawing1, claimed) // [] after sheet 1 claimed it
+ * @example claimDrawings(zip, "xl/worksheets/sheet1.xml", undefined, claimed) // []: no rels part
  */
-async function loadSheetImages(
+export function claimDrawings(
 	zip: ZipArchive,
 	sheetPath: string,
-	sheetRels: Map<string, Relationship> | undefined,
-): Promise<readonly SheetImage[]> {
+	sheetRels: ReadonlyMap<string, Relationship> | undefined,
+	claimed: Set<string>,
+): OwnedDrawing[] {
 	if (sheetRels === undefined) return [];
-	const drawingRels = [...sheetRels.values()].filter(
-		(r) => r.type.endsWith(REL_DRAWING) && r.targetMode !== "External",
-	);
-	if (drawingRels.length === 0) return [];
+	const owned: OwnedDrawing[] = [];
+	for (const rel of sheetRels.values()) {
+		if (!rel.type.endsWith(REL_DRAWING) || rel.targetMode === "External") continue;
+		const path = resolveTarget(directoryOf(sheetPath), rel.target);
+		if (!zip.has(path) || !claimPart(claimed, path)) continue;
+		const relsPath = relsPathFor(path);
+		owned.push({
+			path,
+			rels: zip.has(relsPath) && claimPart(claimed, relsPath) ? relsPath : undefined,
+		});
+	}
+	return owned;
+}
 
-	const sheetDir = directoryOf(sheetPath);
+/**
+ * The bytes of the media part at `path`, read once per workbook: the first call starts the read and
+ * caches its promise in `cache`, and later calls (concurrent ones too) share it.
+ *
+ * @example await cachedRead(zip, cache, "xl/media/image1.png") // reads the part
+ * @example await cachedRead(zip, cache, "xl/media/image1.png") // the same Uint8Array, not read again
+ */
+export function cachedRead(
+	zip: ZipArchive,
+	cache: Map<string, Promise<Uint8Array>>,
+	path: string,
+): Promise<Uint8Array> {
+	const cached = cache.get(path);
+	if (cached !== undefined) return cached;
+	const read = zip.read(path);
+	cache.set(path, read);
+	return read;
+}
+
+/**
+ * Collect a sheet's pictures (F6.2) from the drawing parts it owns (see {@link claimDrawings}). It
+ * follows the chain the file uses: the drawing lists the pictures, and each picture points to an image
+ * file. Anything broken or missing along the way (no image, an odd anchor) just skips that one picture
+ * instead of failing. Each owned drawing and its rels part are read here, once; image files are read
+ * through `media`, which the workbook's sheets share, so pictures using one image file share one
+ * `bytes` buffer (F11.96). An image path this open claimed in another role (`claimed`: a part read at
+ * open, or a drawing or drawing-rels part) is not read as an image.
+ *
+ * @example await loadSheetImages(zip, [], claimed, media) // []: the sheet owns no drawing
+ * @example await loadSheetImages(zip, [{ path: "xl/drawings/drawing1.xml", rels: "xl/drawings/_rels/drawing1.xml.rels" }], claimed, media) // [{ anchor, bytes, mime }]
+ */
+export async function loadSheetImages(
+	zip: ZipArchive,
+	drawings: readonly OwnedDrawing[],
+	claimed: ReadonlySet<string>,
+	media: Map<string, Promise<Uint8Array>>,
+): Promise<readonly SheetImage[]> {
 	const images: SheetImage[] = [];
-	for (const drawingRel of drawingRels) {
-		const drawingPath = resolveTarget(sheetDir, drawingRel.target);
-		if (!zip.has(drawingPath)) continue;
-		const anchors = parseDrawing(decodeText(await zip.read(drawingPath)));
-		if (anchors.length === 0) continue;
+	for (const drawing of drawings) {
+		const anchors = parseDrawing(decodeText(await zip.read(drawing.path)));
+		if (anchors.length === 0 || drawing.rels === undefined) continue;
 
 		// The drawing's rels map each picture's r:embed to its media part.
-		const embedRelsPath = relsPathFor(drawingPath);
-		if (!zip.has(embedRelsPath)) continue;
-		const embedRels = parseRels(decodeText(await zip.read(embedRelsPath)));
-		const drawingDir = directoryOf(drawingPath);
-		const mediaCache = new Map<string, Uint8Array>();
+		const embedRels = parseRels(decodeText(await zip.read(drawing.rels)));
+		const drawingDir = directoryOf(drawing.path);
 
 		for (const anchor of anchors) {
 			const rel = embedRels.get(anchor.embed);
 			if (rel === undefined || rel.targetMode === "External") continue;
 			const mediaPath = resolveTarget(drawingDir, rel.target);
-			if (!zip.has(mediaPath)) continue;
-			let bytes = mediaCache.get(mediaPath);
-			if (bytes === undefined) {
-				bytes = await zip.read(mediaPath);
-				mediaCache.set(mediaPath, bytes);
-			}
+			if (!zip.has(mediaPath) || claimed.has(mediaPath)) continue;
+			const bytes = await cachedRead(zip, media, mediaPath);
 			images.push({
 				anchor: {
 					from: anchor.from,
@@ -442,10 +489,12 @@ export class XlsxWorksheet implements Worksheet {
 	 * buffer. Empty when the sheet has no pictures. Shapes, charts, and free-floating (absolute)
 	 * pictures aren't included, and a picture whose image file is missing is skipped.
 	 *
-	 * Media is cached per SHEET, not per workbook: when several sheets show the same image, each
-	 * sheet's first `images()` call decompresses that image once more (sheets stay independent, and
-	 * a sheet whose pictures you never touch costs nothing). Rewriting through the bridge is
-	 * unaffected — the writer dedupes identical bytes back into one media part.
+	 * Media is cached per WORKBOOK (F11.96): each drawing and image file is read at most once, however
+	 * many sheets or calls ask for it, and pictures on different sheets that use one image file share
+	 * one `bytes` buffer, so treat `bytes` as read-only (copy it before mutating or transferring it). A
+	 * sheet whose pictures you never touch still costs nothing. A drawing part named by several sheets
+	 * belongs to the first sheet in tab order, whichever sheet's `images()` runs first, and a drawing
+	 * named twice by one sheet gives its pictures once.
 	 */
 	images(): Promise<readonly SheetImage[]> {
 		if (this.#imagesPromise === undefined) {
@@ -796,7 +845,9 @@ export async function openXlsx(
 		date1904,
 	} = await loadWorkbook(source, options);
 
-	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet.
+	// Decompress each worksheet (so cell access is synchronous) and build the Worksheet. Image parts
+	// are read lazily, through one cache the workbook's sheets share (F11.96).
+	const pictureReads = new Map<string, Promise<Uint8Array>>();
 	const infos: SheetInfo[] = [];
 	const byName = new Map<string, Worksheet>();
 	for (const { info, path } of sheets) {
@@ -836,10 +887,12 @@ export async function openXlsx(
 		infos.push(info);
 		// First definition wins if two sheets somehow share a name.
 		if (!byName.has(info.name)) {
-			// A lazy picture loader — captures the zip + this sheet's path/rels, invoked only on the
-			// first Worksheet.images() call so a sheet whose images you never read costs no media I/O.
+			// A lazy picture loader, invoked only on the first Worksheet.images() call so a sheet whose
+			// images you never read costs no media I/O. The drawing parts it may read are claimed now,
+			// in tab order, so which sheet owns a drawing never depends on call order (F11.96).
+			const drawings = claimDrawings(zip, path, rels, claimed);
 			const loadImages = (): Promise<readonly SheetImage[]> =>
-				loadSheetImages(zip, path, rels);
+				loadSheetImages(zip, drawings, claimed, pictureReads);
 			byName.set(
 				info.name,
 				new XlsxWorksheet(info, xml, context, rels, commentsXml, loadImages, tablesXml),
