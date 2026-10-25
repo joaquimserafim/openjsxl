@@ -1,3 +1,4 @@
+import { XlsxError } from "../errors";
 import { formatRef, MAX_COL, MAX_ROW } from "../ooxml";
 import type { Cell, Hyperlink, SheetState } from "../types";
 import { tokenize } from "../xml";
@@ -14,8 +15,10 @@ import { tokenize } from "../xml";
 // pads every sheet's tail this way). We never materialize an EMPTY repeat — an empty cell/row emits
 // nothing and only advances the position cursor (saturated at the grid bounds) — so a
 // repeat-to-the-edge tail costs O(1). Non-empty repeats DO materialize (a value filled across cells
-// is real content), clamped to the grid and to a per-sheet cell ceiling, so total materialization is
-// bounded by content or the cap, never by an attacker-chosen repeat count.
+// is real content), clamped to the grid. Each cell element is kept as one run and expanded when its
+// row ends; the instances a repeat creates beyond the element itself count against a document-wide
+// budget, checked before any of them is placed, and spending it fails typed (F11.57). Literal cells
+// never count, so total materialization is bounded by the input's size plus the budget.
 
 /** A parsed ODF sheet: the shared cell/merge/link model plus its tab identity. */
 export interface OdsSheet {
@@ -28,11 +31,19 @@ export interface OdsSheet {
 	readonly dimension: string | undefined;
 }
 
-// Cap accumulated text per cell so a `<text:s text:c="1e9"/>` space run can't balloon memory.
-const MAX_CELL_TEXT = 32_768;
-// Cap materialized cells per sheet: legit sheets sit far below this; a non-empty repeat bomb
-// degrades (cells past the cap are dropped) instead of expanding to the full 2^34-cell grid.
-const MAX_ODS_CELLS = 2_000_000;
+/**
+ * Cap on the extra spaces a cell's `text:s` runs expand to (each run's first space is free), so a
+ * `<text:s text:c="1e9"/>` run can't balloon memory. Literal text, single spaces, tabs and line breaks
+ * are not capped: each costs input bytes of its own (F11.57).
+ */
+export const MAX_GENERATED_TEXT = 32_768;
+/**
+ * The document-wide budget for cells that `table:number-columns-repeated` and
+ * `table:number-rows-repeated` create beyond the cell element itself. Legitimate repeats sit far below
+ * it; a repeat bomb fails with `XlsxError('part-too-large')` instead of expanding toward the 2^34-cell
+ * grid (F11.57).
+ */
+export const MAX_ODS_REPEATED_CELLS = 2_000_000;
 
 // A non-empty cell decoded but not yet placed at a final A1 ref (row placement is deferred because a
 // row can itself repeat). `type`/`value` are a valid Cell pairing by construction.
@@ -41,10 +52,14 @@ interface DecodedCell {
 	readonly value: string | number | boolean | Date | null;
 }
 
-interface PendingCell {
+// One cell element of the current row, kept as a run until the row ends (F11.57).
+interface PendingRun {
 	/** 1-based column of the first instance. */
 	readonly col: number;
+	/** Instances across the row, already clamped to the grid; at least 1. */
+	readonly count: number;
 	readonly decoded: DecodedCell;
+	// A hyperlink and a merge belong to the first instance only.
 	readonly href: string | undefined;
 	readonly spanCols: number;
 	readonly spanRows: number;
@@ -161,10 +176,18 @@ export function isNonCellContent(name: string): boolean {
 
 /**
  * Parse the whole content.xml (every sheet lives in this one part) into typed cell tables.
- * Tolerant by construction: unparseable cells degrade to empty, and no throw ever escapes here —
- * container-level failures are raised by the caller (`openOds`).
+ * Tolerant by construction: unparseable cells degrade to empty. The one throw is the repeat budget:
+ * when repeats would create more than `maxRepeatedCells` cells beyond their elements across the
+ * document, it throws `XlsxError('part-too-large')` before placing any of them (F11.57).
+ * Container-level failures are raised by the caller (`openOds`).
+ *
+ * @example parseOdsContent(contentXml) // [{ name: "Sheet1", cells, merges, hyperlinks, dimension, … }]
+ * @example parseOdsContent(repeatBombXml) // throws XlsxError part-too-large
  */
-export function parseOdsContent(xml: string): OdsSheet[] {
+export function parseOdsContent(
+	xml: string,
+	maxRepeatedCells: number = MAX_ODS_REPEATED_CELLS,
+): OdsSheet[] {
 	const sheets: OdsSheet[] = [];
 
 	// Document-position gating. Sheets are the top-level <table:table> inside <office:spreadsheet>;
@@ -173,11 +196,9 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 	let spreadsheetDepth = 0;
 	let tableDepth = 0;
 
-	// DOCUMENT-WIDE materialized-cell budget (not per-sheet): the repeat-bomb cap has to span every
-	// sheet, or a tiny content.xml with N bomb sheets would materialize N × MAX_ODS_CELLS and OOM.
-	// Once spent, later cells (and their merges/hyperlinks, which each ride a materialized cell) are
-	// dropped — the reader-degrades way.
-	let totalCells = 0;
+	// DOCUMENT-WIDE repeat budget (not per-sheet): it has to span every sheet, or a tiny content.xml
+	// with N bomb sheets would materialize N times the budget. Only repeat-created cells count.
+	let repeatedCells = 0;
 
 	// Current sheet accumulation.
 	let name = "";
@@ -195,7 +216,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 	// Current row accumulation.
 	let rowRepeat = 1;
 	let colCursor = 0; // columns already consumed in this row (next cell is colCursor + 1).
-	let rowCells: PendingCell[] = [];
+	let rowRuns: PendingRun[] = [];
 
 	// Current cell accumulation.
 	let inCell = false;
@@ -207,6 +228,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 	let cellIsError = false;
 	let cellAttrs: Readonly<Record<string, string>> = {};
 	let cellText = "";
+	let generatedText = 0; // extra spaces this cell's text:s runs expanded to (see MAX_GENERATED_TEXT)
 	let cellHref: string | undefined;
 	let sawParagraph = false;
 	let paraDepth = 0; // > 0 while inside a <text:p> (character data counts only there).
@@ -247,36 +269,50 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 	const beginRow = (attrs: Readonly<Record<string, string>>): void => {
 		rowRepeat = intAttr(attrs["table:number-rows-repeated"], 1);
 		colCursor = 0;
-		rowCells = [];
+		rowRuns = [];
 	};
 
 	const endRow = (): void => {
-		if (rowCells.length > 0 && rowCursor < MAX_ROW && totalCells < MAX_ODS_CELLS) {
+		if (rowRuns.length > 0 && rowCursor < MAX_ROW) {
 			const instances = Math.min(rowRepeat, MAX_ROW - rowCursor);
-			for (let r = 0; r < instances && totalCells < MAX_ODS_CELLS; r++) {
+			// Every instance beyond each run's first one in the first row instance is repeat-created.
+			let rowWidth = 0;
+			for (const run of rowRuns) rowWidth += run.count;
+			const created = instances * rowWidth - rowRuns.length;
+			if (created > maxRepeatedCells - repeatedCells) {
+				throw new XlsxError(
+					"part-too-large",
+					`ods: repeated cells exceed the ${maxRepeatedCells}-cell budget (table:number-columns-repeated / table:number-rows-repeated)`,
+				);
+			}
+			repeatedCells += created;
+			for (let r = 0; r < instances; r++) {
 				const row = rowCursor + 1 + r;
-				for (const pc of rowCells) {
-					if (pc.col > MAX_COL) continue;
-					if (totalCells >= MAX_ODS_CELLS) break;
-					const ref = formatRef({ col: pc.col, row });
-					cells.set(ref, { ref, type: pc.decoded.type, value: pc.decoded.value } as Cell);
-					totalCells += 1;
-					if (pc.col < minCol) minCol = pc.col;
-					if (pc.col > maxCol) maxCol = pc.col;
-					if (row < minRow) minRow = row;
-					if (row > maxRow) maxRow = row;
-					// Merges + hyperlinks belong to the first row instance only (a repeated row carrying
-					// a merge is degenerate; the first placement is the faithful one).
-					if (r === 0 && pc.href !== undefined) {
-						hyperlinks.push({ ref, target: pc.href });
-					}
-					if (r === 0 && (pc.spanCols > 1 || pc.spanRows > 1)) {
-						const brCol = Math.min(pc.col + pc.spanCols - 1, MAX_COL);
-						const brRow = Math.min(row + pc.spanRows - 1, MAX_ROW);
-						// Skip a span that the grid-edge clamp collapsed to a single cell — a "XFD1:XFD1"
-						// range isn't a merge, and the writer rightly rejects it.
-						if (brCol > pc.col || brRow > row) {
-							merges.push(`${ref}:${formatRef({ col: brCol, row: brRow })}`);
+				for (const run of rowRuns) {
+					for (let k = 0; k < run.count; k++) {
+						const col = run.col + k;
+						const ref = formatRef({ col, row });
+						cells.set(ref, {
+							ref,
+							type: run.decoded.type,
+							value: run.decoded.value,
+						} as Cell);
+						if (col < minCol) minCol = col;
+						if (col > maxCol) maxCol = col;
+						if (row < minRow) minRow = row;
+						if (row > maxRow) maxRow = row;
+						// Merges + hyperlinks belong to the first row and column instance only (a repeated
+						// row carrying a merge is degenerate; the first placement is the faithful one).
+						if (r !== 0 || k !== 0) continue;
+						if (run.href !== undefined) hyperlinks.push({ ref, target: run.href });
+						if (run.spanCols > 1 || run.spanRows > 1) {
+							const brCol = Math.min(col + run.spanCols - 1, MAX_COL);
+							const brRow = Math.min(row + run.spanRows - 1, MAX_ROW);
+							// Skip a span that the grid-edge clamp collapsed to a single cell — a "XFD1:XFD1"
+							// range isn't a merge, and the writer rightly rejects it.
+							if (brCol > col || brRow > row) {
+								merges.push(`${ref}:${formatRef({ col: brCol, row: brRow })}`);
+							}
 						}
 					}
 				}
@@ -285,6 +321,9 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 		// Advance the row cursor by the full repeat (saturated) even when nothing was emitted, so a
 		// trailing empty repeated row costs O(1) and later rows land at the right index.
 		rowCursor = Math.min(rowCursor + rowRepeat, MAX_ROW);
+		// The runs are placed: a stray or nested row close that replays endRow places nothing again,
+		// so literal cells cannot be multiplied around the budget (F11.57).
+		rowRuns = [];
 	};
 
 	const beginCell = (elementName: string, attrs: Readonly<Record<string, string>>): void => {
@@ -296,6 +335,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 		cellIsError = attrs["calcext:value-type"] === "error";
 		cellAttrs = attrs;
 		cellText = "";
+		generatedText = 0;
 		cellHref = undefined;
 		sawParagraph = false;
 		paraDepth = 0;
@@ -307,28 +347,27 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 		const decoded = cellCovered
 			? undefined
 			: decodeOdsCell(cellValueType, cellIsError, cellAttrs, cellText);
-		if (decoded !== undefined) {
-			const firstCol = colCursor + 1;
-			const instances = Math.min(cellRepeat, Math.max(0, MAX_COL - colCursor));
-			for (let k = 0; k < instances; k++) {
-				rowCells.push({
-					col: firstCol + k,
-					decoded,
-					// A hyperlink/merge applies to the first instance only.
-					href: k === 0 ? cellHref : undefined,
-					spanCols: k === 0 ? cellSpanCols : 1,
-					spanRows: k === 0 ? cellSpanRows : 1,
-				});
-			}
+		const count = Math.min(cellRepeat, Math.max(0, MAX_COL - colCursor));
+		if (decoded !== undefined && count > 0) {
+			rowRuns.push({
+				col: colCursor + 1,
+				count,
+				decoded,
+				href: cellHref,
+				spanCols: cellSpanCols,
+				spanRows: cellSpanRows,
+			});
 		}
 		colCursor = Math.min(colCursor + cellRepeat, MAX_COL);
 		inCell = false;
 	};
 
-	const appendText = (s: string): void => {
-		if (cellText.length >= MAX_CELL_TEXT) return;
-		cellText += s;
-		if (cellText.length > MAX_CELL_TEXT) cellText = cellText.slice(0, MAX_CELL_TEXT);
+	// A text:s run of `count` spaces: the first space is free, and the extra ones count against
+	// MAX_GENERATED_TEXT per cell. Everything else is appended in full.
+	const appendSpaces = (count: number): void => {
+		const extra = Math.min(count - 1, MAX_GENERATED_TEXT - generatedText);
+		generatedText += extra;
+		cellText += " ".repeat(1 + extra);
 	};
 
 	for (const token of tokenize(xml)) {
@@ -369,17 +408,16 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 					else inCell = true;
 				} else if (inCell) {
 					if (n === "text:p") {
-						if (sawParagraph) appendText("\n");
+						if (sawParagraph) cellText += "\n";
 						sawParagraph = true;
 						if (!token.selfClosing) paraDepth++;
 					} else if (paraDepth > 0) {
 						if (n === "text:s") {
-							const c = intAttr(token.attrs["text:c"], 1);
-							appendText(" ".repeat(Math.min(c, MAX_CELL_TEXT)));
+							appendSpaces(intAttr(token.attrs["text:c"], 1));
 						} else if (n === "text:tab") {
-							appendText("\t");
+							cellText += "\t";
 						} else if (n === "text:line-break") {
-							appendText("\n");
+							cellText += "\n";
 						} else if (n === "text:a") {
 							if (cellHref === undefined) cellHref = token.attrs["xlink:href"];
 							// keep accumulating the link's inner text as the cell's text
@@ -388,7 +426,7 @@ export function parseOdsContent(xml: string): OdsSheet[] {
 				}
 			}
 		} else if (token.kind === "text") {
-			if (inCell && paraDepth > 0 && ignored.length === 0) appendText(token.value);
+			if (inCell && paraDepth > 0 && ignored.length === 0) cellText += token.value;
 		} else {
 			// close
 			const n = token.name;

@@ -200,7 +200,8 @@ class OdsWorksheet implements Worksheet {
  * degrade to empty/undefined on their accessors. Encrypted documents fail with a typed
  * {@link XlsxError}; a non-spreadsheet ODF file is rejected by its `mimetype` entry when one is
  * present (a mimetype-less container is judged by its `content.xml` alone and may open with
- * zero sheets).
+ * zero sheets). Repeated cells and rows that would create more than 2,000,000 cells beyond the
+ * repeated elements fail with `XlsxError('part-too-large')` (F11.57).
  */
 export async function openOds(
 	source: Uint8Array | ArrayBuffer,

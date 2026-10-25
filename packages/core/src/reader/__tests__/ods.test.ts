@@ -131,18 +131,18 @@ describe("openOds — adversarial-review regressions", () => {
 		expect([b1.getUTCFullYear(), b1.getUTCHours(), b1.getUTCMinutes()]).toEqual([1, 13, 30]);
 	});
 
-	it("bounds materialized cells DOCUMENT-WIDE across repeat-bomb sheets, not per-sheet", () => {
-		// Each sheet alone can hit the cap (200 rows × 16 384 cols > 2M); per-sheet counting would
-		// let four sheets materialize ~8M cells. A shared budget caps the total at ~2M.
+	it("fails typed once repeat bombs spend the DOCUMENT-WIDE budget, not a per-sheet one", () => {
+		// Each sheet alone creates 99,999 cells, within a 250,000 budget; per-sheet counting would let
+		// four sheets create ~400,000. The shared budget fails typed on the third (F11.57).
 		const bomb =
-			'<table:table table:name="B"><table:table-row table:number-rows-repeated="200">' +
-			'<table:table-cell office:value-type="float" office:value="1" table:number-columns-repeated="16384"/>' +
+			'<table:table table:name="B"><table:table-row table:number-rows-repeated="100">' +
+			'<table:table-cell office:value-type="float" office:value="1" table:number-columns-repeated="1000"/>' +
 			"</table:table-row></table:table>";
-		const sheets = parseOdsContent(odsDoc(bomb + bomb + bomb + bomb));
-		const total = sheets.reduce((n, s) => n + s.cells.size, 0);
-		expect(total).toBeGreaterThan(0);
-		expect(total).toBeLessThanOrEqual(2_000_000);
-	}, 20_000);
+		expect(parseOdsContent(odsDoc(bomb + bomb), 250_000)).toHaveLength(2);
+		expect(() => parseOdsContent(odsDoc(bomb + bomb + bomb + bomb), 250_000)).toThrow(
+			expect.objectContaining({ name: "XlsxError", code: "part-too-large" }),
+		);
+	});
 
 	it("drops a span that the grid-edge clamp collapses to a single cell", () => {
 		// A cell at the last column spanning 2 more columns clamps to XFD..XFD — not a real merge.

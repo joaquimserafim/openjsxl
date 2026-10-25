@@ -24,8 +24,8 @@ development branch are welcome, but unreleased code is not a supported published
 **Version note, 2026-10-22:** the latest published version is **1.0.0**. This branch contains work
 toward **1.0.1**, which is not yet released; its unchanged package version does not make these
 changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
-the exact ZIP-entry size checks, the ZIP entry-overlap check and the read-each-part-once rule
-described below are unreleased 1.0.1 changes, absent from 1.0.0.
+the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule and the
+ODS repeat budget described below are unreleased 1.0.1 changes, absent from 1.0.0.
 
 ## Processing untrusted files
 
@@ -48,6 +48,15 @@ metadata can use additional memory. The input byte buffer is already allocated b
 receives it. Streaming rows does not remove the input/archive and shared-metadata costs, and
 retaining streamed rows defeats its memory benefit. CSV/TSV has no ZIP container: `openCsv` does
 not use these guards and parses its input synchronously.
+
+On this unreleased 1.0.1 branch, `openOds` also limits the cells that ODS repeats create. A cell or
+row marked as repeated (`table:number-columns-repeated`, `table:number-rows-repeated`) may create
+at most 2,000,000 cells beyond the marked elements themselves, across the whole document. Past that,
+`openOds` fails with `XlsxError` code `part-too-large` before placing them. Empty repeats, such as
+the padding LibreOffice writes to the edge of the grid, create no cells and cost nothing. Cells
+written out one by one never count against the limit, although cells past Excel's grid are dropped
+as in the other readers. A run of spaces that a cell's markup expands (`text:s`) is capped at
+32,768 extra characters per cell.
 
 On this unreleased 1.0.1 branch, these readers also require every ZIP entry to occupy its own bytes.
 Before any part is read, an archive is rejected with `XlsxError` code `corrupt-zip` when two
