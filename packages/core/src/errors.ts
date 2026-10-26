@@ -10,7 +10,7 @@ export type XlsxErrorCode =
 	| "corrupt-zip" // the ZIP structure is malformed, or an entry failed to inflate
 	| "unsupported" // a valid but unsupported feature (ZIP64, encryption, unknown method)
 	| "no-such-sheet" // the caller asked for a sheet name the workbook does not have
-	| "part-too-large" // a part exceeds a size guard: the maxPartBytes ceiling, the compression-ratio cap, a single unterminated XML construct's bound, or the ODS repeat budget
+	| "part-too-large" // a part exceeds a size guard: the maxPartBytes ceiling, the compression-ratio cap, a single unterminated XML construct's bound, the ODS repeat budget, the CSV cell budget, or decoded text longer than the runtime's longest string
 	| "invalid-input"; // a value can't be represented in .xlsx: a cell/option passed to the writer, or a ref an a1 helper can't parse or format
 
 export class XlsxError extends Error {

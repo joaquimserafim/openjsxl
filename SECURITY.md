@@ -24,8 +24,9 @@ development branch are welcome, but unreleased code is not a supported published
 **Version note, 2026-10-22:** the latest published version is **1.0.0**. This branch contains work
 toward **1.0.1**, which is not yet released; its unchanged package version does not make these
 changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
-the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule and the
-ODS repeat budget described below are unreleased 1.0.1 changes, absent from 1.0.0.
+the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule, the
+ODS repeat budget and the CSV cell budget described below are unreleased 1.0.1 changes, absent from
+1.0.0.
 
 ## Processing untrusted files
 
@@ -47,7 +48,11 @@ budget. Many entries can each fit their limit; parsed cells, strings, styles, im
 metadata can use additional memory. The input byte buffer is already allocated before the reader
 receives it. Streaming rows does not remove the input/archive and shared-metadata costs, and
 retaining streamed rows defeats its memory benefit. CSV/TSV has no ZIP container: `openCsv` does
-not use these guards and parses its input synchronously.
+not use these guards and parses its input synchronously. On this unreleased 1.0.1 branch, `openCsv`
+fails with `XlsxError` code `part-too-large` when its input holds more than 16,000,000 non-empty
+cells within Excel's grid, or when its bytes decode to more text than the runtime's longest string.
+Fields past the grid are dropped, as in the other readers. The cell limit bounds the count of cells,
+not memory.
 
 On this unreleased 1.0.1 branch, `openOds` also limits the cells that ODS repeats create. A cell or
 row marked as repeated (`table:number-columns-repeated`, `table:number-rows-repeated`) may create

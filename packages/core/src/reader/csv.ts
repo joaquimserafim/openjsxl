@@ -1,4 +1,5 @@
-import { inferCsvValue, parseDelimited, sniffDelimiter } from "../csv";
+import { inferCsvValue, MAX_CSV_CELLS, scanDelimited, sniffDelimiter } from "../csv";
+import { XlsxError } from "../errors";
 import { formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml";
 import type {
 	Cell,
@@ -17,6 +18,7 @@ import type {
 	TableInfo,
 	Worksheet,
 } from "../types";
+import { decodeText } from "./decode";
 import { Workbook } from "./workbook";
 
 // The `.csv` / `.tsv` reader. Delimited text is the universal export; it has no container and no
@@ -24,8 +26,7 @@ import { Workbook } from "./workbook";
 // (one sheet — a CSV is a single table). A hand-rolled scanner (see ../csv) handles RFC 4180 quoting
 // and every line ending; type inference is conservative (numbers + booleans only, never dates), so a
 // spreadsheet's worth of columns crosses into the typed model without fabricating values (F7.3).
-
-const decoder = new TextDecoder();
+// Fields go straight from the scanner into cells, so no grid of every field is ever built (F11.58).
 
 const NO_MERGES: readonly string[] = [];
 const NO_HYPERLINKS: readonly Hyperlink[] = [];
@@ -189,12 +190,74 @@ class CsvWorksheet implements Worksheet {
 	}
 }
 
+/** The cells {@link csvCells} places, and their synthesized dimension. */
+export interface CsvCells {
+	readonly cells: Map<string, Cell>;
+	readonly dimension: string | undefined;
+}
+
+/**
+ * Scan delimited text into typed cells, keyed by A1 ref, with the dimension that spans them. Empty
+ * fields are absent cells, and fields past Excel's grid are dropped. Placing more than `maxCells`
+ * non-empty cells fails with `XlsxError('part-too-large')`; the default is `MAX_CSV_CELLS` (F11.58).
+ *
+ * @example csvCells("a,1\n,TRUE", ",", true) // { cells: A1 "a", B1 1, B2 true; dimension: "A1:B2" }
+ * @example csvCells("a,b,c", ",", true, 2) // throws XlsxError part-too-large
+ */
+export function csvCells(
+	text: string,
+	delimiter: string,
+	infer: boolean,
+	maxCells: number = MAX_CSV_CELLS,
+): CsvCells {
+	const cells = new Map<string, Cell>();
+	let minCol = Number.POSITIVE_INFINITY;
+	let minRow = Number.POSITIVE_INFINITY;
+	let maxCol = 0;
+	let maxRow = 0;
+
+	scanDelimited(text, delimiter, (field, r, c) => {
+		if (r >= MAX_ROW || c >= MAX_COL) return;
+		const data = infer
+			? inferCsvValue(field)
+			: field === ""
+				? undefined
+				: ({ type: "string", value: field } as const);
+		if (data === undefined) return;
+		if (cells.size >= maxCells) {
+			throw new XlsxError(
+				"part-too-large",
+				`csv: the input has more than ${maxCells} non-empty cells, the cell budget`,
+			);
+		}
+		const col = c + 1;
+		const row = r + 1;
+		const ref = formatRef({ col, row });
+		cells.set(ref, { ref, type: data.type, value: data.value } as Cell);
+		if (col < minCol) minCol = col;
+		if (col > maxCol) maxCol = col;
+		if (row < minRow) minRow = row;
+		if (row > maxRow) maxRow = row;
+	});
+
+	const dimension =
+		cells.size === 0
+			? undefined
+			: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
+	return { cells, dimension };
+}
+
 /**
  * Read delimited text (`.csv` / `.tsv`) into a {@link Workbook} of one sheet — the same public
  * surface {@link openXlsx} returns. Accepts raw bytes (decoded as UTF-8) or a string. Cells carry
  * inferred number/boolean types (never dates — see {@link CsvReadOptions.inferTypes}); merges,
  * styles, formulas, comments, geometry, and images degrade on their accessors. Synchronous: CSV has
- * no container to decompress.
+ * no container to decompress. Bytes whose text exceeds the runtime's maximum string length, and input
+ * with more than 16,000,000 non-empty cells within Excel's grid, fail with
+ * `XlsxError('part-too-large')` (F11.58).
+ *
+ * @example openCsv("name,qty\nApples,42").sheet("Sheet1").cell("B2") // { ref: "B2", type: "number", value: 42 }
+ * @example openCsv(new Uint8Array(0x1fffffe8 + 8).fill(0x41)) // throws XlsxError part-too-large
  */
 export function openCsv(
 	source: Uint8Array | ArrayBuffer | string,
@@ -203,7 +266,7 @@ export function openCsv(
 	const text =
 		typeof source === "string"
 			? source
-			: decoder.decode(source instanceof Uint8Array ? source : new Uint8Array(source));
+			: decodeText(source instanceof Uint8Array ? source : new Uint8Array(source));
 	const delimiter =
 		options?.delimiter === undefined || options.delimiter === "auto"
 			? sniffDelimiter(text)
@@ -211,40 +274,7 @@ export function openCsv(
 	const infer = options?.inferTypes ?? true;
 	const sheetName = options?.sheetName ?? "Sheet1";
 
-	const grid = parseDelimited(text, delimiter);
-	const cells = new Map<string, Cell>();
-	let minCol = Number.POSITIVE_INFINITY;
-	let minRow = Number.POSITIVE_INFINITY;
-	let maxCol = 0;
-	let maxRow = 0;
-
-	const rowCount = Math.min(grid.length, MAX_ROW);
-	for (let r = 0; r < rowCount; r++) {
-		const fields = grid[r] as string[];
-		const colCount = Math.min(fields.length, MAX_COL);
-		for (let c = 0; c < colCount; c++) {
-			const field = fields[c] as string;
-			const data = infer
-				? inferCsvValue(field)
-				: field === ""
-					? undefined
-					: ({ type: "string", value: field } as const);
-			if (data === undefined) continue;
-			const col = c + 1;
-			const row = r + 1;
-			const ref = formatRef({ col, row });
-			cells.set(ref, { ref, type: data.type, value: data.value } as Cell);
-			if (col < minCol) minCol = col;
-			if (col > maxCol) maxCol = col;
-			if (row < minRow) minRow = row;
-			if (row > maxRow) maxRow = row;
-		}
-	}
-
-	const dimension =
-		cells.size === 0
-			? undefined
-			: `${formatRef({ col: minCol, row: minRow })}:${formatRef({ col: maxCol, row: maxRow })}`;
+	const { cells, dimension } = csvCells(text, delimiter, infer);
 	const info: SheetInfo = { name: sheetName, path: sheetName, visible: true, state: "visible" };
 	const byName = new Map<string, Worksheet>([
 		[sheetName, new CsvWorksheet(info, cells, dimension)],
