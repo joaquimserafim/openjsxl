@@ -1,5 +1,5 @@
 import type { Cell, DxfStyle } from "../types";
-import { serialToDate } from "./dates";
+import { parseIsoDate, serialToDate } from "./dates";
 import type { StyleTable } from "./styles";
 
 // Turn a worksheet `<c>` element's raw pieces into a typed Cell. The `t` attribute selects
@@ -14,6 +14,7 @@ import type { StyleTable } from "./styles";
 //   "inlineStr" <is><t>            text stored inline on the cell
 //   "b"        <v>                 boolean — "1"/"0" (NOT a number)
 //   "e"        <v>                 error literal, e.g. "#DIV/0!"
+//   "d"        <v>                 ISO 8601 date/time text, e.g. "2024-03-15T13:45:30" (F11.60)
 //
 // Booleans and errors live inside `<v>` and must not be read as numbers. Malformed or
 // missing values degrade to an `empty` cell rather than throwing — a reader stays resilient
@@ -47,6 +48,29 @@ export interface DecodeContext {
 	readonly dxfs?: readonly DxfStyle[];
 }
 
+/**
+ * Decode one `<c>` element's raw pieces into a typed Cell, by its `t` attribute (see the table above).
+ * A value that is missing or does not parse reads as an empty cell.
+ *
+ * In each example `raw` is `{ ref: "A1", style: undefined }` plus the fields shown, and `ctx` is
+ * `{ sharedStrings: ["x"] }` unless a style table is named.
+ *
+ * @example decodeCell({ ...raw, type: "s", value: "0" }, ctx) // { ref: "A1", type: "string", value: "x" }
+ * @example decodeCell({ ...raw, type: "s", value: "9" }, ctx) // { ref: "A1", type: "empty", value: null } (no such string)
+ * @example decodeCell({ ...raw, type: "str", value: "y" }, ctx) // { ref: "A1", type: "string", value: "y" }
+ * @example decodeCell({ ...raw, type: "inlineStr", value: undefined }, ctx) // { ref: "A1", type: "empty", value: null }
+ * @example decodeCell({ ...raw, type: "b", value: "1" }, ctx) // { ref: "A1", type: "boolean", value: true }
+ * @example decodeCell({ ...raw, type: "b", value: undefined }, ctx) // { ref: "A1", type: "empty", value: null }
+ * @example decodeCell({ ...raw, type: "e", value: "#N/A" }, ctx) // { ref: "A1", type: "error", value: "#N/A" }
+ * @example decodeCell({ ...raw, type: "e", value: undefined }, ctx) // { ref: "A1", type: "empty", value: null }
+ * @example decodeCell({ ...raw, type: "d", value: "2024-03-15" }, ctx) // { ref: "A1", type: "date", value: 2024-03-15T00:00:00.000Z }
+ * @example decodeCell({ ...raw, type: "d", value: "2024-02-30" }, ctx) // { ref: "A1", type: "empty", value: null }
+ * @example decodeCell({ ...raw, type: "n", value: "" }, ctx) // { ref: "A1", type: "empty", value: null }
+ * @example decodeCell({ ...raw, type: "n", value: "abc" }, ctx) // { ref: "A1", type: "empty", value: null } (not a finite number)
+ * @example decodeCell({ ...raw, value: "45366", style: 1 }, { ...ctx, styles: xf1IsADate }) // { ref: "A1", type: "date", value: 2024-03-15T00:00:00.000Z }
+ * @example decodeCell({ ...raw, value: "1e300", style: 1 }, { ...ctx, styles: xf1IsADate }) // { ref: "A1", type: "number", value: 1e300 } (past Date's range)
+ * @example decodeCell({ ...raw, type: "n", value: "42" }, ctx) // { ref: "A1", type: "number", value: 42 }
+ */
 export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {
 	const { ref, value } = raw;
 
@@ -73,6 +97,14 @@ export function decodeCell(raw: RawCell, ctx: DecodeContext): Cell {
 			return value === undefined
 				? { ref, type: "empty", value: null }
 				: { ref, type: "error", value };
+		case "d": {
+			// An ISO 8601 date, whatever the cell's style or the date system (F11.60). Text that is not
+			// a real date reads as empty, never as a guessed date.
+			const date = value === undefined ? undefined : parseIsoDate(value);
+			return date === undefined
+				? { ref, type: "empty", value: null }
+				: { ref, type: "date", value: date };
+		}
 		default: {
 			// Absent or "n": a number. Reject empty/non-finite content as empty.
 			if (value === undefined || value === "") return { ref, type: "empty", value: null };

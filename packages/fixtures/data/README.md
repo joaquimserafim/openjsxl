@@ -296,6 +296,27 @@ git-ignored [`../local/`](../local) directory and are never committed.
   rewrite, but does not surface any of those unmodelled features — never a bare throw
   (`reader/__tests__/documented-drops.test.ts`; the corpus property pins the value round-trip).
 
+- **`openpyxl-iso-dates.xlsx`** — authored by **openpyxl 3.1.5** with `Workbook(iso_dates=True)`, which
+  writes dates as `t="d"` ISO 8601 text instead of serials (F11.60). One `Dates` sheet: `A1`
+  `2024-03-15T00:00:00`, `A2` `…T13:45:30`, `A3` `…T13:45:30.123` (openpyxl cuts microseconds to
+  milliseconds), `A4` the date-only `2024-02-29`, `A5` the bare time `13:45:30` (outside the scoped
+  grammar, so it reads empty), `A6` `0001-01-01T06:00:00`, `A7` `9999-12-31T23:59:59`, `B1` `=A1+1`
+  with no cached value, plus a string `C1` and a number `C2`. openpyxl reopens it warnings-as-errors
+  clean. `reader/__tests__/iso-dates.test.ts` reads it verbatim through `cell()`, `rows()`,
+  `streamSheetRows`, the evaluator and the bridge. Script:
+
+  ```python
+  import datetime as dt
+  from openpyxl import Workbook
+  wb = Workbook(iso_dates=True); ws = wb.active; ws.title = "Dates"
+  ws["A1"] = dt.datetime(2024, 3, 15); ws["A2"] = dt.datetime(2024, 3, 15, 13, 45, 30)
+  ws["A3"] = dt.datetime(2024, 3, 15, 13, 45, 30, 123456); ws["A4"] = dt.date(2024, 2, 29)
+  ws["A5"] = dt.time(13, 45, 30); ws["A6"] = dt.datetime(1, 1, 1, 6, 0)
+  ws["A7"] = dt.datetime(9999, 12, 31, 23, 59, 59)
+  ws["B1"] = "=A1+1"; ws["C1"] = "label"; ws["C2"] = 42
+  wb.save("packages/fixtures/data/openpyxl-iso-dates.xlsx")
+  ```
+
 - **`odf-basic.ods`** — authored by **odfpy** (in a throwaway venv, the same pattern as the
   openpyxl fixtures — LibreOffice was unavailable then) to exercise the `.ods` value matrix (F7.1): string,
   float, negative float, two booleans, a date and a date-time, a percentage and a currency; a
