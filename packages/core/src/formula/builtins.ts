@@ -8,6 +8,8 @@ import type {
 	RegisteredFunction,
 } from "./functions";
 import {
+	blankToText,
+	blankToZero,
 	type EvalValue,
 	errorValue,
 	type FormulaErrorValue,
@@ -80,10 +82,6 @@ function numericOrZero(v: EvalValue): number | FormulaErrorValue {
 	const s = scalarize(v);
 	if (isErrorValue(s)) return s;
 	return typeof s === "number" ? s : 0;
-}
-
-function blankToZero(v: EvalValue): EvalValue {
-	return v === null ? 0 : v;
 }
 
 // Excel aggregate rule: from a RANGE, only numbers participate (text/boolean/blank ignored); a SCALAR
@@ -598,15 +596,16 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 		// `#VALUE!` sentinel, which must NOT be mistaken for a genuine computation error. Element-wise
 		// error replacement inside a range is array behaviour, out of scope for v0.8.
 		if (isRangeView(v) && v.single() === undefined) return v;
-		if (isErrorValue(scalarize(v))) return thunks[1]?.() ?? null;
-		return v;
+		// An empty value or fallback comes back as "", as Microsoft documents for IFERROR and IFNA.
+		if (isErrorValue(scalarize(v))) return blankToText(thunks[1]?.() ?? null);
+		return blankToText(v);
 	}),
 	IFNA: lazy(2, 2, (thunks) => {
 		const v = thunks[0]?.() ?? null;
 		if (isRangeView(v) && v.single() === undefined) return v; // same range pass-through as IFERROR
 		const s = scalarize(v);
-		if (isErrorValue(s) && s.code === "#N/A") return thunks[1]?.() ?? null;
-		return v;
+		if (isErrorValue(s) && s.code === "#N/A") return blankToText(thunks[1]?.() ?? null);
+		return blankToText(v);
 	}),
 	IFS: lazy(2, POS_INF, (thunks) => {
 		for (let i = 0; i + 1 < thunks.length; i += 2) {
@@ -1159,6 +1158,9 @@ function matchFn(args: readonly EvalValue[]): EvalValue {
 	return best === undefined ? errorValue("#N/A") : best;
 }
 
+// INDEX returns the cell itself, an empty one included, as Microsoft documents it returning a
+// reference: an empty target is empty to the rest of the formula, and a formula ending in it shows 0
+// (F11.62).
 function indexFn(args: readonly EvalValue[]): EvalValue {
 	const arr = args[0];
 	const rowNum = toIndex(args[1] ?? null);
@@ -1170,7 +1172,7 @@ function indexFn(args: readonly EvalValue[]): EvalValue {
 		if (rowNum < 0 || (colNum !== undefined && colNum < 0)) return errorValue("#REF!");
 		const okRow = rowNum === 1 || rowNum === 0;
 		const okCol = colNum === undefined || colNum === 1 || colNum === 0;
-		return okRow && okCol ? blankToZero(arr ?? null) : errorValue("#REF!");
+		return okRow && okCol ? (arr ?? null) : errorValue("#REF!");
 	}
 	const h = arr.height;
 	const w = arr.width;
@@ -1192,7 +1194,7 @@ function indexFn(args: readonly EvalValue[]): EvalValue {
 		co = colNum - 1;
 	}
 	if (ro < 0 || ro >= h || co < 0 || co >= w) return errorValue("#REF!");
-	return blankToZero(arr.cellAt(ro, co));
+	return arr.cellAt(ro, co);
 }
 
 function conditionalAggregate(

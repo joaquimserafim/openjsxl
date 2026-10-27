@@ -14,6 +14,7 @@ import {
 } from "./functions";
 import { parseFormula } from "./parser";
 import {
+	blankToZero,
 	type EvalValue,
 	errorFromString,
 	errorValue,
@@ -360,12 +361,15 @@ class Evaluator {
 		let step = gen.next();
 		for (;;) {
 			if (step.done) {
-				this.setBlack(curKey, step.value);
+				// A formula whose result is an empty cell holds 0, as Excel shows it (F11.62); resolveCell
+				// stores what this returns. A range result stays a range.
+				const value = blankToZero(step.value);
+				this.setBlack(curKey, value);
 				const parent = stack.pop();
-				if (parent === undefined) return step.value;
+				if (parent === undefined) return value;
 				curKey = parent.key;
 				gen = parent.gen;
-				step = gen.next(step.value);
+				step = gen.next(value);
 				continue;
 			}
 			const req = step.value;

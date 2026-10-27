@@ -222,7 +222,7 @@ describe("builtins — lookup & reference", () => {
 		expect(g("A4")).toEqual(err("#N/A"));
 	});
 
-	it("HLOOKUP, ROWS/COLUMNS, INDEX with blank → 0", async () => {
+	it("HLOOKUP and ROWS/COLUMNS", async () => {
 		const g = await evalSheet([
 			[1, 2, 3],
 			["a", "b", "c"],

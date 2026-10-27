@@ -86,6 +86,32 @@ export function isRangeView(v: unknown): v is RangeView {
 	return v instanceof RangeView;
 }
 
+/**
+ * The value with an empty cell read as the 0 Excel shows in its place: what a formula cell holds when
+ * its result is an empty cell (F11.62). VLOOKUP and HLOOKUP also apply it to an empty target.
+ *
+ * @example blankToZero(null) // 0
+ * @example blankToZero("") // "" (an empty string is not an empty cell)
+ */
+export function blankToZero(v: EvalValue): EvalValue {
+	return v === null ? 0 : v;
+}
+
+/**
+ * The value with an empty cell read as an empty string: what IFERROR and IFNA return for an empty
+ * value or fallback, which Microsoft documents as "treats it as an empty string value" (F11.62). A
+ * range over one empty cell is such a value; any other value, a wider range included, is kept as is.
+ *
+ * @example blankToText(null) // ""
+ * @example blankToText(new RangeView("S", 1, 1, 1, 1, () => [], () => null)) // "" (one empty cell)
+ * @example blankToText(0) // 0
+ */
+export function blankToText(v: EvalValue): EvalValue {
+	if (v === null) return "";
+	if (isRangeView(v) && v.single() === null) return "";
+	return v;
+}
+
 /** One populated cell surfaced by a {@link RangeView}: its 1-based position and evaluated value. */
 export interface RangeEntry {
 	readonly col: number;
