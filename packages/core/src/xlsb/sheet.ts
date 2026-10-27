@@ -1,4 +1,5 @@
 import { RecordData, readRecords } from "../biff";
+import { XlsxError } from "../errors";
 import { formatRef, MAX_COL, MAX_ROW, serialToDate } from "../ooxml";
 import type { Cell } from "../types";
 import type { XlsbStyleTable } from "./parts";
@@ -8,7 +9,15 @@ import * as R from "./records";
 // of records: a ROW record sets the current 0-based row; full cells carry their 0-based column,
 // while short cells use the previous column + 1. Both carry a style index and a typed value.
 // Rows/columns convert to the 1-based public A1 model and clamp to the shared grid bounds
-// (a corrupt record can't place a cell off-grid or throw).
+// (a corrupt record can't place a cell off-grid). Style 0, the default, is not stored, and the cells
+// and stored styles of one sheet are capped below V8's Map limit (F11.59).
+
+/**
+ * The most cells, and the most cells with a non-default style, one xlsb sheet keeps. It sits below
+ * V8's Map limit (2^24 entries), so a larger sheet fails with `XlsxError('part-too-large')` instead of
+ * a bare `RangeError` (F11.59).
+ */
+export const MAX_XLSB_CELLS = 16_000_000;
 
 /** A hyperlink as it appears in sheetN.bin: a covered range plus the rel id of its target. */
 interface XlsbHyperlinkRef {
@@ -18,7 +27,10 @@ interface XlsbHyperlinkRef {
 
 export interface XlsbSheetData {
 	readonly cells: Map<string, Cell>;
-	/** A1 ref → the cell's style index, for `numberFormat(ref)`. */
+	/**
+	 * A1 ref → the cell's style index, for `numberFormat(ref)`. Style 0 is not stored: a lookup that
+	 * finds nothing falls back to it.
+	 */
 	readonly cellStyles: Map<string, number>;
 	readonly dimension: string | undefined;
 	readonly hyperlinks: readonly XlsbHyperlinkRef[];
@@ -56,11 +68,44 @@ function numericCell(
 	return { ref, type: "number", value };
 }
 
+/**
+ * `map.set(ref, value)`, unless `ref` is new and `map` already holds `maxCells` entries: then it fails
+ * with `XlsxError('part-too-large')`, naming the entries as `what`. Replacing a ref the map holds is
+ * always allowed (F11.59).
+ *
+ * @example setWithinBudget(new Map(), "A1", 1, 1, "cells") // the map now holds A1
+ * @example setWithinBudget(new Map([["A1", 1]]), "B1", 2, 1, "cells") // throws XlsxError part-too-large
+ */
+export function setWithinBudget<V>(
+	map: Map<string, V>,
+	ref: string,
+	value: V,
+	maxCells: number,
+	what: string,
+): void {
+	if (map.size >= maxCells && !map.has(ref)) {
+		throw new XlsxError(
+			"part-too-large",
+			`xlsb: a sheet has more than ${maxCells} ${what}, the cell budget`,
+		);
+	}
+	map.set(ref, value);
+}
+
+/**
+ * Parse one worksheet part into typed cells, their non-default styles, the dimension and hyperlink
+ * refs. A sheet with more than `maxCells` cells, or more than `maxCells` cells with a non-default
+ * style, fails with `XlsxError('part-too-large')` (F11.59).
+ *
+ * @example parseXlsbSheet(sheetBin, sharedStrings, styles, false) // { cells, cellStyles, dimension, hyperlinks }
+ * @example parseXlsbSheet(sheetBin, [], undefined, false, 1) // throws XlsxError part-too-large past one cell
+ */
 export function parseXlsbSheet(
 	bytes: Uint8Array,
 	sharedStrings: readonly string[],
 	styles: XlsbStyleTable | undefined,
 	date1904: boolean,
+	maxCells: number = MAX_XLSB_CELLS,
 ): XlsbSheetData {
 	const cells = new Map<string, Cell>();
 	const cellStyles = new Map<string, number>();
@@ -165,10 +210,23 @@ export function parseXlsbSheet(
 				// bits 25–31 are reserved (MS-XLSB Cell). Mask to 24 bits, or an fPhShow=1 cell (CJK
 				// phonetic workbooks) would carry a corrupted style index and lose date detection.
 				const styleRef = d.u32() & 0xffffff;
+				// Style 0 is what every lookup falls back to, so it is not stored, and a style-0 blank
+				// needs no ref unless an earlier record styled one. A style-0 record still replaces an
+				// earlier style at the same ref, as when every style was stored (F11.59).
+				const blank = rec.id === R.BLANK || rec.id === R.SHORT_BLANK;
+				if (blank && styleRef === 0 && cellStyles.size === 0) break;
 				const ref = refOf(row, col);
-				cellStyles.set(ref, styleRef);
+				if (styleRef === 0) cellStyles.delete(ref);
+				else
+					setWithinBudget(
+						cellStyles,
+						ref,
+						styleRef,
+						maxCells,
+						"cells with a non-default style",
+					);
 				const cell = decodeCell(rec.id, ref, d, styleRef, sharedStrings, styles, date1904);
-				if (cell !== undefined) cells.set(ref, cell);
+				if (cell !== undefined) setWithinBudget(cells, ref, cell, maxCells, "cells");
 				break;
 			}
 		}

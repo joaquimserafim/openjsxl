@@ -111,10 +111,11 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		{ name: "formula boolean", fullId: 0x0a, payload: [0] },
 		{ name: "formula error", fullId: 0x0b, payload: [42] },
 	])("sets the next implicit column after a full $name", ({ fullId, payload }) => {
-		const sheet = parse(row(0), full(fullId, 5, payload), short(0x0f, [1]));
+		// Style 2 makes the full cell's own placement visible: style 0 is not stored (F11.59).
+		const sheet = parse(row(0), full(fullId, 5, payload, 2), short(0x0f, [1]));
 		expect(sheet.cells.get("G1")).toEqual({ ref: "G1", type: "boolean", value: true });
 		expect(sheet.cells.has("A1")).toBe(false);
-		expect(sheet.cellStyles.has("F1")).toBe(true);
+		expect(sheet.cellStyles.get("F1")).toBe(2);
 	});
 
 	it("uses the last explicit column across gaps, backwards records, and blank runs", () => {
@@ -150,7 +151,8 @@ describe("parseXlsbSheet — full and short cell records", () => {
 			short(0x0d, u32((42 << 2) | 2)),
 		);
 		expect([...sheet.cells]).toEqual([["D2", { ref: "D2", type: "number", value: 42 }]]);
-		expect([...sheet.cellStyles]).toEqual([["D2", 0]]);
+		// The anchor's style 7 stays unexposed, and D2's style 0 is not stored (F11.59).
+		expect([...sheet.cellStyles]).toEqual([]);
 		expect(sheet.dimension).toBe("C2:D2");
 	});
 
@@ -163,7 +165,7 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		const next = parse(dimension(), row(1), anchor, short(0x0f, [1]));
 		expect(next.dimension).toBe("C2:D2");
 		expect([...next.cells.keys()]).toEqual(["D2"]);
-		expect([...next.cellStyles.keys()]).toEqual(["D2"]);
+		expect([...next.cellStyles.keys()]).toEqual([]); // D2's style 0 is not stored (F11.59)
 	});
 
 	it("keeps rich-string raw column overflow and row resets consistent with other full cells", () => {
@@ -245,7 +247,7 @@ describe("parseXlsbSheet — full and short cell records", () => {
 				expect(sheet.cellStyles.get(ref)).toBe(1);
 			}
 			expect(sheet.cells.get("F1")).toEqual({ ref: "F1", type: "number", value: 0.5 });
-			expect(sheet.cellStyles.get("F1")).toBe(0);
+			expect(sheet.cellStyles.get("F1") ?? 0).toBe(0); // masked to 0, which is not stored (F11.59)
 		},
 	);
 
@@ -372,15 +374,16 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		},
 		{ name: "ordinary", prefix: dimension(2, 5, 1, 2), expected: "B3:C6" },
 	])("preserves the $name dimension policy with short cells", ({ prefix, expected }) => {
+		// Style 3 makes the leading blank's placement visible: style 0 is not stored (F11.59).
 		const sheet = parse(
 			prefix,
-			short(0x0c, [], 0),
+			short(0x0c, [], 3),
 			row(3),
 			full(0x04, 2, [1]),
 			short(0x0f, [0]),
 		);
 		expect(sheet.dimension).toBe(expected);
-		expect(sheet.cellStyles.get("A1")).toBe(0);
+		expect(sheet.cellStyles.get("A1")).toBe(3);
 		expect(sheet.cells.get("D4")?.value).toBe(false);
 	});
 

@@ -1,5 +1,5 @@
 import { XlsxError } from "../errors";
-import { parseRef, parseRels, resolveTarget } from "../ooxml";
+import { isDateFormatCode, parseRef, parseRels, resolveTarget } from "../ooxml";
 import type {
 	Cell,
 	CellStyle,
@@ -18,6 +18,8 @@ import type {
 	Worksheet,
 } from "../types";
 import {
+	MAX_XLSB_CELLS,
+	MAX_XLSB_TABLE_ENTRIES,
 	parseXlsbSheet,
 	parseXlsbStrings,
 	parseXlsbStyles,
@@ -214,7 +216,13 @@ class XlsbWorksheet implements Worksheet {
  * Open an Excel Binary Workbook (`.xlsb`) and read its cells. Returns the same {@link Workbook} as
  * {@link openXlsx} — sheets, typed cells (with style-driven date detection), number formats,
  * hyperlinks, dimension, and visibility. Styles beyond number formats, formula text, comments,
- * geometry, images, and merged ranges are not carried and degrade on their accessors.
+ * geometry, images, and merged ranges are not carried and degrade on their accessors. A sheet with
+ * more than 16,000,000 cells, or more than 16,000,000 cells with a non-default style, fails with
+ * `XlsxError('part-too-large')`, as does a workbook with more than 16,000,000 sheets, shared strings
+ * or cell formats (F11.59).
+ *
+ * @example (await openXlsb(bytes)).sheet("Sheet1").cell("A1") // { ref: "A1", type: "string", value: … }
+ * @example await openXlsb(sheetOfSeventeenMillionCells) // throws XlsxError part-too-large
  */
 export async function openXlsb(
 	source: Uint8Array | ArrayBuffer,
@@ -236,7 +244,10 @@ export async function openXlsb(
 	const workbookPath = resolveTarget("", office.target);
 	const workbookDir = directoryOf(workbookPath);
 
-	const { sheets: sheetEntries, date1904 } = parseXlsbWorkbook(await readPart(zip, workbookPath));
+	const { sheets: sheetEntries, date1904 } = parseXlsbWorkbook(
+		await readPart(zip, workbookPath),
+		MAX_XLSB_TABLE_ENTRIES,
+	);
 	claimed.add(workbookPath);
 	const workbookRels = parseRels(await readText(zip, relsPathFor(workbookPath)));
 	claimed.add(relsPathFor(workbookPath));
@@ -247,13 +258,15 @@ export async function openXlsb(
 	if (sstRel !== undefined && sstRel.targetMode !== "External") {
 		const p = resolveTarget(workbookDir, sstRel.target);
 		if (zip.has(p) && claimPart(claimed, p))
-			sharedStrings = parseXlsbStrings(await zip.read(p));
+			sharedStrings = parseXlsbStrings(await zip.read(p), MAX_XLSB_TABLE_ENTRIES);
 	}
 	let styles: XlsbStyleTable | undefined;
 	const stylesRel = [...workbookRels.values()].find((r) => r.type.endsWith(REL_STYLES));
 	if (stylesRel !== undefined && stylesRel.targetMode !== "External") {
 		const p = resolveTarget(workbookDir, stylesRel.target);
-		if (zip.has(p) && claimPart(claimed, p)) styles = parseXlsbStyles(await zip.read(p));
+		if (zip.has(p) && claimPart(claimed, p)) {
+			styles = parseXlsbStyles(await zip.read(p), isDateFormatCode, MAX_XLSB_TABLE_ENTRIES);
+		}
 	}
 
 	// Claim every sheet's part before any sheet's rels are read, as openXlsx does. A sheet whose part
@@ -269,7 +282,13 @@ export async function openXlsb(
 	const infos: SheetInfo[] = [];
 	const byName = new Map<string, Worksheet>();
 	for (const { entry, path } of loadable) {
-		const parsed = parseXlsbSheet(await zip.read(path), sharedStrings, styles, date1904);
+		const parsed = parseXlsbSheet(
+			await zip.read(path),
+			sharedStrings,
+			styles,
+			date1904,
+			MAX_XLSB_CELLS,
+		);
 
 		// Resolve hyperlink rel ids through the sheet's own rels part.
 		const hyperlinks = await resolveHyperlinks(zip, path, parsed.hyperlinks, claimed);

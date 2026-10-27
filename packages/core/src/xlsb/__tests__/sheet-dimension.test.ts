@@ -100,10 +100,7 @@ describe("parseXlsbSheet — used dimensions", () => {
 			["E8", { ref: "E8", type: "string", value: "inline" }],
 			["B3", { ref: "B3", type: "boolean", value: true }],
 		]);
-		expect([...sheet.cellStyles]).toEqual([
-			["E8", 7],
-			["B3", 0],
-		]);
+		expect([...sheet.cellStyles]).toEqual([["E8", 7]]); // B3's style 0 is not stored (F11.59)
 	});
 
 	it("keeps absent, invalid, and ordinary dimensions authoritative with inline strings", () => {
@@ -121,7 +118,7 @@ describe("parseXlsbSheet — used dimensions", () => {
 
 			expect(sheet.dimension).toBe("A1");
 			expect(sheet.cells.size).toBe(0);
-			expect(sheet.cellStyles.get("A1")).toBe(style & 0xffffff);
+			expect(sheet.cellStyles.get("A1") ?? 0).toBe(style & 0xffffff); // 0 is not stored (F11.59)
 		},
 	);
 
@@ -164,7 +161,7 @@ describe("parseXlsbSheet — used dimensions", () => {
 
 		expect(sheet.dimension).toBe("E7");
 		expect(sheet.cells.get("E7")).toEqual({ ref: "E7", type, value });
-		expect(sheet.cellStyles.get("E7")).toBe(0);
+		expect(sheet.cellStyles.get("E7") ?? 0).toBe(0); // style 0 is not stored (F11.59)
 	});
 
 	it("derives sparse bounds across unsorted rows, values, and styled blanks", () => {
@@ -180,7 +177,7 @@ describe("parseXlsbSheet — used dimensions", () => {
 
 		expect(sheet.dimension).toBe("B4:E9");
 		expect([...sheet.cells.keys()]).toEqual(["E9", "D6"]);
-		expect([...sheet.cellStyles.keys()]).toEqual(["E9", "B4", "D6"]);
+		expect([...sheet.cellStyles.keys()]).toEqual([]); // every style here is 0, not stored (F11.59)
 	});
 
 	it("clamps observed cell coordinates with the same grid bounds as cell placement", () => {
@@ -323,7 +320,7 @@ describe("parseXlsbSheet — used dimensions", () => {
 		const blank = parse(dimension(), row(3), record(R.BLANK, [1, 0, 0]));
 		expect(blank.dimension).toBe("A4");
 		expect(blank.cells.size).toBe(0);
-		expect(blank.cellStyles.get("A4")).toBe(0);
+		expect(blank.cellStyles.get("A4") ?? 0).toBe(0); // style 0 is not stored (F11.59)
 	});
 
 	it("trims a lying final record length and ignores incomplete record headers", () => {

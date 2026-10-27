@@ -25,8 +25,8 @@ development branch are welcome, but unreleased code is not a supported published
 toward **1.0.1**, which is not yet released; its unchanged package version does not make these
 changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
 the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule, the
-ODS repeat budget and the CSV cell budget described below are unreleased 1.0.1 changes, absent from
-1.0.0.
+ODS repeat budget and the CSV and XLSB cell budgets described below are unreleased 1.0.1 changes,
+absent from 1.0.0.
 
 ## Processing untrusted files
 
@@ -52,7 +52,9 @@ not use these guards and parses its input synchronously. On this unreleased 1.0.
 fails with `XlsxError` code `part-too-large` when its input holds more than 16,000,000 non-empty
 cells within Excel's grid, or when its bytes decode to more text than the runtime's longest string.
 Fields past the grid are dropped, as in the other readers. The cell limit bounds the count of cells,
-not memory.
+not memory. `openXlsb` has the same limit per sheet: more than 16,000,000 cells, or more than
+16,000,000 cells with a non-default style, fail with `part-too-large`, as do more than 16,000,000
+sheets, shared strings or cell formats in one workbook.
 
 On this unreleased 1.0.1 branch, `openOds` also limits the cells that ODS repeats create. A cell or
 row marked as repeated (`table:number-columns-repeated`, `table:number-rows-repeated`) may create

@@ -1,4 +1,5 @@
 import { RecordData, readRecords } from "../biff";
+import { XlsxError } from "../errors";
 import {
 	dateFormatDecider,
 	isDateFormatCode,
@@ -10,7 +11,32 @@ import * as R from "./records";
 
 // Parsers for the small BIFF12 parts every sheet depends on — the workbook (sheet list), the shared
 // string table, and the styles table (for date detection + number-format codes). Each walks the
-// record stream once; unknown records are ignored.
+// record stream once; unknown records are ignored. Each list they build is capped below V8's array
+// limit (F11.59).
+
+/**
+ * The most entries a workbook's sheet list, shared-string table or cell-format table keeps. It sits
+ * below V8's array limit (2^27 elements), so a larger table fails with `XlsxError('part-too-large')`
+ * instead of a bare `RangeError` (F11.59).
+ */
+export const MAX_XLSB_TABLE_ENTRIES = 16_000_000;
+
+/**
+ * `list.push(value)`, unless `list` already holds `maxEntries` entries: then it fails with
+ * `XlsxError('part-too-large')`, naming the table as `what` (F11.59).
+ *
+ * @example pushWithinBudget([], "a", 1, "shared strings") // the list now holds "a"
+ * @example pushWithinBudget(["a"], "b", 1, "shared strings") // throws XlsxError part-too-large
+ */
+export function pushWithinBudget<T>(list: T[], value: T, maxEntries: number, what: string): void {
+	if (list.length >= maxEntries) {
+		throw new XlsxError(
+			"part-too-large",
+			`xlsb: the workbook has more than ${maxEntries} ${what}, the table budget`,
+		);
+	}
+	list.push(value);
+}
 
 /** One sheet as named in workbook.bin: its tab name, visibility, and the rel id of its part. */
 export interface XlsbSheetEntry {
@@ -24,8 +50,17 @@ export interface XlsbWorkbookMeta {
 	readonly date1904: boolean;
 }
 
-/** Parse workbook.bin → the sheet list (BrtBundleSh) and the date system (BrtWbProp.f1904). */
-export function parseXlsbWorkbook(bytes: Uint8Array): XlsbWorkbookMeta {
+/**
+ * Parse workbook.bin → the sheet list (BrtBundleSh) and the date system (BrtWbProp.f1904). More than
+ * `maxEntries` sheets fail with `XlsxError('part-too-large')` (F11.59).
+ *
+ * @example parseXlsbWorkbook(workbookBin) // { sheets: [{ name: "Sheet1", relId: "rId1", state: "visible" }], date1904: false }
+ * @example parseXlsbWorkbook(workbookBin, 0) // throws XlsxError part-too-large on the first sheet
+ */
+export function parseXlsbWorkbook(
+	bytes: Uint8Array,
+	maxEntries: number = MAX_XLSB_TABLE_ENTRIES,
+): XlsbWorkbookMeta {
 	const sheets: XlsbSheetEntry[] = [];
 	let date1904 = false;
 	for (const rec of readRecords(bytes)) {
@@ -44,7 +79,7 @@ export function parseXlsbWorkbook(bytes: Uint8Array): XlsbWorkbookMeta {
 			const name = d.wideString() ?? "";
 			const state: SheetState =
 				hsState === 2 ? "veryHidden" : hsState === 1 ? "hidden" : "visible";
-			sheets.push({ name, relId, state });
+			pushWithinBudget(sheets, { name, relId, state }, maxEntries, "sheets");
 		} else if (rec.id === R.WORKBOOK_END) {
 			break;
 		}
@@ -52,14 +87,23 @@ export function parseXlsbWorkbook(bytes: Uint8Array): XlsbWorkbookMeta {
 	return { sheets, date1904 };
 }
 
-/** Parse sharedStrings.bin → the string table (BrtSSTItem text; rich runs/phonetics dropped). */
-export function parseXlsbStrings(bytes: Uint8Array): string[] {
+/**
+ * Parse sharedStrings.bin → the string table (BrtSSTItem text; rich runs/phonetics dropped). More than
+ * `maxEntries` strings fail with `XlsxError('part-too-large')` (F11.59).
+ *
+ * @example parseXlsbStrings(sharedStringsBin) // ["Name", "Qty"]
+ * @example parseXlsbStrings(sharedStringsBin, 1) // throws XlsxError part-too-large on the second string
+ */
+export function parseXlsbStrings(
+	bytes: Uint8Array,
+	maxEntries: number = MAX_XLSB_TABLE_ENTRIES,
+): string[] {
 	const strings: string[] = [];
 	for (const rec of readRecords(bytes)) {
 		if (rec.id === R.SI) {
 			const d = new RecordData(rec.data);
 			d.skip(1); // flags
-			strings.push(d.wideString() ?? "");
+			pushWithinBudget(strings, d.wideString() ?? "", maxEntries, "shared strings");
 		} else if (rec.id === R.SST_END) {
 			break;
 		}
@@ -78,13 +122,16 @@ export interface XlsbStyleTable {
  * cellXfs entry's numFmtId (BrtXF iFmt, at offset 2 after ixfeParent), then resolves a cell's style
  * index to its format code and reuses the SAME cached date decision and 255-character format limit
  * the xlsx reader uses (F11.50), so date detection is identical across formats. `detect` defaults
- * to `isDateFormatCode` and exists so tests can count decisions (one per id).
+ * to `isDateFormatCode` and exists so tests can count decisions (one per id). More than `maxEntries`
+ * cell formats fail with `XlsxError('part-too-large')` (F11.59).
  *
  * @example parseXlsbStyles(stylesBin).formatCode(1) // the code xf 1 uses, or undefined
+ * @example parseXlsbStyles(stylesBin, isDateFormatCode, 1) // throws XlsxError part-too-large on the second cell format
  */
 export function parseXlsbStyles(
 	bytes: Uint8Array,
 	detect: (formatCode: string) => boolean = isDateFormatCode,
+	maxEntries: number = MAX_XLSB_TABLE_ENTRIES,
 ): XlsbStyleTable {
 	const customFormats = new Map<number, string | null>();
 	const xfNumFmt: number[] = []; // cellXfs index → numFmtId
@@ -104,7 +151,7 @@ export function parseXlsbStyles(
 		} else if (rec.id === R.XF && inCellXfs) {
 			const d = new RecordData(rec.data);
 			d.skip(2); // ixfeParent
-			xfNumFmt.push(d.u16()); // iFmt
+			pushWithinBudget(xfNumFmt, d.u16(), maxEntries, "cell formats"); // iFmt
 		}
 	}
 	const numFmtId = (styleRef: number | undefined): number | undefined => xfNumFmt[styleRef ?? 0];
