@@ -6,7 +6,12 @@ import type { Cell, Worksheet } from "../types";
 import type { FormulaAst } from "./ast";
 import { applyBinary, applyPostfix, applyUnary, scalarize } from "./coerce";
 import { FormulaError } from "./errors";
-import { buildRegistry, type EvalContext, type FunctionRegistry } from "./functions";
+import {
+	buildRegistry,
+	type EvalContext,
+	type FunctionRegistry,
+	lookupFunction,
+} from "./functions";
 import { parseFormula } from "./parser";
 import {
 	type EvalValue,
@@ -33,7 +38,8 @@ export interface EvaluateOptions {
 	/**
 	 * Extra functions, keyed by name (case-insensitive), merged over the built-ins. Each value is a
 	 * {@link import("./functions").FunctionSpec}. Validated as a plain object with numeric arg bounds
-	 * and an `evaluate` function.
+	 * and an `evaluate` function. A call Excel stores as `_xlfn.NAME` or `_xlfn._xlws.NAME` reaches the
+	 * function registered as `NAME`, unless one is registered under the prefixed name itself.
 	 */
 	readonly functions?: Record<string, unknown>;
 	/** Injected clock for volatile NOW/TODAY (decision 3). Without it, a volatile call is rejected. */
@@ -520,7 +526,7 @@ class Evaluator {
 		sheet: string,
 		depth: number,
 	): Generator<CellRequest, EvalValue, EvalValue> {
-		const spec = this.registry.get(name.toUpperCase());
+		const spec = lookupFunction(this.registry, name);
 		if (spec === undefined) return errorValue("#NAME?");
 		if (args.length < spec.minArgs || args.length > spec.maxArgs) return errorValue("#VALUE!");
 		if (spec.volatile && !this.hasVolatileSource) {

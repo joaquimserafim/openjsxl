@@ -168,3 +168,32 @@ export function buildRegistry(callerFunctions: unknown): FunctionRegistry {
 	}
 	return registry;
 }
+
+// Excel stores a function added after Excel 2007 as `_xlfn.NAME` (`_xlfn.IFNA`), and FILTER and
+// SORT as `_xlfn._xlws.NAME` (F11.61). Without the `u` flag, `i` folds ASCII letters only, so no
+// other character (U+017F, which upper-cases to S) can stand in for a prefix letter.
+const FUTURE_PREFIX = /^_xlfn\.(?:_xlws\.)?/i;
+
+/**
+ * The registered function a call's name resolves to, matched case-insensitively. A name registered
+ * exactly as written wins. Otherwise a leading `_xlfn.` or `_xlfn._xlws.` is dropped and the rest
+ * resolves as a bare name would, so the `_xlfn.IFNA` Excel stores finds IFNA. Nothing else is
+ * dropped, and a prefix alone names no function.
+ *
+ * @example lookupFunction(registry, "sum") // the SUM built-in
+ * @example lookupFunction(buildRegistry({ "_xlfn.IFNA": spec }), "_xlfn.IFNA") // the caller's spec, not IFNA
+ * @example lookupFunction(registry, "NOSUCH") // undefined (no prefix to drop)
+ * @example lookupFunction(registry, "_xlfn.") // undefined (nothing after the prefix)
+ * @example lookupFunction(registry, "_xlfn.IFNA") // the IFNA built-in
+ * @example lookupFunction(registry, "_xlfn._xlws.IFNA") // the IFNA built-in
+ */
+export function lookupFunction(
+	registry: FunctionRegistry,
+	name: string,
+): RegisteredFunction | undefined {
+	const exact = registry.get(name.toUpperCase());
+	if (exact !== undefined) return exact;
+	const prefix = FUTURE_PREFIX.exec(name);
+	if (prefix === null || prefix[0].length === name.length) return undefined;
+	return registry.get(name.slice(prefix[0].length).toUpperCase());
+}

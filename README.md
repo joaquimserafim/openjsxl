@@ -414,6 +414,11 @@ await evaluateWorkbook(wb, {
 });
 ```
 
+Excel stores functions added after Excel 2007 with a prefix: `_xlfn.IFNA`, and `_xlfn._xlws.SORT`
+for FILTER and SORT. Since 1.0.1 such a call reaches the built-in, or the function you registered,
+under the bare name, so register `XLOOKUP`, not `_xlfn.XLOOKUP`. A function registered under the
+exact prefixed name still wins.
+
 **Determinism is enforced.** Volatile functions have no ambient source: `TODAY`/`NOW` and
 `RAND`/`RANDBETWEEN` throw a typed `FormulaError` unless you inject `options.now` / `options.random`,
 so the same inputs always produce the same output.
