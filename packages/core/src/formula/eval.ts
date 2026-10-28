@@ -3,7 +3,7 @@ import { dateToSerial } from "../ooxml/dates";
 import type { DefinedName } from "../ooxml/workbook";
 import type { Workbook } from "../reader/workbook";
 import type { Cell, Worksheet } from "../types";
-import type { FormulaAst } from "./ast";
+import type { ArrayElement, ArrayLiteral, FormulaAst } from "./ast";
 import { applyBinary, applyPostfix, applyUnary, scalarize } from "./coerce";
 import { FormulaError } from "./errors";
 import {
@@ -14,6 +14,8 @@ import {
 } from "./functions";
 import { parseFormula } from "./parser";
 import {
+	ArrayView,
+	anchorValue,
 	blankToZero,
 	type EvalValue,
 	errorFromString,
@@ -40,7 +42,8 @@ export interface EvaluateOptions {
 	 * Extra functions, keyed by name (case-insensitive), merged over the built-ins. Each value is a
 	 * {@link import("./functions").FunctionSpec}. Validated as a plain object with numeric arg bounds
 	 * and an `evaluate` function. A call Excel stores as `_xlfn.NAME` or `_xlfn._xlws.NAME` reaches the
-	 * function registered as `NAME`, unless one is registered under the prefixed name itself.
+	 * function registered as `NAME`, unless one is registered under the prefixed name itself. An array
+	 * constant argument (`{1,2;3,4}`) arrives as a `RangeView` of its elements whose `sheet` is `""`.
 	 */
 	readonly functions?: Record<string, unknown>;
 	/** Injected clock for volatile NOW/TODAY (decision 3). Without it, a volatile call is rejected. */
@@ -158,6 +161,52 @@ function cellToValue(cell: Cell, date1904: boolean): EvalValue {
  */
 export function holdsValue(cell: Cell, formula: string | undefined): boolean {
 	return formula !== undefined || cell.type !== "empty";
+}
+
+/**
+ * The value of one element of an array constant: a literal, or a signed literal (`-1`, `+"a"`).
+ *
+ * @example arrayElementValue({ type: "number", value: 2, raw: "2" }) // 2
+ * @example arrayElementValue({ type: "error", value: "#N/A" }) // the #N/A error value
+ * @example arrayElementValue({ type: "unary", op: "-", operand: { type: "number", value: 1, raw: "1" } }) // -1
+ * @example arrayElementValue({ type: "unary", op: "-", operand: { type: "string", value: "a" } }) // #VALUE! (no number)
+ * @example arrayElementValue({ type: "unary", op: "-", operand: { type: "error", value: "#DIV/0!" } }) // #DIV/0!
+ * @example arrayElementValue({ type: "unary", op: "-", operand: { type: "cell", ref: "A1" } }) // #VALUE! (not a literal)
+ */
+export function arrayElementValue(element: ArrayElement): EvalValue {
+	if (element.type === "error") return errorFromString(element.value);
+	if (element.type !== "unary") return element.value;
+	const operand = element.operand;
+	if (operand.type === "number" || operand.type === "string" || operand.type === "boolean") {
+		return applyUnary(element.op, operand.value);
+	}
+	if (operand.type === "error") return errorFromString(operand.value);
+	return errorValue("#VALUE!");
+}
+
+// The view of each array constant node, built once: the evaluator caches the AST per formula text,
+// and a view never changes (F11.64).
+const arrayViews = new WeakMap<ArrayLiteral, ArrayView>();
+
+/**
+ * A function argument that is an array constant, as an {@link ArrayView} of its elements (F11.64), or
+ * `undefined` for any other argument. Parentheses around the constant are looked through, and the
+ * view of a node is built once.
+ *
+ * @example arrayArgument(parseFormula("{1,2;3,4}")) // a 2×2 ArrayView over 1, 2, 3, 4
+ * @example arrayArgument(parseFormula("(({1,2}))")) // a 1×2 ArrayView over 1, 2
+ * @example arrayArgument(node) === arrayArgument(node) // true: the second call reuses the view
+ * @example arrayArgument(parseFormula("A1:A3")) // undefined
+ */
+export function arrayArgument(node: FormulaAst): ArrayView | undefined {
+	let cur = node;
+	while (cur.type === "group") cur = cur.expr;
+	if (cur.type !== "array") return undefined;
+	const cached = arrayViews.get(cur);
+	if (cached !== undefined) return cached;
+	const view = new ArrayView(cur.rows.map((row) => row.map(arrayElementValue)));
+	arrayViews.set(cur, view);
+	return view;
 }
 
 class Evaluator {
@@ -380,9 +429,10 @@ class Evaluator {
 		let step = gen.next();
 		for (;;) {
 			if (step.done) {
-				// A formula whose result is an empty cell holds 0, as Excel shows it (F11.62); resolveCell
-				// stores what this returns. A range result stays a range.
-				const value = blankToZero(step.value);
+				// A formula whose result is an empty cell holds 0, as Excel shows it (F11.62), and one whose
+				// result is an array constant holds its first element (F11.64); resolveCell stores what this
+				// returns. A reference range result stays a range.
+				const value = blankToZero(anchorValue(step.value));
 				this.setBlack(curKey, value);
 				const parent = stack.pop();
 				if (parent === undefined) return value;
@@ -558,12 +608,19 @@ class Evaluator {
 				`${name} is volatile; inject options.now/random`,
 			);
 		}
+		// An array constant argument reaches the function as a range of its elements (F11.64).
 		if (spec.lazyArgs) {
-			const thunks = args.map((arg) => () => this.evalSync(arg, sheet, depth));
+			const thunks = args.map((arg) => {
+				const array = arrayArgument(arg);
+				return array === undefined ? () => this.evalSync(arg, sheet, depth) : () => array;
+			});
 			return spec.invoke(thunks, this.ctx);
 		}
 		const values: EvalValue[] = [];
-		for (const arg of args) values.push(yield* this.evalGen(arg, sheet, depth));
+		for (const arg of args) {
+			const array = arrayArgument(arg);
+			values.push(array === undefined ? yield* this.evalGen(arg, sheet, depth) : array);
+		}
 		return spec.invoke(values, this.ctx);
 	}
 

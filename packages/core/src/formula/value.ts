@@ -143,7 +143,7 @@ export class RangeView {
 	}
 
 	constructor(
-		/** Resolved sheet name the range lives on. */
+		/** Resolved sheet name the range lives on; `""` for an array constant (F11.64). */
 		readonly sheet: string,
 		/** 1-based inclusive bounds. */
 		readonly startCol: number,
@@ -214,4 +214,93 @@ export class RangeView {
 		}
 		return this.resolve(this.startCol + colOffset, this.startRow + rowOffset);
 	}
+}
+
+/**
+ * Every [col, row] position of a `width` × `height` grid from (1, 1), row by row.
+ *
+ * @example [...gridPositions(2, 2)] // [[1, 1], [2, 1], [1, 2], [2, 2]]
+ * @example [...gridPositions(0, 3)] // []
+ */
+export function* gridPositions(
+	width: number,
+	height: number,
+): Generator<readonly [number, number]> {
+	for (let row = 1; row <= height; row++) {
+		for (let col = 1; col <= width; col++) yield [col, row];
+	}
+}
+
+/**
+ * An array constant (`{1,2;3,4}`) as a range over its own elements, so a function argument sees every
+ * element (F11.64). Every position is populated, and `sheet` is empty because it names no sheet.
+ * Where one value is wanted, it stands for its first element: the value Excel shows for an array
+ * result (decision 5).
+ *
+ * @example new ArrayView([[1, 2], [3, 4]]).cellAt(1, 0) // 3
+ */
+export class ArrayView extends RangeView {
+	constructor(rows: readonly (readonly EvalValue[])[]) {
+		const width = rows[0]?.length ?? 0;
+		super(
+			"",
+			1,
+			1,
+			width,
+			rows.length,
+			() => gridPositions(width, rows.length),
+			(col, row) => rows[row - 1]?.[col - 1] ?? null,
+		);
+	}
+}
+
+/**
+ * The value with an array constant read as its first element, the value a cell holding an array
+ * result shows (decision 5, F11.64). Any other value, a reference range included, is kept as is.
+ *
+ * @example anchorValue(new ArrayView([[1, 2]])) // 1
+ * @example anchorValue(5) // 5
+ */
+export function anchorValue(v: EvalValue): EvalValue {
+	return v instanceof ArrayView ? v.topLeft() : v;
+}
+
+/**
+ * A new array constant of the same shape, with each element replaced by `fn(element, row, col)`, the
+ * position given as 0-based offsets.
+ *
+ * @example mapArray(new ArrayView([[1, 2]]), (v) => (v === 1 ? 9 : v)) // an ArrayView over 9, 2
+ */
+export function mapArray(
+	view: ArrayView,
+	fn: (value: EvalValue, row: number, col: number) => EvalValue,
+): ArrayView {
+	const rows: EvalValue[][] = [];
+	for (let row = 0; row < view.height; row++) {
+		const values: EvalValue[] = [];
+		for (let col = 0; col < view.width; col++) values.push(fn(view.cellAt(row, col), row, col));
+		rows.push(values);
+	}
+	return new ArrayView(rows);
+}
+
+/**
+ * One row, one column, or one element of an array constant, as a new array constant. `row` and `col`
+ * are 0-based offsets inside the array; `undefined` keeps every row or every column.
+ *
+ * @example sliceArray(new ArrayView([[1, 2], [3, 4]]), undefined, 0) // an ArrayView over 1, 3
+ * @example sliceArray(new ArrayView([[1, 2], [3, 4]]), 1, undefined) // an ArrayView over 3, 4
+ */
+export function sliceArray(
+	view: ArrayView,
+	row: number | undefined,
+	col: number | undefined,
+): ArrayView {
+	const rows: EvalValue[][] = [];
+	for (let r = row ?? 0; r <= (row ?? view.height - 1); r++) {
+		const values: EvalValue[] = [];
+		for (let c = col ?? 0; c <= (col ?? view.width - 1); c++) values.push(view.cellAt(r, c));
+		rows.push(values);
+	}
+	return new ArrayView(rows);
 }

@@ -8,6 +8,8 @@ import type {
 	RegisteredFunction,
 } from "./functions";
 import {
+	ArrayView,
+	anchorValue,
 	blankToText,
 	blankToZero,
 	type EvalValue,
@@ -15,9 +17,11 @@ import {
 	type FormulaErrorValue,
 	isErrorValue,
 	isRangeView,
+	mapArray,
 	populatedRangePositions,
 	type RangeView,
 	type ScalarValue,
+	sliceArray,
 } from "./value";
 
 // The built-in function library (F8.3). Each entry is a typed {@link RegisteredFunction}; the built-ins
@@ -591,6 +595,9 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	}),
 	IFERROR: lazy(2, 2, (thunks) => {
 		const v = thunks[0]?.() ?? null;
+		// An array constant has each error element replaced, as Excel applies IFERROR element by element
+		// (F11.64).
+		if (v instanceof ArrayView) return replaceArrayErrors(v, () => true, thunks[1]);
 		// A MULTI-cell range is not itself an error — pass it through so an aggregator around IFERROR
 		// still sees the range (`SUM(IFERROR(A1:A3,0))`). `scalarize` reduces a multi-cell range to a
 		// `#VALUE!` sentinel, which must NOT be mistaken for a genuine computation error. Element-wise
@@ -602,6 +609,8 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	}),
 	IFNA: lazy(2, 2, (thunks) => {
 		const v = thunks[0]?.() ?? null;
+		if (v instanceof ArrayView)
+			return replaceArrayErrors(v, (e) => e.code === "#N/A", thunks[1]);
 		if (isRangeView(v) && v.single() === undefined) return v; // same range pass-through as IFERROR
 		const s = scalarize(v);
 		if (isErrorValue(s) && s.code === "#N/A") return blankToText(thunks[1]?.() ?? null);
@@ -689,7 +698,9 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 
 	// ── text ──────────────────────────────────────────────────────────────────────────────────────
 	CONCAT: eager(1, POS_INF, concat),
-	CONCATENATE: eager(1, POS_INF, concat),
+	// CONCATENATE takes one value per argument, so an array constant gives its first element, as Excel
+	// shows it (F11.64); CONCAT joins every element.
+	CONCATENATE: eager(1, POS_INF, (args) => concat(args.map(anchorValue))),
 	TEXTJOIN: eager(3, POS_INF, textjoin),
 	LEN: eager(1, 1, (args) => {
 		const t = toText(args[0] ?? null);
@@ -1128,6 +1139,8 @@ function matchFn(args: readonly EvalValue[]): EvalValue {
 	if (!isRangeView(arr)) {
 		return lookupEquals(arr ?? null, lookup) ? 1 : errorValue("#N/A");
 	}
+	// A 2-D array constant is neither a row nor a column (F11.64); 2-D reference ranges are F11.90.
+	if (arr instanceof ArrayView && arr.height > 1 && arr.width > 1) return errorValue("#N/A");
 	const isRow = arr.height === 1;
 	const cells: { pos: number; value: EvalValue }[] = [];
 	for (const e of arr.entries()) {
@@ -1161,6 +1174,58 @@ function matchFn(args: readonly EvalValue[]): EvalValue {
 // INDEX returns the cell itself, an empty one included, as Microsoft documents it returning a
 // reference: an empty target is empty to the rest of the formula, and a formula ending in it shows 0
 // (F11.62).
+/**
+ * An array constant with each error element that `caught` accepts replaced by the fallback, as IFERROR
+ * and IFNA apply to an array element by element (F11.64). The fallback is evaluated once, and only
+ * when an element needs it; an empty fallback is `""`, as for a single value.
+ *
+ * @example replaceArrayErrors(new ArrayView([[errorValue("#N/A"), 1]]), () => true, () => 0) // an ArrayView over 0, 1
+ * @example replaceArrayErrors(new ArrayView([[1, 2]]), () => true, () => 0) // an ArrayView over 1, 2; the fallback never runs
+ */
+export function replaceArrayErrors(
+	view: ArrayView,
+	caught: (error: FormulaErrorValue) => boolean,
+	fallback: ArgThunk | undefined,
+): ArrayView {
+	let replacement: EvalValue | undefined;
+	return mapArray(view, (value) => {
+		if (!isErrorValue(value) || !caught(value)) return value;
+		replacement ??= blankToText(scalarize(fallback?.() ?? null));
+		return replacement;
+	});
+}
+
+/**
+ * The part of an array constant that INDEX returns for a 0 index, or for one index on a 2-D array:
+ * the whole array, a row, or a column, as Microsoft documents (F11.64). `undefined` when the indexes
+ * pick one element, which INDEX reads as for a range.
+ *
+ * @example indexArrayView(new ArrayView([[1, 2], [3, 4]]), 0, 1) // an ArrayView over 1, 3
+ * @example indexArrayView(new ArrayView([[1, 2], [3, 4]]), 2, undefined) // an ArrayView over 3, 4
+ * @example indexArrayView(new ArrayView([[1, 2, 3]]), 0, undefined) // the whole array
+ * @example indexArrayView(new ArrayView([[1, 2], [3, 4]]), 3, 0) // #REF!
+ * @example indexArrayView(new ArrayView([[1, 2], [3, 4]]), 2, 1) // undefined (one element)
+ */
+export function indexArrayView(
+	view: ArrayView,
+	rowNum: number,
+	colNum: number | undefined,
+): EvalValue | undefined {
+	if (rowNum < 0 || (colNum !== undefined && colNum < 0)) return errorValue("#REF!");
+	if (colNum === undefined) {
+		if (rowNum === 0) return view;
+		if (view.height === 1 || view.width === 1) return undefined;
+		return rowNum > view.height ? errorValue("#REF!") : sliceArray(view, rowNum - 1, undefined);
+	}
+	if (rowNum !== 0 && colNum !== 0) return undefined;
+	if (rowNum > view.height || colNum > view.width) return errorValue("#REF!");
+	return sliceArray(
+		view,
+		rowNum === 0 ? undefined : rowNum - 1,
+		colNum === 0 ? undefined : colNum - 1,
+	);
+}
+
 function indexFn(args: readonly EvalValue[]): EvalValue {
 	const arr = args[0];
 	const rowNum = toIndex(args[1] ?? null);
@@ -1173,6 +1238,10 @@ function indexFn(args: readonly EvalValue[]): EvalValue {
 		const okRow = rowNum === 1 || rowNum === 0;
 		const okCol = colNum === undefined || colNum === 1 || colNum === 0;
 		return okRow && okCol ? (arr ?? null) : errorValue("#REF!");
+	}
+	if (arr instanceof ArrayView) {
+		const part = indexArrayView(arr, rowNum, colNum);
+		if (part !== undefined) return part;
 	}
 	const h = arr.height;
 	const w = arr.width;

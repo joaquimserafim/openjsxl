@@ -441,6 +441,13 @@ follow documented Excel; a single-cell reference passed to an aggregate is treat
 text/booleans in one referenced cell coerce rather than being ignored — multi-cell ranges are
 Excel-exact).
 
+Since 1.0.1 an array constant passed to a function that takes a range or an array is a full array
+(`SUM({1,2,3})` is 6, `MATCH("b",{"a","b","c"},0)` is 2), and a cell whose formula is an array
+shows its first element. A parameter that takes one value, and an operator, use only the first
+element: Excel applies them element by element, so `SUM(COUNTIF(A:A,{"a","b"}))` and
+`SUM({1,2}*2)` count or add only the first element here, where Excel adds both. A defined name
+whose value is an array constant is not evaluated (`#NAME?`).
+
 ## Tables, data validation & conditional formatting (0.9)
 
 Three structural features that read AND write, each as the same record on both sides — so

@@ -218,9 +218,10 @@ class Parser {
 	}
 
 	// `{1,2;3,4}` — an array constant. `,` separates columns, `;` separates rows; elements are
-	// literals only (optionally signed), never references or calls.
+	// literals only (optionally signed), never references or calls. Every row needs the same number of
+	// elements, as Excel requires (F11.64).
 	private parseArray(): FormulaAst {
-		this.next(); // '{'
+		const open = this.next(); // '{'
 		const rows: ArrayElement[][] = [];
 		let row: ArrayElement[] = [];
 		for (;;) {
@@ -242,6 +243,14 @@ class Parser {
 				break;
 			}
 			this.fail("parse-error", "expected ',', ';' or '}' in array constant", t);
+		}
+		const width = rows[0]?.length ?? 0;
+		if (rows.some((r) => r.length !== width)) {
+			this.fail(
+				"parse-error",
+				"every row of an array constant needs the same number of elements",
+				open,
+			);
 		}
 		return { type: "array", rows };
 	}

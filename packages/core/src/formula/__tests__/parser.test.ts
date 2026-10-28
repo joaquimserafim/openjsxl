@@ -197,6 +197,14 @@ describe("parseFormula — array constants", () => {
 		expectCode("{A1}", "parse-error");
 		expectCode("{SUM(1)}", "parse-error");
 	});
+
+	it("rejects rows of different lengths, as Excel does (F11.64)", () => {
+		expectCode("{1,2;3}", "parse-error");
+		expectCode("{1;2,3}", "parse-error");
+		expectCode("{1,2;3,4;5}", "parse-error");
+		expect(rp("{1;2;3}")).toBe("{1;2;3}");
+		expect(rp("{1,2,3}")).toBe("{1,2,3}");
+	});
 });
 
 describe("parseFormula — operators", () => {

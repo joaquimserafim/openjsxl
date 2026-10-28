@@ -1,5 +1,6 @@
 import type { BinaryOp, PostfixOp, UnaryOp } from "./ast";
 import {
+	ArrayView,
 	type EvalValue,
 	errorValue,
 	type FormulaErrorValue,
@@ -41,8 +42,15 @@ export function numericStringValue(s: string): number | undefined {
 }
 
 /**
- * Reduce a value to a scalar: a single-cell range yields that cell; a wider range is `#VALUE!`. A
- * cell can itself evaluate to a range (`=A1:A3`), so this unwraps repeatedly until non-range.
+ * Reduce a value to a scalar: a single-cell range yields that cell; a wider range is `#VALUE!`, but an
+ * array constant yields its first element, as Excel shows it (F11.64). A cell can itself evaluate to
+ * a range (`=A1:A3`), so this unwraps repeatedly until non-range.
+ *
+ * @example scalarize(5) // 5
+ * @example scalarize(new RangeView("S", 1, 1, 1, 1, () => [], () => 7)) // 7 (one cell)
+ * @example scalarize(new ArrayView([[1, 2]])) // 1
+ * @example scalarize(new RangeView("S", 1, 1, 1, 3, () => [], () => 7)) // #VALUE! (three cells)
+ * @example scalarize(r) // #VALUE! when r's one cell resolves to r itself, as in A1 = A1:A1
  */
 export function scalarize(v: EvalValue): ScalarValue {
 	let cur = v;
@@ -51,7 +59,7 @@ export function scalarize(v: EvalValue): ScalarValue {
 	// construction is lazy), so bound the unwrap and report #VALUE! rather than loop forever.
 	for (let guard = 0; isRangeView(cur); guard++) {
 		if (guard >= 64) return errorValue("#VALUE!");
-		const one = cur.single();
+		const one = cur instanceof ArrayView ? cur.topLeft() : cur.single();
 		if (one === undefined) return errorValue("#VALUE!");
 		cur = one;
 	}
