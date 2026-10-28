@@ -448,6 +448,11 @@ element: Excel applies them element by element, so `SUM(COUNTIF(A:A,{"a","b"}))`
 `SUM({1,2}*2)` count or add only the first element here, where Excel adds both. A defined name
 whose value is an array constant is not evaluated (`#NAME?`).
 
+Since 1.0.1 a sheet name in a formula matches ignoring case, as in Excel, so `=data!A1` reads sheet
+Data; so does the sheet you pass to `evaluateCell`. A sheet-qualified name such as `Data!Rate` uses
+the `Rate` scoped to Data, then the workbook-wide one, and a qualifier that names no sheet gives
+`#REF!`.
+
 ## Tables, data validation & conditional formatting (0.9)
 
 Three structural features that read AND write, each as the same record on both sides — so

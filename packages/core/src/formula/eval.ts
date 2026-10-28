@@ -64,7 +64,10 @@ export interface CellResult {
 /** The result of evaluating a whole workbook — every formula cell, plus a keyed lookup. */
 export interface WorkbookEvalResult {
 	readonly cells: readonly CellResult[];
-	/** The evaluated value at `sheet!ref`, or `undefined` when that cell holds no formula. */
+	/**
+	 * The evaluated value at `sheet!ref`, or `undefined` when that cell holds no formula. The sheet and
+	 * ref match as `cells` spells them (`"Sheet1"`, `"B2"`); `evaluateCell` also takes another case.
+	 */
 	get(sheet: string, ref: string): ScalarValue | undefined;
 }
 
@@ -164,6 +167,62 @@ export function holdsValue(cell: Cell, formula: string | undefined): boolean {
 }
 
 /**
+ * The sheet a formula's qualifier names (`data!A1`, `'DATA'!Rate`), matched ignoring case as Excel
+ * does, with the fold the reader uses for duplicate names (`toLowerCase`), the first sheet in tab
+ * order winning (F11.65). A sheet spelled exactly as the qualifier wins first, so a workbook another
+ * reader loads with both `Data` and `data` keeps each one reachable. Each qualifier is folded once,
+ * however often a formula looks it up, so a long qualifier in a defined name costs no more per use
+ * than a short one.
+ *
+ * @example sheetFinder(["Data", "Main"])("Data") // "Data"
+ * @example sheetFinder(["Data", "Main"])("DATA") // "Data" (case ignored)
+ * @example sheetFinder(["data", "Data"])("Data") // "Data" (the exact spelling wins)
+ * @example sheetFinder(["Data", "Main"])("Nope") // undefined (no such sheet)
+ * @example sheetFinder([5, "Data"])("data") // "Data" (a name that is not a string is skipped)
+ */
+export function sheetFinder(names: readonly string[]): (qualifier: string) => string | undefined {
+	const exact = new Set(names);
+	const folded = new Map<string, string>();
+	for (const name of names) {
+		// A Workbook built without types can name a sheet with any value; no qualifier names it.
+		if (typeof name !== "string") continue;
+		const key = name.toLowerCase();
+		if (!folded.has(key)) folded.set(key, name);
+	}
+	const found = new Map<string, string | undefined>();
+	return (qualifier) => {
+		if (found.has(qualifier)) return found.get(qualifier);
+		const sheet = exact.has(qualifier) ? qualifier : folded.get(qualifier.toLowerCase());
+		found.set(qualifier, sheet);
+		return sheet;
+	};
+}
+
+/**
+ * The sheet a range lives on, from the qualifiers on its two ends (`Data!A1:A2`, `A1:data!A2`). Each
+ * qualifier must name a sheet, or there is none and the range is #REF! (F11.65). The left end's sheet
+ * wins, then the right end's, then the formula's own sheet.
+ *
+ * @example rangeSheet("Data", undefined, "Main", sheetFinder(["Data", "Main"])) // "Data"
+ * @example rangeSheet(undefined, "data", "Main", sheetFinder(["Data", "Main"])) // "Data"
+ * @example rangeSheet("Nope", undefined, "Main", sheetFinder(["Data", "Main"])) // undefined (#REF!)
+ * @example rangeSheet("Data", "Nope", "Main", sheetFinder(["Data", "Main"])) // undefined (#REF!)
+ * @example rangeSheet(undefined, undefined, "Main", sheetFinder(["Data", "Main"])) // "Main"
+ */
+export function rangeSheet(
+	left: string | undefined,
+	right: string | undefined,
+	home: string,
+	findSheet: (qualifier: string) => string | undefined,
+): string | undefined {
+	const leftSheet = left === undefined ? undefined : findSheet(left);
+	if (left !== undefined && leftSheet === undefined) return undefined;
+	const rightSheet = right === undefined ? undefined : findSheet(right);
+	if (right !== undefined && rightSheet === undefined) return undefined;
+	return leftSheet ?? rightSheet ?? home;
+}
+
+/**
  * The value of one element of an array constant: a literal, or a signed literal (`-1`, `+"a"`).
  *
  * @example arrayElementValue({ type: "number", value: 2, raw: "2" }) // 2
@@ -217,6 +276,13 @@ class Evaluator {
 	private readonly ctx: EvalContext;
 	private readonly globalNames = new Map<string, ResolvedName>();
 	private readonly scopedNames = new Map<number, Map<string, ResolvedName>>();
+	// The qualifier lookup, built on first use from the sheets load() put in `models`, so a qualifier
+	// never finds a sheet that did not load (F11.65). No formula runs before load().
+	private sheetLookup: ((qualifier: string) => string | undefined) | undefined;
+	private readonly findSheet = (qualifier: string): string | undefined => {
+		this.sheetLookup ??= sheetFinder([...this.models.keys()]);
+		return this.sheetLookup(qualifier);
+	};
 	private readonly hasVolatileSource: boolean;
 	private fuel: number;
 
@@ -572,14 +638,11 @@ class Evaluator {
 		sheet: string,
 		depth: number,
 	): Generator<CellRequest, EvalValue, EvalValue> {
-		if (explicitSheet !== undefined) {
-			// A sheet-qualified bare name (Sheet1!Name) — resolve as a global-ish name; rare.
-			const resolved = this.globalNames.get(name.toUpperCase());
-			if (resolved === undefined) return errorValue("#NAME?");
-			return yield* this.applyResolvedName(resolved, depth);
-		}
-		const model = this.models.get(sheet);
-		const resolved = this.lookupName(name, model?.index ?? 0);
+		// `Data!Rate` looks in Data's names, then the workbook's, as `Rate` does on its own sheet; a
+		// qualifier that names no sheet is #REF! (F11.65).
+		const target = this.resolveSheet(explicitSheet, sheet);
+		if (target === undefined) return errorValue("#REF!");
+		const resolved = this.lookupName(name, this.models.get(target)?.index ?? 0);
 		if (resolved === undefined) return errorValue("#NAME?");
 		return yield* this.applyResolvedName(resolved, depth);
 	}
@@ -627,8 +690,7 @@ class Evaluator {
 	// ── References ────────────────────────────────────────────────────────────────────────────
 
 	private resolveSheet(explicit: string | undefined, home: string): string | undefined {
-		if (explicit === undefined) return home;
-		return this.models.has(explicit) ? explicit : undefined;
+		return explicit === undefined ? home : this.findSheet(explicit);
 	}
 
 	// Interpret a range endpoint into a partial address: a cell gives {col,row}, a column name gives
@@ -667,7 +729,7 @@ class Evaluator {
 		const a = this.endpoint(leftNode);
 		const b = this.endpoint(rightNode);
 		if (a === undefined || b === undefined) return errorValue("#REF!");
-		const target = this.resolveSheet(a.sheet ?? b.sheet, home);
+		const target = rangeSheet(a.sheet, b.sheet, home, this.findSheet);
 		if (target === undefined) return errorValue("#REF!");
 		let startCol: number;
 		let endCol: number;
@@ -746,8 +808,11 @@ class Evaluator {
 	evaluateCellRef(sheetName: string, ref: string): ScalarValue {
 		const at = parseA1(ref);
 		if (at === undefined) return errorValue("#REF!");
-		if (!this.models.has(sheetName)) return errorValue("#REF!");
-		return this.reduce(this.resolveCell(sheetName, at.col, at.row, 0));
+		// A caller without types can pass any value as the sheet name.
+		if (typeof sheetName !== "string") return errorValue("#REF!");
+		const sheet = this.findSheet(sheetName);
+		if (sheet === undefined) return errorValue("#REF!");
+		return this.reduce(this.resolveCell(sheet, at.col, at.row, 0));
 	}
 
 	evaluateAll(): WorkbookEvalResult {
@@ -787,9 +852,17 @@ export async function evaluateWorkbook(
 
 /**
  * Evaluate a single cell (and, on demand, its transitive dependencies). Returns the scalar result — a
- * formula that yields a range is reduced to its top-left value (decision 5). Throws a typed
- * {@link FormulaError} only for configuration/resource failures (unconfigured volatile, exhausted
- * budget); in-sheet problems come back as error VALUES.
+ * formula that yields a range is reduced to its top-left value (decision 5). The sheet name matches
+ * ignoring case, as a formula's sheet qualifier does; a name that matches no sheet gives `#REF!`.
+ * Throws a typed {@link FormulaError} only for configuration/resource failures (unconfigured
+ * volatile, exhausted budget); in-sheet problems come back as error VALUES.
+ *
+ * @example await evaluateCell(wb, "Sheet1", "B2") // 84, the value of Sheet1!B2's formula
+ * @example await evaluateCell(wb, "sheet1", "B2") // 84 (the sheet name ignores case)
+ * @example await evaluateCell(wb, "Nope", "B2") // the #REF! error value (no such sheet)
+ * @example await evaluateCell(wb, undefined, "B2") // the #REF! error value (not a sheet name)
+ * @example await evaluateCell(wb, "Sheet1", "B2:C3") // the #REF! error value (not one cell)
+ * @example await evaluateCell(wb, "Sheet1", "C1") // throws FormulaError when C1 calls NOW() and options.now is unset
  */
 export async function evaluateCell(
 	workbook: Workbook,
