@@ -223,6 +223,154 @@ export function rangeSheet(
 }
 
 /**
+ * A sheet's populated positions sorted for range queries (F11.67), both ways. `rows` lists the rows
+ * that hold a cell, in ascending order, and `colsOfRow` each one's columns at the same position, in
+ * ascending order. `cols` and `rowsOfCol` do the same column by column (D11).
+ */
+export interface SheetIndex {
+	readonly rows: readonly number[];
+	readonly colsOfRow: readonly (readonly number[])[];
+	readonly cols: readonly number[];
+	readonly rowsOfCol: readonly (readonly number[])[];
+}
+
+/**
+ * The first position in an ascending array whose value is at least `value`, or the array's length
+ * when none is.
+ *
+ * @example lowerBound([2, 4, 6], 4) // 1
+ * @example lowerBound([2, 4, 6], 5) // 2
+ * @example lowerBound([2, 4, 6], 7) // 3
+ */
+export function lowerBound(sorted: readonly number[], value: number): number {
+	let lo = 0;
+	let hi = sorted.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >>> 1;
+		if ((sorted[mid] as number) < value) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
+/**
+ * The {@link SheetIndex} of a sheet's model, a map from row to a map from column to cell. A row
+ * whose map is empty holds no cell, so it is left out.
+ *
+ * @example sheetIndex(new Map([[3, new Map([[2, "x"], [1, "y"]])], [1, new Map([[1, "z"]])]])) // { rows: [1, 3], colsOfRow: [[1], [1, 2]], cols: [1, 2], rowsOfCol: [[1, 3], [3]] }
+ * @example sheetIndex(new Map([[2, new Map()]])) // { rows: [], colsOfRow: [], cols: [], rowsOfCol: [] }
+ */
+export function sheetIndex(cells: ReadonlyMap<number, ReadonlyMap<number, unknown>>): SheetIndex {
+	const ascending = (a: number, b: number) => a - b;
+	const rows = [...cells.keys()].filter((row) => (cells.get(row)?.size ?? 0) > 0).sort(ascending);
+	const colsOfRow = rows.map((row) => [...(cells.get(row)?.keys() ?? [])].sort(ascending));
+	// The rows are visited in ascending order, so each column's list comes out sorted.
+	const byCol = new Map<number, number[]>();
+	rows.forEach((row, i) => {
+		for (const col of colsOfRow[i] ?? []) {
+			let list = byCol.get(col);
+			if (list === undefined) {
+				list = [];
+				byCol.set(col, list);
+			}
+			list.push(row);
+		}
+	});
+	const cols = [...byCol.keys()].sort(ascending);
+	const rowsOfCol = cols.map((col) => byCol.get(col) ?? []);
+	return { rows, colsOfRow, cols, rowsOfCol };
+}
+
+/**
+ * The populated `[col, row]` positions inside columns `c1..c2` and rows `r1..r2`, found column by
+ * column and then put row by row and left to right, or `undefined` when walking the rows costs less
+ * (F11.67, D11). Walking the rows visits every populated row the range spans; walking the columns
+ * visits every populated column it spans, then sorts what it finds, unless it walks one column, whose
+ * finds are already in order. The column walk is taken when its columns, plus its finds times the
+ * sort's log factor (1 for one column), come to fewer than those rows plus the finds. A row bound
+ * that is not a whole number, from a reference such as `2:3.5`, ends at the whole row below it, as
+ * the row walk does.
+ *
+ * In the examples, `index` is `sheetIndex(new Map([[1, new Map([[1, 0]])], [3, new Map([[2, 0],
+ * [5, 0]])], [9, new Map([[1, 0]])]]))`: cells at A1, B3, E3 and A9.
+ *
+ * @example columnWalk(index, 1, 3, 5, 3) // undefined (one row against three columns)
+ * @example columnWalk(index, 1, 1, 2, 9) // undefined (two columns, but three finds to sort)
+ * @example columnWalk(index, 5, 1, 5, 9) // [[5, 3]] (one column and one find, against three rows)
+ * @example columnWalk(index, 4, 1, 4, 9) // [] (no populated column)
+ */
+export function columnWalk(
+	index: SheetIndex,
+	c1: number,
+	r1: number,
+	c2: number,
+	r2: number,
+): readonly (readonly [number, number])[] | undefined {
+	const rowEnd = Math.floor(r2) + 1;
+	const rowCount = lowerBound(index.rows, rowEnd) - lowerBound(index.rows, r1);
+	const from = lowerBound(index.cols, c1);
+	const to = lowerBound(index.cols, c2 + 1);
+	if (to - from >= rowCount) return undefined;
+	// Each column's span of rows inside the range: [column, its rows, start, end].
+	const spans: (readonly [number, readonly number[], number, number])[] = [];
+	let finds = 0;
+	for (let k = from; k < to; k++) {
+		const rows = index.rowsOfCol[k] ?? [];
+		const start = lowerBound(rows, r1);
+		const end = lowerBound(rows, rowEnd);
+		finds += end - start;
+		spans.push([index.cols[k] as number, rows, start, end]);
+	}
+	const one = to - from === 1;
+	const sortFactor = one ? 1 : Math.ceil(Math.log2(finds + 1));
+	if (to - from + finds * sortFactor >= rowCount + finds) return undefined;
+	const found: (readonly [number, number])[] = [];
+	for (const [col, rows, start, end] of spans) {
+		for (let p = start; p < end; p++) found.push([col, rows[p] as number]);
+	}
+	return one ? found : found.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+}
+
+/**
+ * The populated `[col, row]` positions of an index inside columns `c1..c2` and rows `r1..r2`, row by
+ * row and left to right. It walks whichever is cheaper (F11.67, D11): the populated columns the range
+ * spans ({@link columnWalk}), or the populated rows it spans, a binary search finding the first row
+ * and, in each row, the first column. Either way the cost follows the range's own cells and the fewer
+ * of its populated rows or columns, never the rest of the sheet.
+ *
+ * In the examples, `index` holds cells at A1, B3, E3 and A9, as in {@link columnWalk}'s.
+ *
+ * @example [...indexedPositions(index, 5, 1, 5, 9)] // [[5, 3]] (the column walk)
+ * @example [...indexedPositions(index, 2, 1, 5, 3)] // [[2, 3], [5, 3]] (the row walk, stopping past row 3)
+ * @example [...indexedPositions(index, 1, 1, 9, 99)] // [[1, 1], [2, 3], [5, 3], [1, 9]] (the row walk, to the last row)
+ * @example [...indexedPositions(index, 2, 1, 4, 1)] // [] (no column in range on row 1)
+ * @example [...indexedPositions(index, 1, 4, 9, 8)] // [] (no row in range)
+ */
+export function* indexedPositions(
+	index: SheetIndex,
+	c1: number,
+	r1: number,
+	c2: number,
+	r2: number,
+): Generator<readonly [number, number]> {
+	const byColumn = columnWalk(index, c1, r1, c2, r2);
+	if (byColumn !== undefined) {
+		yield* byColumn;
+		return;
+	}
+	for (let i = lowerBound(index.rows, r1); i < index.rows.length; i++) {
+		const row = index.rows[i] as number;
+		if (row > r2) return;
+		const cols = index.colsOfRow[i] ?? [];
+		for (let j = lowerBound(cols, c1); j < cols.length; j++) {
+			const col = cols[j] as number;
+			if (col > c2) break;
+			yield [col, row];
+		}
+	}
+}
+
+/**
  * The value of one element of an array constant: a literal, or a signed literal (`-1`, `+"a"`).
  *
  * @example arrayElementValue({ type: "number", value: 2, raw: "2" }) // 2
@@ -283,6 +431,9 @@ class Evaluator {
 		this.sheetLookup ??= sheetFinder([...this.models.keys()]);
 		return this.sheetLookup(qualifier);
 	};
+	// Each sheet's range index, built on first use from the model load() filled, which nothing
+	// changes afterwards (F11.67).
+	private readonly indexes = new Map<SheetModel, SheetIndex>();
 	private readonly hasVolatileSource: boolean;
 	private fuel: number;
 
@@ -784,12 +935,12 @@ class Evaluator {
 		r2: number,
 	): Generator<readonly [number, number]> {
 		if (model === undefined) return;
-		for (const [row, colMap] of model.cells) {
-			if (row < r1 || row > r2) continue;
-			for (const col of colMap.keys()) {
-				if (col >= c1 && col <= c2) yield [col, row];
-			}
+		let index = this.indexes.get(model);
+		if (index === undefined) {
+			index = sheetIndex(model.cells);
+			this.indexes.set(model, index);
 		}
+		yield* indexedPositions(index, c1, r1, c2, r2);
 	}
 
 	// ── Public results ────────────────────────────────────────────────────────────────────────

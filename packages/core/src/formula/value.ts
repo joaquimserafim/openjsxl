@@ -187,7 +187,10 @@ export class RangeView {
 		return this.width * this.height;
 	}
 
-	/** Populated (non-blank) cells, evaluated on demand, in the model's iteration order. */
+	/**
+	 * Populated (non-blank) cells, evaluated on demand, in the order the view's source gives them: row
+	 * by row and left to right for a range the evaluator builds (F11.67) and for an array constant.
+	 */
 	*entries(): IterableIterator<RangeEntry> {
 		for (const [col, row] of this.populated()) {
 			yield { col, row, value: this.resolve(col, row) };

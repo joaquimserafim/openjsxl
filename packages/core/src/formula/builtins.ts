@@ -132,8 +132,8 @@ function collectBools(args: readonly EvalValue[]): boolean[] | FormulaErrorValue
 	return out;
 }
 
-// Populated cells of a range in row-major order (deterministic; the model's iteration order is
-// row-then-col but not guaranteed sorted, so CONCAT/TEXTJOIN sort explicitly).
+// Populated cells of a range in row-major order. The evaluator's ranges already come in that order
+// (F11.67), but a range a caller builds need not, so CONCAT/TEXTJOIN sort explicitly.
 function sortedEntries(rv: RangeView): { col: number; row: number; value: EvalValue }[] {
 	const list = [...rv.entries()];
 	list.sort((a, b) => a.row - b.row || a.col - b.col);
