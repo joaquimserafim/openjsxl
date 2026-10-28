@@ -89,7 +89,7 @@ describe("a styled empty cell", () => {
 	});
 
 	it("gives TEXTJOIN with ignore_empty FALSE the result an absent cell gives", async () => {
-		// Neither gets a slot yet, where Excel keeps one for every empty cell (F11.97).
+		// Both get a slot, as Excel keeps one for every empty cell (F11.97).
 		const formula = ['TEXTJOIN(",",FALSE,Data!A1:A3)'];
 		const absent = await evaluateFormulas(formula, [["a"], [], ["c"]]);
 		expect(await evaluateFormulas(formula, [["a"], [bold], ["c"]])).toEqual(absent);

@@ -460,6 +460,11 @@ long for JavaScript gives `#VALUE!` instead of throwing. A longer text that a fi
 returned as it is by a formula that passes it through unchanged, such as `=A1`, `LEFT`, `MID`, or a
 `SUBSTITUTE` that replaces nothing.
 
+Since 1.0.1 `TEXTJOIN` with ignore_empty FALSE gives an empty item for every empty cell in a range, as
+in Excel: with "a" in A1, A2 empty and "c" in A3, `TEXTJOIN(",",FALSE,A1:A3)` is `"a,,c"`. Over a large
+range, such as a whole column, those empty items can pass the 32,767-character limit. The result is
+then `#VALUE!`, and no cell of a range past that point is read, so an error there does not show.
+
 ## Tables, data validation & conditional formatting (0.9)
 
 Three structural features that read AND write, each as the same record on both sides — so

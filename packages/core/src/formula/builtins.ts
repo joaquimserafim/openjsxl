@@ -1033,10 +1033,11 @@ export function concat(args: readonly EvalValue[]): EvalValue {
 
 /**
  * TEXTJOIN: the items joined with the delimiter between them, a range's populated cells in row-major
- * order; with ignore_empty TRUE, an empty value is no item. A result longer than {@link MAX_TEXT}
- * characters is `#VALUE!`. A running length, delimiters included, is kept, and the items are joined
- * only when it fits, so no longer text is built (F11.66); every item is still read, so an error in any
- * of them wins, as before.
+ * order. With ignore_empty FALSE, {@link joinKeepingEmpty} joins them, an empty cell in a range one
+ * empty item (F11.97). With TRUE, an empty value is no item, and a result longer than
+ * {@link MAX_TEXT} characters is `#VALUE!`: a running length, delimiters included, is kept, and the
+ * items are joined only when it fits, so no longer text is built (F11.66); every item is still read,
+ * so an error in any of them wins, as before.
  *
  * @example textjoin([",", true, "a", "", "b"]) // "a,b"
  * @example textjoin([",", false, "a", "", "b"]) // "a,,b"
@@ -1050,18 +1051,83 @@ export function textjoin(args: readonly EvalValue[]): EvalValue {
 	if (isErrorValue(delim)) return delim;
 	const ignoreEmpty = toBool(args[1] ?? null);
 	if (isErrorValue(ignoreEmpty)) return ignoreEmpty;
+	if (!ignoreEmpty) return joinKeepingEmpty(delim, args.slice(2));
 	const parts: string[] = [];
 	// The joined length so far: every part, and a delimiter before each but the first.
 	let length = 0;
 	for (let i = 2; i < args.length; i++) {
 		const arg = args[i] ?? null;
 		for (const value of isRangeView(arg) ? sortedEntries(arg).map((e) => e.value) : [arg]) {
-			if (ignoreEmpty && (value === null || value === "")) continue;
+			if (value === null || value === "") continue;
 			const t = toText(value);
 			if (isErrorValue(t)) return t;
 			length += (parts.length > 0 ? delim.length : 0) + t.length;
 			parts.push(t);
 		}
+	}
+	return length > MAX_TEXT ? errorValue("#VALUE!") : parts.join(delim);
+}
+
+/**
+ * TEXTJOIN with ignore_empty FALSE: the items joined with the delimiter between them, every empty cell
+ * inside a range one empty item, as in Excel (F11.97). A range's populated cells are read in row-major
+ * order; the empty cells before the first, between them and after the last are counted from the
+ * range's bounds, never visited, so the cost follows the populated cells however large the range. A
+ * running length, delimiters included, is kept: once it passes {@link MAX_TEXT} the result is
+ * `#VALUE!`, and no further cell of a range is read. A scalar argument is already evaluated, so an
+ * error in a later one still wins, as with TRUE. With an empty delimiter, empty items add nothing, so
+ * they are not counted.
+ *
+ * @example joinKeepingEmpty(",", ["a", null, "b"]) // "a,,b"
+ * @example joinKeepingEmpty(",", ["a", errorValue("#N/A")]) // #N/A
+ * @example joinKeepingEmpty("-", ["a".repeat(32767), "b"]) // #VALUE!
+ * @example joinKeepingEmpty("-", ["a".repeat(32767), "b", errorValue("#N/A")]) // #N/A
+ * @example joinKeepingEmpty(",", [new RangeView("S", 1, 1, 1, 3, () => [[1, 2]], () => "b")]) // ",b,"
+ * @example joinKeepingEmpty(",", [new RangeView("S", 1, 1, 1, 3, () => [[1, 2]], () => errorValue("#N/A"))]) // #N/A
+ * @example joinKeepingEmpty(",", [new RangeView("S", 1, 1, 1, 40000, () => [[1, 40000]], () => "x")]) // #VALUE! (the gap passes the limit; the cell is never read)
+ * @example joinKeepingEmpty("", [new RangeView("S", 1, 1, 1, 2, () => [[1, 1], [1, 2]], () => "a".repeat(20000))]) // #VALUE! (the second cell passes it)
+ * @example joinKeepingEmpty(",", [new RangeView("S", 1, 1, 1, 32769, () => [], () => null)]) // #VALUE! (32,768 commas)
+ * @example joinKeepingEmpty("", [new RangeView("S", 1, 1, 16384, 1048576, () => [[3, 7]], () => "x")]) // "x"
+ */
+export function joinKeepingEmpty(delim: string, items: readonly EvalValue[]): EvalValue {
+	const parts: string[] = [];
+	// The joined length so far, and whether an item came before (the first has no delimiter). The
+	// length only grows, so once it passes the limit it stays past it.
+	let length = 0;
+	let started = false;
+	// Add `times` items of `text`; false once the joined length passes the limit, before keeping any.
+	const add = (text: string, times: number): boolean => {
+		length += text.length * times + delim.length * (started ? times : times - 1);
+		started = true;
+		if (length > MAX_TEXT) return false;
+		for (let i = 0; i < times; i++) parts.push(text);
+		return true;
+	};
+	for (const item of items) {
+		if (!isRangeView(item)) {
+			const t = toText(item);
+			if (isErrorValue(t)) return t;
+			add(t, 1);
+			continue;
+		}
+		// Past the limit no cell of a range is read. A scalar is already evaluated, so its error is
+		// still seen above.
+		if (length > MAX_TEXT) continue;
+		const positions = [...populatedRangePositions(item)].sort(
+			(a, b) => a[1] - b[1] || a[0] - b[0],
+		);
+		// The row-major index of the first cell not yet joined.
+		let next = 0;
+		for (const [col, row] of positions) {
+			const at = (row - item.startRow) * item.width + (col - item.startCol);
+			if (delim !== "" && at > next && !add("", at - next)) break;
+			const t = toText(item.cellAt(row - item.startRow, col - item.startCol));
+			if (isErrorValue(t)) return t;
+			if (!add(t, 1)) break;
+			next = at + 1;
+		}
+		const rest = item.cellCount - next;
+		if (delim !== "" && rest > 0) add("", rest);
 	}
 	return length > MAX_TEXT ? errorValue("#VALUE!") : parts.join(delim);
 }
