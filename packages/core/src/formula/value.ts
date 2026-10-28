@@ -112,6 +112,23 @@ export function blankToText(v: EvalValue): EvalValue {
 	return v;
 }
 
+/**
+ * The most characters a text value holds in Excel: 32,767, its cell limit. `&` and the built-ins that
+ * build text give `#VALUE!` for a longer result, as Excel does (F11.66); `=A1` still returns a longer
+ * text that a reader stored, as it is.
+ */
+export const MAX_TEXT = 32767;
+
+/**
+ * The text, or `#VALUE!` when it is longer than {@link MAX_TEXT} characters (F11.66).
+ *
+ * @example capText("abc") // "abc"
+ * @example capText("a".repeat(32768)) // #VALUE!
+ */
+export function capText(text: string): string | FormulaErrorValue {
+	return text.length > MAX_TEXT ? errorValue("#VALUE!") : text;
+}
+
 /** One populated cell surfaced by a {@link RangeView}: its 1-based position and evaluated value. */
 export interface RangeEntry {
 	readonly col: number;

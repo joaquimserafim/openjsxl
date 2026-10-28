@@ -12,11 +12,13 @@ import {
 	anchorValue,
 	blankToText,
 	blankToZero,
+	capText,
 	type EvalValue,
 	errorValue,
 	type FormulaErrorValue,
 	isErrorValue,
 	isRangeView,
+	MAX_TEXT,
 	mapArray,
 	populatedRangePositions,
 	type RangeView,
@@ -727,18 +729,10 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 			.filter((p) => p !== "")
 			.join(" ");
 	}),
-	UPPER: eager(1, 1, (args) => textFn1(args, (t) => t.toUpperCase())),
-	LOWER: eager(1, 1, (args) => textFn1(args, (t) => t.toLowerCase())),
+	UPPER: eager(1, 1, (args) => changeCase(args, "upper")),
+	LOWER: eager(1, 1, (args) => changeCase(args, "lower")),
 	PROPER: eager(1, 1, (args) => textFn1(args, proper)),
-	REPT: eager(2, 2, (args) => {
-		const t = toText(args[0] ?? null);
-		if (isErrorValue(t)) return t;
-		const k = toIndex(args[1] ?? null);
-		if (isErrorValue(k)) return k;
-		if (k < 0) return errorValue("#VALUE!");
-		if (t.length * k > 32767) return errorValue("#VALUE!");
-		return t.repeat(k);
-	}),
+	REPT: eager(2, 2, repeatText),
 	EXACT: eager(2, 2, (args) => {
 		const a = toText(args[0] ?? null);
 		if (isErrorValue(a)) return a;
@@ -776,18 +770,7 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 		return n === undefined ? errorValue("#VALUE!") : n * scale;
 	}),
 	SUBSTITUTE: eager(3, 4, substitute),
-	REPLACE: eager(4, 4, (args) => {
-		const t = toText(args[0] ?? null);
-		if (isErrorValue(t)) return t;
-		const start = toIndex(args[1] ?? null);
-		if (isErrorValue(start)) return start;
-		const num = toIndex(args[2] ?? null);
-		if (isErrorValue(num)) return num;
-		const nw = toText(args[3] ?? null);
-		if (isErrorValue(nw)) return nw;
-		if (start < 1 || num < 0) return errorValue("#VALUE!");
-		return t.slice(0, start - 1) + nw + t.slice(start - 1 + num);
-	}),
+	REPLACE: eager(4, 4, replaceText),
 	FIND: eager(2, 3, (args) => findFn(args, "find")),
 	SEARCH: eager(2, 3, (args) => findFn(args, "search")),
 
@@ -1021,49 +1004,66 @@ function sumproduct(args: readonly EvalValue[]): EvalValue {
 	return sum;
 }
 
-function concat(args: readonly EvalValue[]): EvalValue {
+/**
+ * CONCAT: every argument as text, a range's populated cells in row-major order, joined. A result
+ * longer than {@link MAX_TEXT} characters is `#VALUE!`. The length is checked before each piece is
+ * added, so no longer text is built (F11.66); the rest of the argument that passes the limit is still
+ * read, so an error in it wins, as before.
+ *
+ * @example concat(["a", 1, true]) // "a1TRUE"
+ * @example concat([new ArrayView([["a", "b"]]), "c"]) // "abc"
+ * @example concat(["a", errorValue("#N/A")]) // #N/A
+ * @example concat([new ArrayView([["a".repeat(32767), "b", errorValue("#N/A")]])]) // #N/A
+ * @example concat(["a".repeat(32767), "b", errorValue("#N/A")]) // #VALUE!
+ */
+export function concat(args: readonly EvalValue[]): EvalValue {
 	let out = "";
+	let over = false;
 	for (const arg of args) {
-		if (isRangeView(arg)) {
-			for (const e of sortedEntries(arg)) {
-				const t = toText(e.value);
-				if (isErrorValue(t)) return t;
-				out += t;
-			}
-		} else {
-			const t = toText(arg);
+		for (const value of isRangeView(arg) ? sortedEntries(arg).map((e) => e.value) : [arg]) {
+			const t = toText(value);
 			if (isErrorValue(t)) return t;
-			out += t;
+			if (out.length + t.length > MAX_TEXT) over = true;
+			else out += t;
 		}
-		if (out.length > 32767) return errorValue("#VALUE!");
+		if (over) return errorValue("#VALUE!");
 	}
 	return out;
 }
 
-function textjoin(args: readonly EvalValue[]): EvalValue {
+/**
+ * TEXTJOIN: the items joined with the delimiter between them, a range's populated cells in row-major
+ * order; with ignore_empty TRUE, an empty value is no item. A result longer than {@link MAX_TEXT}
+ * characters is `#VALUE!`. A running length, delimiters included, is kept, and the items are joined
+ * only when it fits, so no longer text is built (F11.66); every item is still read, so an error in any
+ * of them wins, as before.
+ *
+ * @example textjoin([",", true, "a", "", "b"]) // "a,b"
+ * @example textjoin([",", false, "a", "", "b"]) // "a,,b"
+ * @example textjoin([errorValue("#N/A"), true, "a"]) // #N/A
+ * @example textjoin([",", "yes", "a"]) // #VALUE! (ignore_empty is not a boolean)
+ * @example textjoin([",", true, "a".repeat(32767), "b", errorValue("#N/A")]) // #N/A
+ * @example textjoin([",", true, "a".repeat(32767), "b"]) // #VALUE!
+ */
+export function textjoin(args: readonly EvalValue[]): EvalValue {
 	const delim = toText(args[0] ?? null);
 	if (isErrorValue(delim)) return delim;
 	const ignoreEmpty = toBool(args[1] ?? null);
 	if (isErrorValue(ignoreEmpty)) return ignoreEmpty;
 	const parts: string[] = [];
+	// The joined length so far: every part, and a delimiter before each but the first.
+	let length = 0;
 	for (let i = 2; i < args.length; i++) {
-		const arg = args[i];
-		if (isRangeView(arg)) {
-			for (const e of sortedEntries(arg)) {
-				if (ignoreEmpty && (e.value === null || e.value === "")) continue;
-				const t = toText(e.value);
-				if (isErrorValue(t)) return t;
-				parts.push(t);
-			}
-		} else {
-			if (ignoreEmpty && (arg === null || arg === undefined || arg === "")) continue;
-			const t = toText(arg ?? null);
+		const arg = args[i] ?? null;
+		for (const value of isRangeView(arg) ? sortedEntries(arg).map((e) => e.value) : [arg]) {
+			if (ignoreEmpty && (value === null || value === "")) continue;
+			const t = toText(value);
 			if (isErrorValue(t)) return t;
+			length += (parts.length > 0 ? delim.length : 0) + t.length;
 			parts.push(t);
 		}
 	}
-	const joined = parts.join(delim);
-	return joined.length > 32767 ? errorValue("#VALUE!") : joined;
+	return length > MAX_TEXT ? errorValue("#VALUE!") : parts.join(delim);
 }
 
 function sidePart(args: readonly EvalValue[], side: "left" | "right"): EvalValue {
@@ -1086,7 +1086,26 @@ function proper(t: string): string {
 	return out;
 }
 
-function substitute(args: readonly EvalValue[]): EvalValue {
+/**
+ * SUBSTITUTE: the text with new_text in place of old_text, at every occurrence or at the instance_num-th
+ * only. The result's length is worked out before it is built, and a result longer than
+ * {@link MAX_TEXT} characters is `#VALUE!` (F11.66). When nothing is replaced, the text comes back as
+ * it is, however long, as before: SUBSTITUTE then builds nothing.
+ *
+ * @example substitute([errorValue("#N/A"), "a", "b"]) // #N/A
+ * @example substitute(["abc", errorValue("#DIV/0!"), "b"]) // #DIV/0!
+ * @example substitute(["abc", "a", errorValue("#NUM!")]) // #NUM!
+ * @example substitute(["abc", "", "x"]) // "abc" (an empty old_text replaces nothing)
+ * @example substitute(["abc", "x", "y"]) // "abc" (no occurrence)
+ * @example substitute(["a".repeat(32767), "a", "bb"]) // #VALUE!
+ * @example substitute(["a-b-c", "-", "+"]) // "a+b+c"
+ * @example substitute(["a-b-c", "-", "+", "two"]) // #VALUE!
+ * @example substitute(["a-b-c", "-", "+", 0]) // #VALUE!
+ * @example substitute(["a-b-c", "-", "+", 3]) // "a-b-c" (no third occurrence)
+ * @example substitute(["a".repeat(32767), "a", "bb", 1]) // #VALUE!
+ * @example substitute(["a-b-c", "-", "+", 2]) // "a-b+c"
+ */
+export function substitute(args: readonly EvalValue[]): EvalValue {
 	const text = toText(args[0] ?? null);
 	if (isErrorValue(text)) return text;
 	const oldText = toText(args[1] ?? null);
@@ -1094,7 +1113,18 @@ function substitute(args: readonly EvalValue[]): EvalValue {
 	const newText = toText(args[2] ?? null);
 	if (isErrorValue(newText)) return newText;
 	if (oldText === "") return text;
-	if (args.length < 4) return text.split(oldText).join(newText);
+	if (args.length < 4) {
+		let count = 0;
+		let at = text.indexOf(oldText);
+		while (at !== -1) {
+			count++;
+			at = text.indexOf(oldText, at + oldText.length);
+		}
+		if (count === 0) return text;
+		const length = text.length + count * (newText.length - oldText.length);
+		if (length > MAX_TEXT) return errorValue("#VALUE!");
+		return text.split(oldText).join(newText);
+	}
 	const instance = toIndex(args[3] ?? null);
 	if (isErrorValue(instance)) return instance;
 	if (instance < 1) return errorValue("#VALUE!");
@@ -1104,10 +1134,82 @@ function substitute(args: readonly EvalValue[]): EvalValue {
 		const idx = text.indexOf(oldText, from);
 		if (idx === -1) return text;
 		count++;
-		if (count === instance)
+		if (count === instance) {
+			const length = text.length - oldText.length + newText.length;
+			if (length > MAX_TEXT) return errorValue("#VALUE!");
 			return text.slice(0, idx) + newText + text.slice(idx + oldText.length);
+		}
 		from = idx + oldText.length;
 	}
+}
+
+/**
+ * REPLACE: the text with num_chars characters from start_num on replaced by new_text. The result's
+ * length is worked out before it is built, and a result longer than {@link MAX_TEXT} characters is
+ * `#VALUE!` (F11.66).
+ *
+ * @example replaceText([errorValue("#N/A"), 1, 1, "x"]) // #N/A
+ * @example replaceText(["abc", "one", 1, "x"]) // #VALUE!
+ * @example replaceText(["abc", 1, "one", "x"]) // #VALUE!
+ * @example replaceText(["abc", 1, 1, errorValue("#DIV/0!")]) // #DIV/0!
+ * @example replaceText(["abc", 0, 1, "x"]) // #VALUE!
+ * @example replaceText(["a".repeat(32767), 1, 0, "b"]) // #VALUE!
+ * @example replaceText(["abcdef", 2, 3, "X"]) // "aXef"
+ */
+export function replaceText(args: readonly EvalValue[]): EvalValue {
+	const t = toText(args[0] ?? null);
+	if (isErrorValue(t)) return t;
+	const start = toIndex(args[1] ?? null);
+	if (isErrorValue(start)) return start;
+	const num = toIndex(args[2] ?? null);
+	if (isErrorValue(num)) return num;
+	const nw = toText(args[3] ?? null);
+	if (isErrorValue(nw)) return nw;
+	if (start < 1 || num < 0) return errorValue("#VALUE!");
+	const kept = Math.min(start - 1, t.length) + Math.max(0, t.length - (start - 1 + num));
+	if (kept + nw.length > MAX_TEXT) return errorValue("#VALUE!");
+	return t.slice(0, start - 1) + nw + t.slice(start - 1 + num);
+}
+
+/**
+ * UPPER or LOWER: the text in that case. A result longer than {@link MAX_TEXT} characters is
+ * `#VALUE!` (F11.66). Case mapping never shortens text, so a longer input is `#VALUE!` before any text
+ * is built; a shorter one can still grow past the limit, as `ß` upper-cases to `SS`.
+ *
+ * @example changeCase([errorValue("#N/A")], "upper") // #N/A
+ * @example changeCase(["a".repeat(32768)], "lower") // #VALUE!
+ * @example changeCase(["ß".repeat(16384)], "upper") // #VALUE! (32,768 characters once upper-cased)
+ * @example changeCase(["Abc"], "upper") // "ABC"
+ * @example changeCase(["Abc"], "lower") // "abc"
+ */
+export function changeCase(args: readonly EvalValue[], to: "upper" | "lower"): EvalValue {
+	const t = toText(args[0] ?? null);
+	if (isErrorValue(t)) return t;
+	if (t.length > MAX_TEXT) return errorValue("#VALUE!");
+	return capText(to === "upper" ? t.toUpperCase() : t.toLowerCase());
+}
+
+/**
+ * REPT: the text repeated number_times times. A result longer than {@link MAX_TEXT} characters is
+ * `#VALUE!`, decided before the text is built. Empty text repeats to empty text for any count, an
+ * infinite one too (a literal such as `1E+999` reads as infinity), which `"".repeat` would throw on.
+ *
+ * @example repeatText([errorValue("#N/A"), 2]) // #N/A
+ * @example repeatText(["ab", "two"]) // #VALUE!
+ * @example repeatText(["ab", -1]) // #VALUE!
+ * @example repeatText(["", Infinity]) // ""
+ * @example repeatText(["ab", 16384]) // #VALUE! (32,768 characters)
+ * @example repeatText(["ab", 3]) // "ababab"
+ */
+export function repeatText(args: readonly EvalValue[]): EvalValue {
+	const t = toText(args[0] ?? null);
+	if (isErrorValue(t)) return t;
+	const k = toIndex(args[1] ?? null);
+	if (isErrorValue(k)) return k;
+	if (k < 0) return errorValue("#VALUE!");
+	if (t === "") return "";
+	if (t.length * k > MAX_TEXT) return errorValue("#VALUE!");
+	return t.repeat(k);
 }
 
 function findFn(args: readonly EvalValue[], kind: "find" | "search"): EvalValue {

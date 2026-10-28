@@ -453,6 +453,13 @@ Data; so does the sheet you pass to `evaluateCell`. A sheet-qualified name such 
 the `Rate` scoped to Data, then the workbook-wide one, and a qualifier that names no sheet gives
 `#REF!`.
 
+Text a formula builds is capped at 32,767 characters, Excel's cell limit: a longer result is
+`#VALUE!`. `CONCAT`, `CONCATENATE`, `TEXTJOIN` and `REPT` always did this. Since 1.0.1 so do `&`,
+`SUBSTITUTE`, `REPLACE`, `UPPER` and `LOWER` (`REPT("a",32767)&"b"` is `#VALUE!`), and a result too
+long for JavaScript gives `#VALUE!` instead of throwing. A longer text that a file stored is still
+returned as it is by a formula that passes it through unchanged, such as `=A1`, `LEFT`, `MID`, or a
+`SUBSTITUTE` that replaces nothing.
+
 ## Tables, data validation & conditional formatting (0.9)
 
 Three structural features that read AND write, each as the same record on both sides — so

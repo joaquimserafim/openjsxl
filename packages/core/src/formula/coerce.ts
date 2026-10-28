@@ -6,6 +6,7 @@ import {
 	type FormulaErrorValue,
 	isErrorValue,
 	isRangeView,
+	MAX_TEXT,
 	type ScalarValue,
 } from "./value";
 
@@ -180,15 +181,28 @@ function arithmetic(op: "+" | "-" | "*" | "/" | "^", a: number, b: number): Eval
 	return result;
 }
 
+/**
+ * The `&` operator: both operands as text, joined. A result longer than {@link MAX_TEXT} characters is
+ * `#VALUE!`, decided from the two lengths before the text is built (F11.66). Errors propagate left
+ * first.
+ *
+ * @example joinText("a", 1) // "a1"
+ * @example joinText(errorValue("#N/A"), errorValue("#DIV/0!")) // #N/A
+ * @example joinText("a", errorValue("#DIV/0!")) // #DIV/0!
+ * @example joinText("a".repeat(32767), "b") // #VALUE!
+ */
+export function joinText(left: EvalValue, right: EvalValue): string | FormulaErrorValue {
+	const x = toText(left);
+	if (isErrorValue(x)) return x;
+	const y = toText(right);
+	if (isErrorValue(y)) return y;
+	if (x.length + y.length > MAX_TEXT) return errorValue("#VALUE!");
+	return x + y;
+}
+
 /** Apply an infix operator to two already-evaluated operands. */
 export function applyBinary(op: BinaryOp["op"], left: EvalValue, right: EvalValue): EvalValue {
-	if (op === "&") {
-		const x = toText(left);
-		if (isErrorValue(x)) return x;
-		const y = toText(right);
-		if (isErrorValue(y)) return y;
-		return x + y;
-	}
+	if (op === "&") return joinText(left, right);
 	if (op === "=" || op === "<>" || op === "<" || op === ">" || op === "<=" || op === ">=") {
 		const c = compareValues(left, right);
 		if (isErrorValue(c)) return c;
