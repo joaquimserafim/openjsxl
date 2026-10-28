@@ -29,7 +29,7 @@
 		"bench": "pnpm -r build && pnpm --filter @openjsxl/bench bench"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.6.2",
+		"@biomejs/biome": "^2.6.3",
 		"@types/node": "^24.19.2",
 		"tsup": "^8.5.1",
 		"typescript": "^5.9.3",
