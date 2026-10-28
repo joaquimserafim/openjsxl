@@ -146,6 +146,20 @@ function cellToValue(cell: Cell, date1904: boolean): EvalValue {
 	}
 }
 
+/**
+ * Whether a cell the reader returns belongs in the evaluator's model: it holds a formula or a value. A
+ * cell the reader reads as empty, with no formula it can return, is empty to every formula, as
+ * `Worksheet.cell()` reports it. That covers a cell that carries only a style, so formatting a cell
+ * never changes a result, as in Excel (F11.63), and a value the reader degrades to empty.
+ *
+ * @example holdsValue({ ref: "A1", type: "number", value: 3 }, undefined) // true
+ * @example holdsValue({ ref: "A1", type: "empty", value: null }, "B1*2") // true (a formula cell)
+ * @example holdsValue({ ref: "A1", type: "empty", value: null }, undefined) // false (a styled blank)
+ */
+export function holdsValue(cell: Cell, formula: string | undefined): boolean {
+	return formula !== undefined || cell.type !== "empty";
+}
+
 class Evaluator {
 	private readonly models = new Map<string, SheetModel>();
 	private readonly state = new Map<string, CellState>();
@@ -206,6 +220,11 @@ class Evaluator {
 					const at = parseA1(cell.ref);
 					if (at === undefined) continue;
 					const formula = worksheet.formula(cell.ref);
+					if (!holdsValue(cell, formula)) {
+						// A later empty copy of a ref still wins, as it does in Worksheet.cell().
+						colMap?.delete(at.col);
+						continue;
+					}
 					const model: ModelCell =
 						formula !== undefined
 							? { kind: "formula", text: formula }
