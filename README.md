@@ -172,6 +172,26 @@ with Excel's `_xHHHH_` escape, so they round-trip instead of corrupting or rejec
 An optional second argument `writeXlsx(input, { date1904: true })` selects the 1904 date epoch
 (legacy Mac workbooks); dates are 1900-epoch by default.
 
+Dates are UTC wall-clock values, read and written alike. A `Date` is the UTC instant that holds the
+date and time a cell shows, whatever the machine's time zone. Build one with
+`new Date(Date.UTC(2024, 0, 15))`, or from an ISO string that is a bare date or ends in `Z`
+(`new Date('2024-01-15')`, `new Date('2024-01-15T09:30Z')`), and read a date cell with
+`getUTCFullYear()`, `getUTCHours()` and the other `getUTC*` methods. Local-time constructors shift
+the value by the machine's offset: `new Date(2024, 0, 15)` is written as 2024-01-14 18:30 in
+Asia/Kolkata, and as 2024-01-15 08:00 in Los Angeles, where a date-only format hides the shift. An
+ISO date-time without `Z` is local time too. The formula evaluator's `options.now` follows the same
+rule, so `TODAY()` is the UTC date of the `Date` it returns.
+
+In the 1900 system, serials below 61 are one day off from Excel, which counts a 1900-02-29 that
+never existed: serial 1 reads as 1899-12-31 where Excel shows 1900-01-01, and 1900-01-01 is written
+as serial 2. The formula evaluator uses the same calendar (`YEAR(1)` is 1899). Dates from
+1900-03-01 through 9999-12-31 match Excel, as do dates from 1904-01-01 in the 1904 system. The
+writer accepts dates outside those ranges without an error, as serials Excel cannot show as those
+dates; 1.1 plans to reject them. A time or duration formatted like `h:mm` or `[h]:mm` reads back
+from `.xlsx` and `.xlsb` as a `Date` counted from the epoch: 1899-12-30, or 1904-01-01 in the 1904
+system. `dateToSerial(cell.value, workbook.date1904)` gives its length in days, so 36 hours reads
+as 1.5. `.ods` returns durations as numbers.
+
 Worksheet tab names, legacy Note authors, `Hyperlink.location` values, and **every formula field** —
 cell formulas, `DefinedName.refersTo`, data-validation `formula1`/`formula2`, conditional-formatting
 `formulas`, and table `totalsRowFormula`/`calculatedColumnFormula` (`ST_Formula` is a restriction of
@@ -595,8 +615,8 @@ a malformed reference (a uniform contract, since 1.0).
 | `indexToColumn` | `(index: number) => string` | `1` → `"A"`. Throws on a non-integer or `< 1`. |
 | `parseRef` | `(ref: string) => CellRef` | `"B3"` → `{ col: 2, row: 3 }`. Throws on a non-A1 string. |
 | `formatRef` | `(ref: CellRef) => string` | `{ col: 2, row: 3 }` → `"B3"`. Throws on a non-integer/`< 1` row. |
-| `serialToDate` | `(serial: number, date1904?: boolean) => Date` | Excel serial → `Date`. |
-| `dateToSerial` | `(date: Date, date1904?: boolean) => number` | `Date` → Excel serial. |
+| `serialToDate` | `(serial: number, date1904?: boolean) => Date` | Excel serial → UTC `Date` ([dates](#writing)). |
+| `dateToSerial` | `(date: Date, date1904?: boolean) => number` | UTC `Date` → Excel serial. |
 
 ### `Workbook`
 
@@ -654,6 +674,9 @@ cells: readonly Cell[] }` (sparse — absent rows/cells are omitted).
 | `"empty"` | `null` | | `"boolean"` | `boolean` |
 | `"string"` | `string` | | `"date"` | `Date` |
 | `"number"` | `number` | | `"error"` | `string` |
+
+A `"date"` value is a UTC wall-clock `Date`: read it with `getUTC*` (see the date notes under
+[Writing](#writing)).
 
 ### Style & geometry types
 

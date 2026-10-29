@@ -29,6 +29,20 @@ import type {
  * A value a cell can hold when writing. The OOXML cell type is inferred from it:
  * `string` → inline string, `number` → numeric, `boolean` → `b`, `Date` → date-styled serial.
  * `null` / `undefined` (including array holes) → an empty cell, omitted from the output.
+ *
+ * A `Date` is the UTC instant that holds the wall-clock date and time the cell shows, whatever the
+ * machine's time zone, and a reader's dates are the same (F11.78). Build one with
+ * `new Date(Date.UTC(2024, 0, 15))` or an ISO string that is a bare date or ends in `Z`
+ * (`new Date("2024-01-15")`), and read one with `getUTC*`. Local-time constructors shift it:
+ * `new Date(2024, 0, 15)` is written as 2024-01-14 18:30 in Asia/Kolkata and 2024-01-15 08:00 in
+ * Los Angeles, and an ISO date-time without `Z` is local too. In the 1900 system, dates before
+ * 1900-03-01 are one day off from Excel, which counts a 1900-02-29 that never existed: 1900-01-01
+ * is written as serial 2, which Excel shows as 1900-01-02, and serial 1 reads back as 1899-12-31.
+ * Dates from 1900-03-01 through 9999-12-31, and from 1904-01-01 in the 1904 system, match Excel;
+ * dates outside those ranges are written without an error, as serials Excel cannot show as those
+ * dates. A duration is a number of days with a format such as `[h]:mm`; an .xlsx or .xlsb reader
+ * returns it as a `Date` counted from the epoch, and `dateToSerial(value, workbook.date1904)`
+ * gives the days back.
  */
 export type CellValue = string | number | boolean | Date | null | undefined;
 
