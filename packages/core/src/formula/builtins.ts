@@ -142,16 +142,24 @@ function sortedEntries(rv: RangeView): { col: number; row: number; value: EvalVa
 
 // ── criteria (SUMIF / COUNTIF / *IFS) ─────────────────────────────────────────────────────────────
 
-type CritOp = "=" | "<>" | ">" | "<" | ">=" | "<=";
-type Criteria =
+export type CritOp = "=" | "<>" | ">" | "<" | ">=" | "<=";
+export type Criteria =
 	| { readonly kind: "number"; readonly op: CritOp; readonly operand: number }
 	| { readonly kind: "boolean"; readonly op: CritOp; readonly operand: boolean }
 	| {
 			readonly kind: "text";
 			readonly op: CritOp;
 			readonly operand: string;
-			readonly glob: readonly GlobToken[] | null;
+			readonly glob: Glob | null;
 	  };
+
+/**
+ * The most characters a criterion (`COUNTIF`, `SUMIF`, `AVERAGEIF` and their `IFS` forms, operator
+ * included) or a text lookup value (`VLOOKUP`, `HLOOKUP`, `MATCH`) may hold. A longer one is `#VALUE!`,
+ * as Microsoft documents for VLOOKUP, COUNTIF and SUMIF (F11.68, D12). The cap also bounds each
+ * wildcard segment, which keeps matching linear in the text.
+ */
+export const MAX_MATCH_TEXT = 255;
 
 function splitOp(s: string): { op: CritOp; rest: string } {
 	if (s.startsWith("<=")) return { op: "<=", rest: s.slice(2) };
@@ -164,10 +172,10 @@ function splitOp(s: string): { op: CritOp; rest: string } {
 }
 
 // Excel wildcards, matched WITHOUT a regex. A translated `*a*a*a*…` regex backtracks exponentially
-// (ReDoS — a tiny hostile formula could hang the evaluator, bypassing the fuel budget), so we compile
-// the pattern to tokens and match with a linear two-pointer glob algorithm: O(n·m), no backtracking.
-// `*` matches any run, `?` any single char, `~` escapes the next wildcard. Anchored, case-insensitive.
-type GlobToken =
+// (ReDoS — a tiny hostile formula could hang the evaluator, bypassing the fuel budget), so the pattern
+// is compiled to `*`-separated segments matched greedily, leftmost first (F11.68). `*` matches any run,
+// `?` any single char, `~` escapes the next wildcard. Anchored, case-insensitive.
+export type GlobToken =
 	| { readonly kind: "any" }
 	| { readonly kind: "one" }
 	| { readonly kind: "lit"; readonly ch: string };
@@ -193,38 +201,197 @@ function parseGlob(pattern: string): GlobToken[] {
 	return tokens;
 }
 
-function globMatch(text: string, tokens: readonly GlobToken[]): boolean {
-	const up = text.toUpperCase();
-	let i = 0; // text index
-	let j = 0; // token index
-	let star = -1; // index of the most recent '*' token
-	let mark = 0; // text position captured when that '*' was taken
-	while (i < up.length) {
-		const t = tokens[j];
-		if (t !== undefined && (t.kind === "one" || (t.kind === "lit" && t.ch === up.charAt(i)))) {
-			i++;
-			j++;
-		} else if (t !== undefined && t.kind === "any") {
-			star = j;
-			mark = i;
-			j++;
-		} else if (star !== -1) {
-			j = star + 1;
-			mark++;
-			i = mark;
+/**
+ * The longest run with no `?` that is found with `indexOf`: at most 32 comparisons per position even
+ * in a naive search. A longer run takes the Shift-And scan, whose cost does not depend on the run's
+ * characters. `indexOf` can be far slower on some longer needles: V8 builds its skip tables from a
+ * needle's last 250 characters only, so `*ab` and 251 `a`s took about 3 ms per 32,767-character cell
+ * (F11.68 review).
+ */
+export const NEEDLE_MAX = 32;
+
+/**
+ * One run of a wildcard pattern between two `*`s: per position, the upper-case character it must
+ * equal, or `undefined` for `?`. A run of at most {@link NEEDLE_MAX} characters with no `?` keeps them
+ * as one `needle` for `indexOf`. Any other run keeps Shift-And masks instead: per character code, the
+ * positions it can fill, and `rest` for every other character (F11.68, D12).
+ */
+export interface GlobSegment {
+	readonly chars: readonly (string | undefined)[];
+	readonly needle: string | undefined;
+	readonly masks: ReadonlyMap<number, Uint32Array>;
+	readonly rest: Uint32Array;
+}
+
+/**
+ * A wildcard pattern compiled once for many texts: its runs between `*`s, in order (one run when it
+ * has no `*`). `never` is set when a literal upper-cases to more than one character (`ß` to `SS`): no
+ * single text character equals it, so the pattern matches nothing, as before F11.68.
+ */
+export interface Glob {
+	readonly segments: readonly GlobSegment[];
+	readonly never: boolean;
+}
+
+/**
+ * Compile a run of `?` and literal tokens.
+ *
+ * @example globSegment([{ kind: "lit", ch: "A" }, { kind: "lit", ch: "B" }]).needle // "AB"
+ * @example compileGlob("a".repeat(33)).segments[0].needle // undefined (too long for `indexOf`)
+ * @example globSegment([{ kind: "lit", ch: "A" }, { kind: "one" }]).rest // Uint32Array [0b10] (`?` at position 1; "A" fills 0b11)
+ */
+export function globSegment(tokens: readonly GlobToken[]): GlobSegment {
+	const chars = tokens.map((token) => (token.kind === "lit" ? token.ch : undefined));
+	const masks = new Map<number, Uint32Array>();
+	if (chars.length <= NEEDLE_MAX && !chars.includes(undefined)) {
+		return { chars, needle: chars.join(""), masks, rest: new Uint32Array(0) };
+	}
+	const rest = new Uint32Array(Math.ceil(chars.length / 32));
+	chars.forEach((ch, p) => {
+		if (ch === undefined) rest[p >>> 5] = (rest[p >>> 5] as number) | (1 << (p & 31));
+	});
+	chars.forEach((ch, p) => {
+		if (ch === undefined) return;
+		const code = ch.charCodeAt(0);
+		let mask = masks.get(code);
+		if (mask === undefined) {
+			mask = Uint32Array.from(rest);
+			masks.set(code, mask);
+		}
+		mask[p >>> 5] = (mask[p >>> 5] as number) | (1 << (p & 31));
+	});
+	return { chars, needle: undefined, masks, rest };
+}
+
+/**
+ * Compile a wildcard pattern: its tokens split at every `*` into runs.
+ *
+ * @example compileGlob("a*b").segments.map((s) => s.needle) // ["A", "B"]
+ * @example compileGlob("*").segments.length // 2 (two empty runs)
+ * @example compileGlob("*ß*").never // true (`ß` upper-cases to `SS`)
+ */
+export function compileGlob(pattern: string): Glob {
+	const tokens = parseGlob(pattern);
+	const never = tokens.some((token) => token.kind === "lit" && token.ch.length !== 1);
+	const segments: GlobSegment[] = [];
+	let run: GlobToken[] = [];
+	for (const token of tokens) {
+		if (token.kind === "any") {
+			segments.push(globSegment(run));
+			run = [];
 		} else {
-			return false;
+			run.push(token);
 		}
 	}
-	while (j < tokens.length && tokens[j]?.kind === "any") j++;
-	return j === tokens.length;
+	segments.push(globSegment(run));
+	return { segments, never };
 }
 
-function globTest(text: string, pattern: string): boolean {
-	return globMatch(text, parseGlob(pattern));
+/**
+ * Whether a run matches the upper-cased text at position `at`, fitting inside it.
+ *
+ * In the examples, `run` is `compileGlob("b?").segments[0]`.
+ *
+ * @example segmentAt(run, "ABC", 1) // true
+ * @example segmentAt(run, "ABC", 2) // false (runs past the end)
+ * @example segmentAt(run, "ABC", 0) // false
+ */
+export function segmentAt(segment: GlobSegment, up: string, at: number): boolean {
+	const chars = segment.chars;
+	if (at < 0 || at + chars.length > up.length) return false;
+	for (let p = 0; p < chars.length; p++) {
+		const ch = chars[p];
+		if (ch !== undefined && up.charAt(at + p) !== ch) return false;
+	}
+	return true;
 }
 
-function parseCriteria(raw: EvalValue): Criteria | FormulaErrorValue {
+/**
+ * The first position at or after `from` where a non-empty run matches the upper-cased text, or -1. A
+ * short run with no `?` is found with `indexOf`; any other with a Shift-And scan, where bit p of the
+ * state says the run's first p + 1 characters end at the current position. The scan costs one pass
+ * over the text, times the run's length in 32-bit words (F11.68, D12).
+ *
+ * @example findSegment(compileGlob("bc").segments[0], "ABCBC", 2) // 3 (indexOf)
+ * @example findSegment(compileGlob("b?b").segments[0], "ABCBC", 0) // 1 (Shift-And)
+ * @example findSegment(compileGlob("b?d").segments[0], "ABCBC", 0) // -1
+ */
+export function findSegment(segment: GlobSegment, up: string, from: number): number {
+	if (segment.needle !== undefined) return up.indexOf(segment.needle, from);
+	const { masks, rest } = segment;
+	const state = new Uint32Array(rest.length);
+	const last = segment.chars.length - 1;
+	const lastWord = last >>> 5;
+	const lastBit = 1 << (last & 31);
+	for (let i = from; i < up.length; i++) {
+		const mask = masks.get(up.charCodeAt(i)) ?? rest;
+		let carry = 1;
+		for (let w = 0; w < state.length; w++) {
+			const word = state[w] as number;
+			state[w] = ((word << 1) | carry) & (mask[w] as number);
+			carry = word >>> 31;
+		}
+		if (((state[lastWord] as number) & lastBit) !== 0) return i - last;
+	}
+	return -1;
+}
+
+/**
+ * Whether the text matches a compiled wildcard pattern, the whole text and ignoring case
+ * (`toUpperCase`, as before). The first run must start the text and the last end it; each run between
+ * is found at its leftmost place after the one before, which leaves the most room for the rest, so
+ * the cost is one pass over the text per run (F11.68).
+ *
+ * @example globMatch("abc", compileGlob("*ß*")) // false (the pattern can never match)
+ * @example globMatch("abc", compileGlob("A?C")) // true (no `*`: the run is the whole text)
+ * @example globMatch("abcd", compileGlob("b*")) // false (the first run does not start the text)
+ * @example globMatch("xaybz", compileGlob("x*a*b*z")) // true
+ * @example globMatch("xbz", compileGlob("x*a*z")) // false (a middle run is missing)
+ * @example globMatch("xaz", compileGlob("x*az*z")) // false (a middle run overlaps the last)
+ */
+export function globMatch(text: string, glob: Glob): boolean {
+	if (glob.never) return false;
+	const up = text.toUpperCase();
+	const segments = glob.segments;
+	const first = segments[0];
+	// `compileGlob` always gives a run; a Glob built by hand with none is the empty pattern.
+	if (first === undefined) return up.length === 0;
+	if (segments.length === 1) {
+		return up.length === first.chars.length && segmentAt(first, up, 0);
+	}
+	const lastSegment = segments[segments.length - 1] as GlobSegment;
+	const end = up.length - lastSegment.chars.length;
+	if (end < first.chars.length || !segmentAt(first, up, 0) || !segmentAt(lastSegment, up, end)) {
+		return false;
+	}
+	let at = first.chars.length;
+	for (let k = 1; k < segments.length - 1; k++) {
+		const segment = segments[k] as GlobSegment;
+		if (segment.chars.length === 0) continue;
+		const found = findSegment(segment, up, at);
+		if (found === -1 || found + segment.chars.length > end) return false;
+		at = found + segment.chars.length;
+	}
+	return true;
+}
+
+/**
+ * A criterion of `COUNTIF`, `SUMIF`, `AVERAGEIF` or their `IFS` forms, parsed once for every cell it
+ * tests. Text longer than {@link MAX_MATCH_TEXT} characters, operator included, is `#VALUE!` (F11.68,
+ * D12), as an error in the criterion is; a number or a boolean is never capped. A wildcard pattern is
+ * compiled here.
+ *
+ * @example parseCriteria(errorValue("#N/A")) // #N/A
+ * @example parseCriteria(5) // { kind: "number", op: "=", operand: 5 }
+ * @example parseCriteria(true) // { kind: "boolean", op: "=", operand: true }
+ * @example parseCriteria(null) // { kind: "number", op: "=", operand: 0 } (an empty cell)
+ * @example parseCriteria(`=${"a".repeat(255)}`) // #VALUE! (256 characters with the operator)
+ * @example parseCriteria(">5") // { kind: "number", op: ">", operand: 5 }
+ * @example parseCriteria("<>TRUE") // { kind: "boolean", op: "<>", operand: true }
+ * @example parseCriteria("false") // { kind: "boolean", op: "=", operand: false }
+ * @example parseCriteria("a*") // { kind: "text", op: "=", operand: "a*", glob: compileGlob("a*") }
+ */
+export function parseCriteria(raw: EvalValue): Criteria | FormulaErrorValue {
 	const s = scalarize(raw);
 	if (isErrorValue(s)) return s;
 	if (typeof s === "number") return { kind: "number", op: "=", operand: s };
@@ -232,12 +399,13 @@ function parseCriteria(raw: EvalValue): Criteria | FormulaErrorValue {
 	// An empty-cell criterion is 0 (Microsoft COUNTIFS/AVERAGEIF). An omitted argument evaluates to the
 	// same null and is treated alike (F11.31 owner ruling; unsourced for Excel).
 	if (s === null) return { kind: "number", op: "=", operand: 0 };
+	if (s.length > MAX_MATCH_TEXT) return errorValue("#VALUE!");
 	const { op, rest } = splitOp(s);
 	const num = numericStringValue(rest);
 	if (num !== undefined) return { kind: "number", op, operand: num };
 	if (/^true$/i.test(rest)) return { kind: "boolean", op, operand: true };
 	if (/^false$/i.test(rest)) return { kind: "boolean", op, operand: false };
-	const glob = (op === "=" || op === "<>") && /[*?]/.test(rest) ? parseGlob(rest) : null;
+	const glob = (op === "=" || op === "<>") && /[*?]/.test(rest) ? compileGlob(rest) : null;
 	return { kind: "text", op, operand: rest, glob };
 }
 
@@ -326,14 +494,30 @@ function alignedValue(
 
 // ── lookups ───────────────────────────────────────────────────────────────────────────────────────
 
-// Exact-match equality for VLOOKUP/HLOOKUP/MATCH: text equality is case-insensitive and honors
-// wildcards; other types compare by value (no cross-type coercion).
-function lookupEquals(cell: EvalValue, lookup: ScalarValue): boolean {
+/**
+ * The compiled pattern of a lookup value that holds `*` or `?`, or `null` for any other value: built
+ * once for every cell a lookup tests (F11.68).
+ *
+ * @example lookupGlob("b*") // compileGlob("b*")
+ * @example lookupGlob("b") // null
+ */
+export function lookupGlob(lookup: ScalarValue): Glob | null {
+	return typeof lookup === "string" && /[*?]/.test(lookup) ? compileGlob(lookup) : null;
+}
+
+/**
+ * Exact-match equality for VLOOKUP, HLOOKUP and MATCH: text equality ignores case and honors the
+ * lookup's wildcards (`glob`, from {@link lookupGlob}); other types compare by value, with no
+ * cross-type coercion. An error cell never matches.
+ *
+ * @example lookupEquals(errorValue("#N/A"), "a", null) // false
+ * @example lookupEquals("Bat", "b*", lookupGlob("b*")) // true
+ * @example lookupEquals("a", "A", null) // true
+ */
+export function lookupEquals(cell: EvalValue, lookup: ScalarValue, glob: Glob | null): boolean {
 	const c = scalarize(cell);
 	if (isErrorValue(c)) return false;
-	if (typeof lookup === "string" && /[*?]/.test(lookup) && typeof c === "string") {
-		return globTest(c, lookup);
-	}
+	if (glob !== null && typeof c === "string") return globMatch(c, glob);
 	const cmp = compareValues(c, lookup);
 	return !isErrorValue(cmp) && cmp === 0;
 }
@@ -369,9 +553,31 @@ function approxMatch(
 	return best;
 }
 
-function tableLookup(args: readonly EvalValue[], axis: "col" | "row"): EvalValue {
+/**
+ * VLOOKUP (`axis` "col") and HLOOKUP ("row"): the value in column (row) `index` of `table`, counting
+ * its first column (row) as 1, at the lookup's match in that first column (row), approximate unless
+ * range_lookup is FALSE. A text lookup value longer than {@link MAX_MATCH_TEXT} characters is
+ * `#VALUE!` in either mode (F11.68, D12). It is read first, like an error in the lookup value, so it
+ * wins over a bad table or index.
+ *
+ * In the examples, `table` is `new ArrayView([["a", 1], ["b", 2]])`.
+ *
+ * @example tableLookup([errorValue("#N/A"), table, 2], "col") // #N/A
+ * @example tableLookup(["a".repeat(256), table, 2], "col") // #VALUE!
+ * @example tableLookup(["a", "a", 2], "col") // #N/A (the table is not a range)
+ * @example tableLookup(["a", table, "x"], "col") // #VALUE! (the index is not a number)
+ * @example tableLookup(["a", table, 0], "col") // #VALUE!
+ * @example tableLookup(["a", table, 3], "col") // #REF!
+ * @example tableLookup(["a", table, 2, "x"], "col") // #VALUE! (range_lookup is not a boolean)
+ * @example tableLookup(["0", table, 2], "col") // #N/A (approximate: nothing at or below "0")
+ * @example tableLookup(["bz", table, 2], "col") // 2 (approximate)
+ * @example tableLookup(["B*", table, 2, false], "col") // 2 (exact, with a wildcard)
+ * @example tableLookup(["c", table, 2, false], "col") // #N/A
+ */
+export function tableLookup(args: readonly EvalValue[], axis: "col" | "row"): EvalValue {
 	const lookup = scalarize(args[0] ?? null);
 	if (isErrorValue(lookup)) return lookup;
+	if (typeof lookup === "string" && lookup.length > MAX_MATCH_TEXT) return errorValue("#VALUE!");
 	const table = args[1];
 	if (!isRangeView(table)) return errorValue("#N/A");
 	const idx = toIndex(args[2] ?? null);
@@ -389,8 +595,9 @@ function tableLookup(args: readonly EvalValue[], axis: "col" | "row"): EvalValue
 			axis === "col" ? table.cellAt(off, idx - 1) : table.cellAt(idx - 1, off),
 		);
 	}
+	const glob = lookupGlob(lookup);
 	for (const { off, value } of line) {
-		if (lookupEquals(value, lookup)) {
+		if (lookupEquals(value, lookup, glob)) {
 			return blankToZero(
 				axis === "col" ? table.cellAt(off, idx - 1) : table.cellAt(idx - 1, off),
 			);
@@ -1298,14 +1505,35 @@ function findFn(args: readonly EvalValue[], kind: "find" | "search"): EvalValue 
 	return idx === -1 ? errorValue("#VALUE!") : idx + 1;
 }
 
-function matchFn(args: readonly EvalValue[]): EvalValue {
+/**
+ * MATCH: the 1-based position of the lookup value in a row or column, exact for match_type 0 (with
+ * wildcards), else the last position at or below it (1, the default) or at or above it (-1). A text
+ * lookup value longer than {@link MAX_MATCH_TEXT} characters is `#VALUE!` in every mode (F11.68, D12),
+ * read first, like an error in the lookup value.
+ *
+ * In the examples, `list` is `new ArrayView([["a"], ["b"], ["c"]])`, a column.
+ *
+ * @example matchFn([errorValue("#N/A"), list]) // #N/A
+ * @example matchFn(["a".repeat(256), list]) // #VALUE!
+ * @example matchFn(["a", list, "x"]) // #VALUE! (match_type is not a number)
+ * @example matchFn(["a", "a"]) // 1 (one value, and it matches)
+ * @example matchFn(["a", "b"]) // #N/A
+ * @example matchFn(["a", new ArrayView([["a", "b"], ["c", "d"]])]) // #N/A (neither a row nor a column)
+ * @example matchFn(["b*", list, 0]) // 2
+ * @example matchFn(["z", list, 0]) // #N/A
+ * @example matchFn(["bb", list]) // 2 (the last at or below "bb")
+ * @example matchFn(["0", list]) // #N/A (nothing at or below "0")
+ */
+export function matchFn(args: readonly EvalValue[]): EvalValue {
 	const lookup = scalarize(args[0] ?? null);
 	if (isErrorValue(lookup)) return lookup;
+	if (typeof lookup === "string" && lookup.length > MAX_MATCH_TEXT) return errorValue("#VALUE!");
 	const arr = args[1];
 	const type = args.length >= 3 ? toIndex(args[2] ?? null) : 1;
 	if (isErrorValue(type)) return type;
+	const glob = lookupGlob(lookup);
 	if (!isRangeView(arr)) {
-		return lookupEquals(arr ?? null, lookup) ? 1 : errorValue("#N/A");
+		return lookupEquals(arr ?? null, lookup, glob) ? 1 : errorValue("#N/A");
 	}
 	// A 2-D array constant is neither a row nor a column (F11.64); 2-D reference ranges are F11.90.
 	if (arr instanceof ArrayView && arr.height > 1 && arr.width > 1) return errorValue("#N/A");
@@ -1319,7 +1547,7 @@ function matchFn(args: readonly EvalValue[]): EvalValue {
 	}
 	cells.sort((a, b) => a.pos - b.pos);
 	if (type === 0) {
-		for (const { pos, value } of cells) if (lookupEquals(value, lookup)) return pos;
+		for (const { pos, value } of cells) if (lookupEquals(value, lookup, glob)) return pos;
 		return errorValue("#N/A");
 	}
 	// type 1: ascending data, largest value ≤ lookup. type -1: descending data, smallest value ≥ lookup.

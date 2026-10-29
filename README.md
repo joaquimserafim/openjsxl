@@ -465,6 +465,11 @@ in Excel: with "a" in A1, A2 empty and "c" in A3, `TEXTJOIN(",",FALSE,A1:A3)` is
 range, such as a whole column, those empty items can pass the 32,767-character limit. The result is
 then `#VALUE!`, and no cell of a range past that point is read, so an error there does not show.
 
+Since 1.0.1 a criterion longer than 255 characters, operator included, gives `#VALUE!` in `COUNTIF`,
+`SUMIF`, `AVERAGEIF` and their `IFS` forms, and so does a text lookup value of that length in `VLOOKUP`,
+`HLOOKUP` and `MATCH`, in every match mode, as Excel documents for VLOOKUP, COUNTIF(S) and SUMIF(S). Within
+that limit, wildcard matching takes time in proportion to the text it reads.
+
 ## Tables, data validation & conditional formatting (0.9)
 
 Three structural features that read AND write, each as the same record on both sides — so
