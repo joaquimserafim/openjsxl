@@ -1,6 +1,7 @@
 import { localName } from "../utils";
 import {
 	clearDirectChild,
+	isSheetRoot,
 	pushColsOpen,
 	pushRegionChildClose,
 	pushSheetDataOpen,
@@ -19,11 +20,13 @@ export type {
 
 /**
  * Create document scope before its root.
- * Example: input `()` returns `phase: "before-root"`, no owners/barriers, and zero counters.
+ * Example: input `()` returns `phase: "before-root"`, no root name, no owners/barriers, and zero
+ * counters.
  */
 export function createWorksheetStructure(): WorksheetStructure {
 	return {
 		phase: "before-root",
+		rootName: undefined,
 		rootSameNameDepth: 0,
 		directChild: undefined,
 		sameNameDepth: 0,
@@ -58,8 +61,10 @@ export function isWorksheetRow(state: WorksheetStructure): boolean {
 /**
  * Track one opening element in constant space and return an admitted style-bearing element.
  * Examples:
- * - before-root + `<worksheet>` or `<x:worksheet>` returns nothing and enters worksheet scope;
- * - before-root + `<worksheet/>` or another root returns nothing and permanently closes scope;
+ * - before-root + `<worksheet>`, `<x:worksheet>` or `<xm:macrosheet>` returns nothing, enters
+ *   worksheet scope and records the root's local name (F11.32);
+ * - before-root + `<worksheet/>`, `<xm:macrosheet/>` or another root returns nothing and permanently
+ *   closes scope;
  * - any opening after closure returns nothing and changes no state;
  * - `<cols>`, `<sheetData>`, or another non-self-closing direct child returns nothing and owns the
  *   direct-child position; self-closing direct children return nothing and own nothing;
@@ -69,9 +74,9 @@ export function isWorksheetRow(state: WorksheetStructure): boolean {
  * - a non-self-closing fake `<row>`/`<c>` below a barrier returns nothing and increments its
  *   blocked counter; its self-closing form returns nothing without incrementing;
  * - `<sheetData><ext><row>` and every opening under a noncanonical direct child return nothing;
- * - a nested non-self-closing `worksheet` raises the root-name depth, while another opening with
- *   the current direct-child name raises the direct-child depth; both return nothing and prevent
- *   the corresponding inner close from releasing the outer owner.
+ * - a nested non-self-closing root of the recorded name raises the root-name depth, while another
+ *   opening with the current direct-child name raises the direct-child depth; both return nothing
+ *   and prevent the corresponding inner close from releasing the outer owner.
  */
 export function pushWorksheetOpen(
 	state: WorksheetStructure,
@@ -80,11 +85,16 @@ export function pushWorksheetOpen(
 ): WorksheetOpen | undefined {
 	const name = localName(nameWithPrefix);
 	if (state.phase === "before-root") {
-		state.phase = name === "worksheet" && !selfClosing ? "worksheet" : "closed";
+		if (isSheetRoot(name) && !selfClosing) {
+			state.phase = "worksheet";
+			state.rootName = name;
+		} else {
+			state.phase = "closed";
+		}
 		return undefined;
 	}
 	if (state.phase !== "worksheet") return undefined;
-	if (name === "worksheet" && !selfClosing) state.rootSameNameDepth++;
+	if (name === state.rootName && !selfClosing) state.rootSameNameDepth++;
 
 	if (state.directChild === undefined) {
 		if (selfClosing) return undefined;
@@ -118,9 +128,11 @@ export function pushWorksheetOpen(
  * - the inner close of a same-name direct child returns nothing and decrements its depth;
  * - the outer `</cols>` / `</sheetData>` returns `"cols"` / `"sheetData"` and clears the direct
  *   child; a noncanonical direct-child close returns nothing and clears its barrier;
- * - a nested `</worksheet>` returns nothing and decrements `rootSameNameDepth`;
- * - the real root `</worksheet>` returns the active `"cols"` or `"sheetData"` boundary, or nothing
- *   when no canonical region is active, then closes the state permanently.
+ * - a nested close of the recorded root name (`</worksheet>` or `</xm:macrosheet>`) returns nothing
+ *   and decrements `rootSameNameDepth`;
+ * - the real root close returns the active `"cols"` or `"sheetData"` boundary, or nothing when no
+ *   canonical region is active, then closes the state permanently; a close of the other sheet-root
+ *   name is an ordinary close.
  */
 export function pushWorksheetClose(
 	state: WorksheetStructure,
@@ -129,7 +141,7 @@ export function pushWorksheetClose(
 	if (state.phase !== "worksheet") return undefined;
 	const name = localName(nameWithPrefix);
 
-	if (name === "worksheet" && state.rootSameNameDepth === 0) {
+	if (name === state.rootName && state.rootSameNameDepth === 0) {
 		const ended = state.region;
 		clearDirectChild(state);
 		state.phase = "closed";
@@ -146,6 +158,6 @@ export function pushWorksheetClose(
 		}
 	}
 
-	if (name === "worksheet" && state.rootSameNameDepth > 0) state.rootSameNameDepth--;
+	if (name === state.rootName && state.rootSameNameDepth > 0) state.rootSameNameDepth--;
 	return boundary;
 }

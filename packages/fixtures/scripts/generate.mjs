@@ -239,6 +239,51 @@ const crafted = [
 			{ name: "xl/vbaProject.bin", data: new TextEncoder().encode("openjsxl-ignored-vba") },
 		],
 	},
+	// Excel 4.0 macro sheets (F11.32): one part linked by each macro-sheet relationship type
+	// (xlMacrosheet, xlIntlMacrosheet), both with the `xm:macrosheet` root of MS-OFFMACRO2 2.2.1.2,
+	// plus a chartsheet that carries cells it must not expose. The macro sheets hold a styled number,
+	// text that reads like a boolean, a styled boolean, text and an XLM formula with its cached value.
+	{
+		file: "macrosheet-xlm.xlsm",
+		parts: [
+			{
+				name: "[Content_Types].xml",
+				xml: `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/><Override PartName="/xl/macrosheets/sheet1.xml" ContentType="application/vnd.ms-excel.macrosheet+xml"/><Override PartName="/xl/macrosheets/sheet2.xml" ContentType="application/vnd.ms-excel.intlmacrosheet+xml"/><Override PartName="/xl/chartsheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`,
+			},
+			{
+				name: "_rels/.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.xml"/></Relationships>`,
+			},
+			{
+				name: "xl/workbook.xml",
+				xml: `${XMLD}\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${R_NS}"><sheets><sheet name="Macro1" sheetId="1" r:id="rId1"/><sheet name="Macro2" sheetId="2" r:id="rId2"/><sheet name="Chart1" sheetId="3" r:id="rId3"/></sheets></workbook>`,
+			},
+			{
+				name: "xl/_rels/workbook.xml.rels",
+				xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/xlMacrosheet" Target="macrosheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/xlIntlMacrosheet" Target="macrosheets/sheet2.xml"/><Relationship Id="rId3" Type="${R_NS}/chartsheet" Target="chartsheets/sheet1.xml"/><Relationship Id="rId4" Type="${R_NS}/styles" Target="styles.xml"/><Relationship Id="rId5" Type="${R_NS}/sharedStrings" Target="sharedStrings.xml"/></Relationships>`,
+			},
+			{
+				name: "xl/styles.xml",
+				xml: `${XMLD}\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.000"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`,
+			},
+			{
+				name: "xl/sharedStrings.xml",
+				xml: `${XMLD}\n<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="3" uniqueCount="3"><si><t>TRUE</t></si><si><t>note</t></si><si><t>intl</t></si></sst>`,
+			},
+			{
+				name: "xl/macrosheets/sheet1.xml",
+				xml: `${XMLD}\n<xm:macrosheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${R_NS}" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><dimension ref="A1:A5"/><sheetData><row r="1"><c r="A1" s="1"><v>42</v></c></row><row r="2"><c r="A2" t="s"><v>0</v></c></row><row r="3"><c r="A3" t="b" s="2"><v>1</v></c></row><row r="4"><c r="A4" t="s"><v>1</v></c></row><row r="5"><c r="A5"><f>RETURN(A1)</f><v>42</v></c></row></sheetData></xm:macrosheet>`,
+			},
+			{
+				name: "xl/macrosheets/sheet2.xml",
+				xml: `${XMLD}\n<xm:macrosheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${R_NS}" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><dimension ref="A1:B2"/><sheetData><row r="1"><c r="A1" s="1"><v>7.5</v></c><c r="B1" t="s"><v>2</v></c></row><row r="2"><c r="A2"><f>RETURN(A1*2)</f><v>15</v></c></row></sheetData></xm:macrosheet>`,
+			},
+			{
+				name: "xl/chartsheets/sheet1.xml",
+				xml: `${XMLD}\n<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${R_NS}"><sheetData><row r="1"><c r="A1"><v>99</v></c></row></sheetData></chartsheet>`,
+			},
+		],
+	},
 	{
 		file: "images-edge.xlsx",
 		parts: [

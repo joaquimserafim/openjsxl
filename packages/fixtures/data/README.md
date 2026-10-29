@@ -46,6 +46,15 @@ so they are safe to commit and diff.
   same shape). `reader/__tests__/cross-format.test.ts` reads its two cells and pins
   `detectSpreadsheetFormat` → `'xlsx'`; it also reads cleanly in python-calamine.
 
+- **`macrosheet-xlm.xlsm`** — a crafted workbook with two Excel 4.0 macro sheets (F11.32): `Macro1`
+  linked by the `xlMacrosheet` relationship and `Macro2` by `xlIntlMacrosheet`, both with the
+  `xm:macrosheet` root of MS-OFFMACRO2 2.2.1.2, and a `Chart1` chartsheet that carries one cell it
+  must not expose. `Macro1` holds a `0.000`-formatted 42, the text `"TRUE"`, a bold `true`, the text
+  `"note"` and an XLM formula `RETURN(A1)` with its cached 42; `Macro2` a formatted 7.5, `"intl"` and
+  `RETURN(A1*2)` caching 15. `reader/__tests__/macro-sheet.test.ts` reads both with the values 1.0.0
+  returns and as the same content in a worksheet, bridges them, and pins that `Chart1` gives no
+  cells. Built part by part by the generator, not exported from Excel.
+
 - **`ods-edge.ods`** — a hand-crafted OpenDocument spreadsheet (F7.1) covering the shapes a real
   producer (LibreOffice) emits that odfpy won't: the **repeat bomb** (row 1 padded with an empty
   cell repeated to column 16 384, and an empty row repeated ~1e6 times to the 2^20 grid edge — a

@@ -10,6 +10,11 @@ export interface RegionChild {
 
 export interface WorksheetStructure {
 	phase: "before-root" | "worksheet" | "closed";
+	/**
+	 * Local name of the document root the gate admitted (`worksheet`, or `macrosheet` for an Excel
+	 * 4.0 macro sheet, F11.32); nested same-name roots and the root's close follow it.
+	 */
+	rootName: SheetRootName | undefined;
 	rootSameNameDepth: number;
 	directChild: string | undefined;
 	sameNameDepth: number;
@@ -19,6 +24,23 @@ export interface WorksheetStructure {
 	cellBarrier: RegionChild | undefined;
 	blockedRows: number;
 	blockedCells: number;
+}
+
+/** The local names of the document roots whose content the gate reads (F11.32). */
+export type SheetRootName = "worksheet" | "macrosheet";
+
+/**
+ * Whether a document root's local name (its prefix already removed) holds worksheet content the gate
+ * reads: `worksheet`, or `macrosheet`, the root of both Excel 4.0 macro-sheet parts (MS-OFFMACRO2
+ * 2.2.1.2; F11.32). Chart and dialog sheets, and any other root, do not.
+ *
+ * @example isSheetRoot("worksheet") // true
+ * @example isSheetRoot("macrosheet") // true (xlMacrosheet and xlIntlMacrosheet parts)
+ * @example isSheetRoot("chartsheet") // false
+ * @example isSheetRoot("xm:macrosheet") // false (pass the local name)
+ */
+export function isSheetRoot(name: string): name is SheetRootName {
+	return name === "worksheet" || name === "macrosheet";
 }
 
 /**

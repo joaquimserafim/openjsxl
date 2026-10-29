@@ -326,7 +326,7 @@ formatting, autofilters, protection, print setup, and the 1904 date system**:
 | colors: rgb, indexed, theme + tint (raw) | in-cell rich-text runs — flattened to plain text (values survive; per-run bold/color is lost) |
 | control chars & `_xHHHH_` literals in strings (ST_Xstring escape) | autofilter **criteria** & sort state — the filter range carries, the per-column filter/sort is dropped |
 | custom theme part (carried byte-identical) | printer-settings binary (`printerSettings.bin`) & manual page breaks — dropped |
-| formula text + cached value | **VBA macros** — an `.xlsm` opens and reads, but rewriting writes a plain `.xlsx` and the macros are dropped (check `Workbook.macroEnabled` to warn first) |
+| formula text + cached value | **VBA macros** — an `.xlsm` opens and reads, but rewriting writes a plain `.xlsx` and the macros are dropped (check `Workbook.macroEnabled` to warn first); an Excel 4.0 (XLM) macro sheet is carried as a regular worksheet with its cells and cached values, its macro semantics dropped |
 | defined names / named ranges (global & sheet-scoped, incl. `_xlnm.*` built-ins) | row/column **outline grouping** (`outlineLevel`/`collapsed`) — the group nesting is dropped (values, width/height/hidden survive) |
 | comments (author + text, Excel-visible) | sheet **tab colors** and other `sheetPr` — dropped |
 | anchored pictures (bytes byte-exact, anchor, type, name) | **document properties** (author, title, created/modified) — no `docProps` is emitted (deterministic bytes) |
@@ -569,7 +569,9 @@ const bytes = await writeXlsx({
 
 An `.xlsm` opens and reads, but rewriting through the bridge writes a plain `.xlsx` and drops the VBA
 project — check `Workbook.macroEnabled` to warn a user before a rewrite discards their macros. See
-[`examples/14`](./examples/14-names-autofilter-protection-print.mjs) for the full round trip.
+[`examples/14`](./examples/14-names-autofilter-protection-print.mjs) for the full round trip. An Excel
+4.0 (XLM) macro sheet reads like a worksheet, with its cells, cached values, styles and formula text,
+and the bridge carries it as a regular worksheet; its macro semantics are dropped, as for VBA.
 
 ## API reference
 

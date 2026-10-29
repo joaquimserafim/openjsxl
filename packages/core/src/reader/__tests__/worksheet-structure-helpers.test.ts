@@ -411,6 +411,7 @@ describe("worksheet structure helpers — direct-child reset", () => {
 		for (const phase of phases) {
 			const state = createWorksheetStructure();
 			state.phase = phase;
+			state.rootName = "macrosheet";
 			state.rootSameNameDepth = 8;
 			state.directChild = "sheetData";
 			state.sameNameDepth = 7;
@@ -425,6 +426,7 @@ describe("worksheet structure helpers — direct-child reset", () => {
 
 			expect(state).toEqual({
 				phase,
+				rootName: "macrosheet",
 				rootSameNameDepth: 0,
 				directChild: undefined,
 				sameNameDepth: 0,
