@@ -1015,44 +1015,14 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	}),
 
 	// ── date / time ─────────────────────────────────────────────────────────────────────────────
-	DATE: eager(3, 3, (args, ctx) => {
-		const y = toIndex(args[0] ?? null);
-		if (isErrorValue(y)) return y;
-		const m = toIndex(args[1] ?? null);
-		if (isErrorValue(m)) return m;
-		const d = toIndex(args[2] ?? null);
-		if (isErrorValue(d)) return d;
-		if (y < 0 || y > 9999) return errorValue("#NUM!");
-		const year = y < 1900 ? y + 1900 : y;
-		// In the workbook's date system: DATE(1904,1,1) is 0 under the 1904 epoch, 1462 under 1900.
-		const serial = dateToSerial(new Date(Date.UTC(year, m - 1, d)), ctx.date1904);
-		if (!Number.isFinite(serial) || serial < 0 || serial > maxDateSerial(ctx.date1904)) {
-			return errorValue("#NUM!");
-		}
-		return serial;
-	}),
+	DATE: eager(3, 3, dateFn),
 	YEAR: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCFullYear())),
 	MONTH: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCMonth() + 1)),
 	DAY: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCDate())),
 	HOUR: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCHours())),
 	MINUTE: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCMinutes())),
 	SECOND: eager(1, 1, (args, ctx) => datePart(args, ctx, (dt) => dt.getUTCSeconds())),
-	WEEKDAY: eager(1, 2, (args, ctx) => {
-		const serial = toSerial(args[0] ?? null, ctx.date1904);
-		if (isErrorValue(serial)) return serial;
-		const type = args.length >= 2 ? toIndex(args[1] ?? null) : 1;
-		if (isErrorValue(type)) return type;
-		const dow = serialToDate(serial, ctx.date1904).getUTCDay(); // 0=Sun..6=Sat
-		if (type === 1) return dow + 1; // Sun=1..Sat=7
-		if (type === 2) return ((dow + 6) % 7) + 1; // Mon=1..Sun=7
-		if (type === 3) return (dow + 6) % 7; // Mon=0..Sun=6
-		// Types 11..17: week starts on Mon..Sun respectively, numbered 1..7.
-		if (type >= 11 && type <= 17) {
-			const startDow = type === 17 ? 0 : type - 10; // 11→Mon(1) … 16→Sat(6), 17→Sun(0)
-			return ((dow - startDow + 7) % 7) + 1;
-		}
-		return errorValue("#NUM!");
-	}),
+	WEEKDAY: eager(1, 2, weekday),
 	TIME: eager(3, 3, (args) => {
 		const h = toNumber(args[0] ?? null);
 		if (isErrorValue(h)) return h;
@@ -1064,13 +1034,7 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 		if (total < 0) return errorValue("#NUM!");
 		return (total % 86400) / 86400;
 	}),
-	DAYS: eager(2, 2, (args, ctx) => {
-		const end = toSerial(args[0] ?? null, ctx.date1904);
-		if (isErrorValue(end)) return end;
-		const start = toSerial(args[1] ?? null, ctx.date1904);
-		if (isErrorValue(start)) return start;
-		return Math.trunc(end) - Math.trunc(start);
-	}),
+	DAYS: eager(2, 2, days),
 	EDATE: eager(2, 2, (args, ctx) => monthShift(args, ctx, "same")),
 	EOMONTH: eager(2, 2, (args, ctx) => monthShift(args, ctx, "end")),
 
@@ -1840,23 +1804,133 @@ function conditionalAggregateS(
 	return sum;
 }
 
-// Every serial ↔ date conversion below uses the workbook's date system (ctx.date1904, F11.10).
-function datePart(
+// Every serial ↔ date conversion below uses the workbook's date system (ctx.date1904, F11.10). A
+// context built by hand may leave the flag out (F11.33), so each function reads it once and only
+// `true` names the 1904 system: an absent flag is the 1900 system.
+
+/**
+ * DATE: the serial of a year, month and day in the context's date system. A year below 1900 has 1900
+ * added; a month or day past its range rolls into the next or previous one. A year outside 0 to 9999,
+ * or a date outside the system's valid serials, is `#NUM!`.
+ *
+ * @example dateFn([errorValue("#N/A"), 1, 1], { now, random }) // #N/A
+ * @example dateFn([2020, "one", 1], { now, random }) // #VALUE!
+ * @example dateFn([2020, 1, "one"], { now, random }) // #VALUE!
+ * @example dateFn([10000, 1, 1], { now, random }) // #NUM!
+ * @example dateFn([1903, 12, 31], { now, random, date1904: true }) // #NUM! (before the 1904 epoch)
+ * @example dateFn([1904, 1, 1], { now, random }) // 1462 (no flag: the 1900 system)
+ * @example dateFn([1904, 1, 1], { now, random, date1904: true }) // 0
+ */
+export function dateFn(args: readonly EvalValue[], ctx: EvalContext): EvalValue {
+	const date1904 = ctx.date1904 === true;
+	const y = toIndex(args[0] ?? null);
+	if (isErrorValue(y)) return y;
+	const m = toIndex(args[1] ?? null);
+	if (isErrorValue(m)) return m;
+	const d = toIndex(args[2] ?? null);
+	if (isErrorValue(d)) return d;
+	if (y < 0 || y > 9999) return errorValue("#NUM!");
+	const year = y < 1900 ? y + 1900 : y;
+	// In the workbook's date system: DATE(1904,1,1) is 0 under the 1904 epoch, 1462 under 1900.
+	const serial = dateToSerial(new Date(Date.UTC(year, m - 1, d)), date1904);
+	if (!Number.isFinite(serial) || serial < 0 || serial > maxDateSerial(date1904)) {
+		return errorValue("#NUM!");
+	}
+	return serial;
+}
+
+/**
+ * WEEKDAY: the day of the week of a serial in the context's date system, numbered by return_type:
+ * 1 (the default) is Sunday 1 to Saturday 7, 2 is Monday 1 to Sunday 7, 3 is Monday 0 to Sunday 6,
+ * and 11 to 17 number 1 to 7 from a week that starts on Monday to Sunday. Any other type is `#NUM!`.
+ *
+ * @example weekday([-1], { now, random }) // #NUM!
+ * @example weekday([0, "one"], { now, random }) // #VALUE!
+ * @example weekday([0], { now, random }) // 7 (1899-12-30, a Saturday)
+ * @example weekday([0], { now, random, date1904: true }) // 6 (1904-01-01, a Friday)
+ * @example weekday([0, 2], { now, random, date1904: true }) // 5
+ * @example weekday([0, 3], { now, random, date1904: true }) // 4
+ * @example weekday([0, 17], { now, random, date1904: true }) // 6 (a week that starts on Sunday)
+ * @example weekday([0, 4], { now, random }) // #NUM!
+ */
+export function weekday(args: readonly EvalValue[], ctx: EvalContext): EvalValue {
+	const date1904 = ctx.date1904 === true;
+	const serial = toSerial(args[0] ?? null, date1904);
+	if (isErrorValue(serial)) return serial;
+	const type = args.length >= 2 ? toIndex(args[1] ?? null) : 1;
+	if (isErrorValue(type)) return type;
+	const dow = serialToDate(serial, date1904).getUTCDay(); // 0=Sun..6=Sat
+	if (type === 1) return dow + 1; // Sun=1..Sat=7
+	if (type === 2) return ((dow + 6) % 7) + 1; // Mon=1..Sun=7
+	if (type === 3) return (dow + 6) % 7; // Mon=0..Sun=6
+	// Types 11..17: week starts on Mon..Sun respectively, numbered 1..7.
+	if (type >= 11 && type <= 17) {
+		const startDow = type === 17 ? 0 : type - 10; // 11→Mon(1) … 16→Sat(6), 17→Sun(0)
+		return ((dow - startDow + 7) % 7) + 1;
+	}
+	return errorValue("#NUM!");
+}
+
+/**
+ * DAYS: the whole days from start_date to end_date. Each must be a valid serial in the context's date
+ * system, whose last day, 9999-12-31, is 1,462 serials sooner under the 1904 system.
+ *
+ * @example days([errorValue("#N/A"), 0], { now, random }) // #N/A
+ * @example days([10, -1], { now, random }) // #NUM!
+ * @example days([2957004, 0], { now, random, date1904: true }) // #NUM! (past 9999-12-31)
+ * @example days([2957004, 4], { now, random }) // 2957000
+ */
+export function days(args: readonly EvalValue[], ctx: EvalContext): EvalValue {
+	const date1904 = ctx.date1904 === true;
+	const end = toSerial(args[0] ?? null, date1904);
+	if (isErrorValue(end)) return end;
+	const start = toSerial(args[1] ?? null, date1904);
+	if (isErrorValue(start)) return start;
+	return Math.trunc(end) - Math.trunc(start);
+}
+
+/**
+ * YEAR, MONTH, DAY, HOUR, MINUTE and SECOND: one part of a serial's date in the context's date
+ * system.
+ *
+ * @example datePart([-1], { now, random }, (dt) => dt.getUTCFullYear()) // #NUM!
+ * @example datePart([0], { now, random }, (dt) => dt.getUTCFullYear()) // 1899
+ * @example datePart([0], { now, random, date1904: true }, (dt) => dt.getUTCFullYear()) // 1904
+ */
+export function datePart(
 	args: readonly EvalValue[],
 	ctx: EvalContext,
 	fn: (dt: Date) => number,
 ): EvalValue {
-	const serial = toSerial(args[0] ?? null, ctx.date1904);
+	const date1904 = ctx.date1904 === true;
+	const serial = toSerial(args[0] ?? null, date1904);
 	if (isErrorValue(serial)) return serial;
-	return fn(serialToDate(serial, ctx.date1904));
+	return fn(serialToDate(serial, date1904));
 }
 
-function monthShift(args: readonly EvalValue[], ctx: EvalContext, mode: "same" | "end"): EvalValue {
-	const serial = toSerial(args[0] ?? null, ctx.date1904);
+/**
+ * EDATE ("same") and EOMONTH ("end"): the serial a number of months from a date in the context's
+ * date system, on the same day (or the target month's last day, when it is shorter) or on the target
+ * month's last day. A result outside the system's valid serials is `#NUM!`.
+ *
+ * @example monthShift([-1, 1], { now, random }, "same") // #NUM!
+ * @example monthShift([0, "one"], { now, random }, "same") // #VALUE!
+ * @example monthShift([0, -1], { now, random, date1904: true }, "same") // #NUM! (before the epoch)
+ * @example monthShift([0, 1], { now, random }, "same") // 31 (1900-01-30)
+ * @example monthShift([0, 1], { now, random, date1904: true }, "same") // 31 (1904-02-01)
+ * @example monthShift([0, 0], { now, random, date1904: true }, "end") // 30 (1904-01-31)
+ */
+export function monthShift(
+	args: readonly EvalValue[],
+	ctx: EvalContext,
+	mode: "same" | "end",
+): EvalValue {
+	const date1904 = ctx.date1904 === true;
+	const serial = toSerial(args[0] ?? null, date1904);
 	if (isErrorValue(serial)) return serial;
 	const months = toIndex(args[1] ?? null);
 	if (isErrorValue(months)) return months;
-	const dt = serialToDate(serial, ctx.date1904);
+	const dt = serialToDate(serial, date1904);
 	const y = dt.getUTCFullYear();
 	const m = dt.getUTCMonth() + months;
 	const targetYear = y + Math.floor(m / 12);
@@ -1865,9 +1939,9 @@ function monthShift(args: readonly EvalValue[], ctx: EvalContext, mode: "same" |
 		mode === "end"
 			? daysInMonth(targetYear, targetMonth)
 			: Math.min(dt.getUTCDate(), daysInMonth(targetYear, targetMonth));
-	const out = dateToSerial(new Date(Date.UTC(targetYear, targetMonth, day)), ctx.date1904);
+	const out = dateToSerial(new Date(Date.UTC(targetYear, targetMonth, day)), date1904);
 	// A result outside Excel's valid range (or a non-finite one from an absurd month count) is #NUM!.
-	if (!Number.isFinite(out) || out < 0 || out > maxDateSerial(ctx.date1904))
+	if (!Number.isFinite(out) || out < 0 || out > maxDateSerial(date1904))
 		return errorValue("#NUM!");
 	return out;
 }

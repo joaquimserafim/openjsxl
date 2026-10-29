@@ -19,10 +19,12 @@ export interface EvalContext {
 	random(): number;
 	/**
 	 * The workbook's date system (F11.10): `true` for the legacy 1904 epoch (serial 0 =
-	 * 1904-01-01), `false` for the default 1900 system. Every built-in serial ↔ date conversion uses
-	 * it; a user function that converts dates should too (`serialToDate(serial, ctx.date1904)`).
+	 * 1904-01-01), `false` for the default 1900 system. The evaluator always sets it. It is optional
+	 * so that a context built by hand compiles as it did in 1.0.0 (F11.33); left out, it means the
+	 * 1900 system. Every built-in serial ↔ date conversion uses it; a user function that converts
+	 * dates should too, as the built-ins do: `serialToDate(serial, ctx.date1904 === true)`.
 	 */
-	readonly date1904: boolean;
+	readonly date1904?: boolean;
 }
 
 /** A lazily-evaluated argument. Lazy functions (IF, CHOOSE) pull only the arguments they need. */
