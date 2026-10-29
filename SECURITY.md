@@ -36,15 +36,27 @@ Tolerant parsing and typed errors help applications handle failures; they do not
 sandbox or make every accepted workbook safe for every use.
 
 For ZIP-based readers (`openXlsx`, `openXlsb`, `openOds`) and the XLSX `streamSheetRows` path,
-`ReadOptions` provides two guards in both published 1.0.0 and this branch:
+`ReadOptions` provides two guards in both published 1.0.0 and this branch, and this unreleased 1.0.1
+branch adds a third, off by default:
 
 | Option | Default | What it limits |
 | --- | --- | --- |
 | `maxPartBytes` | 2 GiB | Uncompressed output of one accessed ZIP entry. |
 | `maxCompressionRatio` | 300 | Inflation relative to that entry's compressed size, with an 8 MiB output floor. |
+| `maxTotalBytes` | unlimited | Uncompressed output of every ZIP entry read through one archive, together (1.0.1 only). |
 
-These limits are **per entry**, not an aggregate workbook, process-memory, CPU-time or cell-count
-budget. Many entries can each fit their limit; parsed cells, strings, styles, images and other
+The first two limits are **per entry**. `maxTotalBytes` bounds the archive: each entry read, stored
+or inflated, is charged the most it can produce before it is read, and the read that would pass the
+budget fails with `XlsxError` code `part-too-large`. Streamed reads count too, an entry read twice
+counts twice, and a stream cut short counts in full. Under a finite budget, an entry whose bound is
+not a number, because `maxPartBytes` or `maxCompressionRatio` is `NaN`, is refused. The value must
+be a number of bytes, at least 0 (`Infinity` for no limit); `null` counts as absent, and any other
+value fails with code `invalid-input`. `detectSpreadsheetFormat` throws neither error: it reports a
+ZIP file it cannot open as unrecognized (`undefined`), and treats an entry the budget refuses as
+unreadable, as it does one that `maxPartBytes` refuses, so a small budget can leave a file
+unclassified. None of these is a process-memory, CPU-time or cell-count budget. Without
+`maxTotalBytes`, many entries can each fit their limit; parsed cells, strings, styles, images and
+other
 metadata can use additional memory. The input byte buffer is already allocated before the reader
 receives it. Streaming rows does not remove the input/archive and shared-metadata costs, and
 retaining streamed rows defeats its memory benefit. CSV/TSV has no ZIP container: `openCsv` does
@@ -75,15 +87,16 @@ part was already read is left out of `sheets`, and a comments or table part that
 is skipped. Pictures, which `Worksheet.images()` and so `workbookToInput` read on demand, follow
 the same rule: each drawing and image part is read at most once per workbook, a drawing part named
 by several sheets belongs to the first sheet in tab order, and pictures that use one image part
-share one buffer. None of this limits total decompressed output: each part read is still bounded
-only by the per-entry limits above, so a workbook of many distinct large parts can still use a large
-amount of memory.
+share one buffer. None of this limits total decompressed output: unless `maxTotalBytes` is set, each
+part read is bounded only by the per-entry limits above, so a workbook of many distinct large parts
+can still use a large amount of memory.
 
 Applications that accept untrusted uploads should:
 
 - Bound input bytes before calling the library, and limit concurrent jobs and retained results.
 - Set lower, finite positive `maxPartBytes` and `maxCompressionRatio` values appropriate to the
-  accepted documents. `Infinity` disables a guard; do not disable limits for untrusted input.
+  accepted documents, and a `maxTotalBytes` budget for the whole archive. `Infinity` disables a
+  guard; do not disable limits for untrusted input.
 - Process files in a killable process with externally enforced time and memory limits. A Promise
   timeout in the same event loop does not stop synchronous parsing or reclaim its allocations.
 - Treat cell text, formulas, links and media as untrusted application data. Apply the destination's

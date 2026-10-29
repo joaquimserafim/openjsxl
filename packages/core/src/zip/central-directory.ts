@@ -36,8 +36,15 @@ export interface ZipEntry {
 export interface ZipArchive {
 	readonly entries: ReadonlyMap<string, ZipEntry>;
 	has(name: string): boolean;
+	/**
+	 * Read an entry whole. Fails typed `missing-part`, `part-too-large` (`maxPartBytes`, the ratio cap,
+	 * or the `maxTotalBytes` budget), `corrupt-zip` or `unsupported`.
+	 */
 	read(name: string): Promise<Uint8Array>;
-	/** Read an entry as a stream of chunks, without materializing the whole part. */
+	/**
+	 * Read an entry as a stream of chunks, without materializing the whole part. It fails as `read`
+	 * does; the `maxTotalBytes` budget is charged for the whole part when the stream starts.
+	 */
 	readStream(name: string): AsyncGenerator<Uint8Array>;
 }
 
@@ -121,6 +128,61 @@ export function findSpanConflict(
 	return undefined;
 }
 
+/**
+ * The aggregate inflate budget a caller's `maxTotalBytes` asks for (F11.53): unlimited when absent
+ * (`undefined` or `null`, as `??` treats the sibling options), else that many bytes. It must be a
+ * number, not `NaN`, at least 0, and `Infinity` is allowed; any other value fails typed
+ * `invalid-input`, so one such as `Number(process.env.UNSET)` cannot switch the budget off. It is
+ * checked on its own, with F11.41(a)'s rule, until that task's shared options helper exists.
+ *
+ * @example totalBudget(undefined) // Infinity (no budget)
+ * @example totalBudget(null) // Infinity (no budget)
+ * @example totalBudget(64 * 1024 * 1024) // 67108864
+ * @example totalBudget(Number.NaN) // throws XlsxError "invalid-input"
+ */
+export function totalBudget(value: unknown): number {
+	if (value === undefined || value === null) return Number.POSITIVE_INFINITY;
+	if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
+		throw new XlsxError(
+			"invalid-input",
+			"ReadOptions.maxTotalBytes must be a number of bytes, at least 0 (Infinity for no limit)",
+		);
+	}
+	return value;
+}
+
+/**
+ * A meter for the aggregate inflate budget (F11.53). Its `charge(name, bytes)` counts the most that a
+ * read of part `name` can produce, before the part is read, and fails typed `part-too-large` when that
+ * would take the archive's total past `limit`. Without a limit it counts nothing. Under a finite limit
+ * a bound that is not a number, from a `NaN` `maxPartBytes` or `maxCompressionRatio`, is refused too:
+ * such a part has no cap, so the budget cannot vouch for it.
+ *
+ * @example budgetMeter(Number.POSITIVE_INFINITY)("xl/a.xml", Number.NaN) // allowed: no budget
+ * @example budgetMeter(100)("xl/a.xml", Number.NaN) // throws XlsxError "part-too-large" (no bound)
+ * @example budgetMeter(100)("xl/a.xml", 60) // counted: 60 of 100 used
+ * @example const charge = budgetMeter(100); charge("xl/a.xml", 60); charge("xl/b.xml", 41) // throws XlsxError "part-too-large"
+ */
+export function budgetMeter(limit: number): (name: string, bytes: number) => void {
+	let used = 0;
+	return (name, bytes) => {
+		if (limit === Number.POSITIVE_INFINITY) return;
+		if (Number.isNaN(bytes)) {
+			throw new XlsxError(
+				"part-too-large",
+				`zip part ${name} has no size bound (maxPartBytes or maxCompressionRatio is not a number), so it cannot be read within the ${limit}-byte maxTotalBytes limit`,
+			);
+		}
+		if (bytes > limit - used) {
+			throw new XlsxError(
+				"part-too-large",
+				`zip part ${name} would bring the decompressed total to ${used + bytes} bytes, over the ${limit}-byte maxTotalBytes limit`,
+			);
+		}
+		used += bytes;
+	};
+}
+
 // The EOCD record sits at the very end, after an optional ≤64 KB comment. Scan backwards
 // for its signature and confirm the comment length lands exactly on the end of file (so a
 // signature appearing inside compressed data can't be mistaken for it).
@@ -134,14 +196,33 @@ function findEocd(view: DataView, len: number): number {
 	return -1;
 }
 
+/**
+ * Open a classic ZIP archive (no ZIP64, one disk) and check its layout: every central-directory record,
+ * duplicate names, and entries that share bytes or reach the central directory. Parts are read on
+ * demand through the returned archive. The options are the zip-bomb guards of `ReadOptions`:
+ * `maxPartBytes` and `maxCompressionRatio` cap each part, and `maxTotalBytes` caps every part read
+ * through this archive together (F11.53); `verifyChecksums` checks each fully read part's CRC-32. A
+ * read fails typed `missing-part`, `part-too-large`, `corrupt-zip` or `unsupported`.
+ *
+ * @example openZip(await writeZip([{ name: "a.xml", data }])).has("a.xml") // true
+ * @example openZip(bytes, { maxTotalBytes: Number.NaN }) // throws XlsxError "invalid-input", before any parsing
+ * @example openZip(new Uint8Array(4)) // throws XlsxError "not-a-zip" (no end-of-central-directory record)
+ * @example openZip(zip64) // throws XlsxError "unsupported" (ZIP64, or a multi-disk archive)
+ * @example openZip(truncated) // throws XlsxError "corrupt-zip" (a bad, oversized or mismatched central directory)
+ * @example openZip(withDuplicateName) // throws XlsxError "corrupt-zip" (two entries with one name)
+ * @example openZip(withSharedBytes) // throws XlsxError "corrupt-zip" (two entries share bytes, or one reaches the central directory)
+ */
 export function openZip(
 	bytes: Uint8Array,
 	options?: {
 		maxPartBytes?: number;
 		maxCompressionRatio?: number;
+		maxTotalBytes?: number;
 		verifyChecksums?: boolean;
 	},
 ): ZipArchive {
+	// The aggregate budget (F11.53) is checked first, so a bad value fails before any parsing.
+	const charge = budgetMeter(totalBudget(options?.maxTotalBytes));
 	const len = bytes.byteLength;
 	const view = new DataView(bytes.buffer, bytes.byteOffset, len);
 	// Zip-bomb guards (F9.7), applied by DEFAULT so a hostile archive is safe without opt-in.
@@ -308,13 +389,22 @@ export function openZip(
 		return Math.min(entry.uncompressedSize, maxPartBytes, ratioLimit);
 	}
 
+	// The most a read of `entry` can produce, charged to the aggregate budget before it is read: a
+	// stored part's own bytes, or a deflated part's inflate cap, past which the inflate aborts.
+	function outputBound(entry: ZipEntry, payload: Uint8Array): number {
+		if (entry.method === 0) return payload.byteLength;
+		return entry.compressedSize === 0 ? 0 : inflateCap(entry);
+	}
+
 	async function read(name: string): Promise<Uint8Array> {
 		const { entry, payload } = locate(name);
 		if (entry.method === 0) {
+			charge(name, outputBound(entry, payload));
 			verifyEntryOutput(entry, payload, verifyChecksums);
 			return payload;
 		}
 		if (entry.method === 8) {
+			charge(name, outputBound(entry, payload));
 			const output =
 				entry.compressedSize === 0
 					? new Uint8Array(0)
@@ -334,6 +424,7 @@ export function openZip(
 		const { entry, payload } = locate(name);
 		const integrity = createEntryIntegrityVerifier(entry, verifyChecksums);
 		if (entry.method === 0) {
+			charge(name, outputBound(entry, payload));
 			if (payload.byteLength > 0) {
 				integrity.update(payload);
 				yield payload;
@@ -342,6 +433,7 @@ export function openZip(
 			return;
 		}
 		if (entry.method === 8) {
+			charge(name, outputBound(entry, payload));
 			if (entry.compressedSize > 0) {
 				for await (const chunk of inflateRawStream(payload, inflateCap(entry), name)) {
 					integrity.update(chunk);
