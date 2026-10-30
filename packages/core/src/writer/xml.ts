@@ -1,3 +1,5 @@
+import { XlsxError } from "../errors";
+
 // XML text serialization for the writer — the encode side of the reader's entity decoding.
 //
 // OOXML content is UTF-8. Markup characters must be escaped, and XML 1.0 §2.11 normalizes literal
@@ -44,6 +46,54 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
  */
 export function ownValue<T extends object, K extends keyof T>(record: T, key: K): T[K] | undefined {
 	return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+// The deepest prototype chain the check walks. Real class hierarchies are a few links deep; a Proxy
+// whose getPrototypeOf trap mints a new prototype on every call would otherwise never end the walk.
+export const MAX_PROTOTYPE_DEPTH = 1000;
+
+/**
+ * Reject a record whose prototype chain supplies one of the model fields in `keys` (F11.34). The
+ * writer reads only own properties, so a field that a class or `Object.create` prototype supplies,
+ * such as a prototype getter, would otherwise be dropped without an error. A key the record owns
+ * itself is fine even when a prototype also has it: the own value is the one written. The walk
+ * starts at the record's prototype and stops at the first `Object.prototype` or `null`: a plain or
+ * null-prototype record costs one prototype read, and a key polluted onto `Object.prototype` stays
+ * ignored. It tests keys with `Object.hasOwn` and reads no value, so no getter runs. A chain longer
+ * than {@link MAX_PROTOTYPE_DEPTH} is rejected too. A Proxy can hide a field from the check, by
+ * serving it from its `get` trap alone or by reporting a plain prototype from its `getPrototypeOf`
+ * trap; that field is not written. Model fields must be own properties.
+ *
+ * @example rejectPrototypeFields({ value: 5 }, ["value", "style"], "cell A1") // returns
+ * @example rejectPrototypeFields(new (class { value = 5 })(), ["value", "style"], "cell A1") // returns
+ * @example rejectPrototypeFields(new (class { value = 5; get style() { return {}; } })(), ["value", "style"], "cell A1") // throws XlsxError invalid-input: cell A1: "style" comes from a prototype; set it as an own property
+ * @example rejectPrototypeFields(endlessProxyChain, ["value", "style"], "cell A1") // throws XlsxError invalid-input: cell A1: its prototype chain is longer than 1000; use a plain object
+ */
+export function rejectPrototypeFields(record: object, keys: readonly string[], what: string): void {
+	let proto: unknown = Object.getPrototypeOf(record);
+	for (
+		let depth = 1;
+		(typeof proto === "object" || typeof proto === "function") &&
+		proto !== null &&
+		proto !== Object.prototype;
+		depth++
+	) {
+		if (depth > MAX_PROTOTYPE_DEPTH) {
+			throw new XlsxError(
+				"invalid-input",
+				`${what}: its prototype chain is longer than ${MAX_PROTOTYPE_DEPTH}; use a plain object`,
+			);
+		}
+		for (const key of keys) {
+			if (Object.hasOwn(proto, key) && !Object.hasOwn(record, key)) {
+				throw new XlsxError(
+					"invalid-input",
+					`${what}: "${key}" comes from a prototype; set it as an own property`,
+				);
+			}
+		}
+		proto = Object.getPrototypeOf(proto);
+	}
 }
 
 // A string whose meaningful leading/trailing whitespace would be stripped by an XML reader needs

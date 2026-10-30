@@ -7,7 +7,14 @@ import type { SheetState, WorkbookProtection } from "../types";
 import { definedNamesXml } from "./defined-names";
 import type { SheetRel, SheetSideParts } from "./sheet";
 import { DEFAULT_THEME_XML } from "./theme";
-import { escapeAttr, isPlainRecord, isXmlSafe, ownValue } from "./xml";
+import type {
+	SheetInput,
+	StreamSheetInput,
+	StreamWorkbookInput,
+	WorkbookInput,
+	WriteOptions,
+} from "./types";
+import { escapeAttr, isPlainRecord, isXmlSafe, ownValue, rejectPrototypeFields } from "./xml";
 
 // The OPC part builders shared by the buffered writer (writeXlsx) and the streaming writer
 // (streamXlsx). Every function here returns the EXACT bytes writeXlsx used to build inline, so the
@@ -29,17 +36,74 @@ const CT_RELS = "application/vnd.openxmlformats-package.relationships+xml";
 const MAX_SHEET_NAME = 31;
 const FORBIDDEN_SHEET_NAME = /[\\/?*[\]:]/;
 
+// The workbook, sheet and options fields of both writers' inputs, checked against the types so a new
+// field cannot be left out. A workbook's, sheet's or options object's prototype must not supply any of
+// them (F11.34).
+const OPTION_FIELDS = Object.keys({ date1904: true } satisfies Record<keyof WriteOptions, true>);
+const WORKBOOK_FIELDS = Object.keys({
+	sheets: true,
+	date1904: true,
+	themeXml: true,
+	definedNames: true,
+	protection: true,
+} satisfies Record<keyof WorkbookInput | keyof StreamWorkbookInput, true>);
+const SHEET_FIELDS = Object.keys({
+	name: true,
+	rows: true,
+	columns: true,
+	rowProperties: true,
+	freeze: true,
+	merges: true,
+	hyperlinks: true,
+	state: true,
+	comments: true,
+	images: true,
+	tables: true,
+	dataValidations: true,
+	conditionalFormatting: true,
+	autoFilter: true,
+	protection: true,
+	pageMargins: true,
+	pageSetup: true,
+	printOptions: true,
+	headerFooter: true,
+} satisfies Record<keyof SheetInput | keyof StreamSheetInput, true>);
+
 /**
  * The writer rejects invalid input with a typed error rather than crashing — so before either entry
  * point reads `workbook.sheets`, confirm the workbook is a non-null object. A `null`/`undefined`
  * workbook would otherwise throw a raw `TypeError` on that property access (found by the F9.4 writer
- * fuzzer); `sheets` itself is then validated by {@link validateSheetMeta}. Single-sourced so both the
- * buffered and streaming entries reject identically.
+ * fuzzer); `sheets` itself is then validated by {@link validateSheetMeta}. A class instance or
+ * `Object.create` workbook whose prototype supplies a workbook field is rejected too, rather than
+ * written without it (F11.34). Single-sourced so both the buffered and streaming entries reject
+ * identically.
+ *
+ * @example requireWorkbookObject(null) // throws XlsxError invalid-input: a workbook must be an object with a `sheets` array
+ * @example requireWorkbookObject(new (class { sheets = []; get protection() { return {}; } })()) // throws XlsxError invalid-input: workbook: "protection" comes from a prototype; set it as an own property
+ * @example requireWorkbookObject({ sheets: [] }) // returns
  */
 export function requireWorkbookObject(workbook: unknown): void {
 	if (typeof workbook !== "object" || workbook === null) {
 		throw new XlsxError("invalid-input", "a workbook must be an object with a `sheets` array");
 	}
+	rejectPrototypeFields(workbook, WORKBOOK_FIELDS, "workbook");
+}
+
+/**
+ * The caller's `options.date1904`, read once, or `undefined` when there are no options or no own flag.
+ * An options object whose prototype supplies the flag, such as a class getter, is rejected rather than
+ * read as absent, which would lose the 1904 date system (F11.34). Shared by both writers.
+ *
+ * @example optionsDate1904(undefined) // undefined
+ * @example optionsDate1904({ date1904: true }) // true
+ * @example optionsDate1904(new (class { get date1904() { return true; } })()) // throws XlsxError invalid-input: options: "date1904" comes from a prototype; set it as an own property
+ */
+export function optionsDate1904(options: WriteOptions | null | undefined): boolean | undefined {
+	if (options == null) return undefined;
+	if (typeof options === "object" || typeof options === "function") {
+		rejectPrototypeFields(options, OPTION_FIELDS, "options");
+	}
+	return ownValue(options, "date1904");
 }
 
 /**
@@ -48,7 +112,20 @@ export function requireWorkbookObject(workbook: unknown): void {
  * between reads), so downstream emission uses these arrays, never `sheet.name`/`sheet.state` — closing
  * a TOCTOU gap where a flipped getter could otherwise slip a forbidden name into workbook.xml. Does
  * NOT validate `rows` — the buffered and streaming writers accept different row shapes (an array vs an
- * iterable) and each checks its own.
+ * iterable) and each checks its own. Each sheet is checked first for a field its prototype supplies,
+ * which is rejected rather than written without it (F11.34); both writers read every sheet here before
+ * any other sheet field.
+ *
+ * @example validateSheetMeta([]) // throws XlsxError invalid-input: a workbook needs at least one sheet
+ * @example validateSheetMeta([new (class { name = "S"; rows = []; get merges() { return ["A1:B2"]; } })()]) // throws XlsxError invalid-input: sheets[0]: "merges" comes from a prototype; set it as an own property
+ * @example validateSheetMeta([{ name: "", rows: [] }]) // throws XlsxError invalid-input: a sheet name must be a non-empty string
+ * @example validateSheetMeta([{ name: "x".repeat(32), rows: [] }]) // throws XlsxError invalid-input: sheet name "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" exceeds 31 characters
+ * @example validateSheetMeta([{ name: "a/b", rows: [] }]) // throws XlsxError invalid-input: sheet name "a/b" contains a forbidden character (\ / ? * [ ] :)
+ * @example validateSheetMeta([{ name: "a\u0001", rows: [] }]) // throws XlsxError invalid-input: sheet name "a\u0001" contains a character not allowed in XML
+ * @example validateSheetMeta([{ name: "S", rows: [] }, { name: "s", rows: [] }]) // throws XlsxError invalid-input: duplicate sheet name "s" (case-insensitive)
+ * @example validateSheetMeta([{ name: "S", rows: [], state: "gone" as never }]) // throws XlsxError invalid-input: sheet "S": state must be "visible", "hidden", or "veryHidden"
+ * @example validateSheetMeta([{ name: "S", rows: [], state: "hidden" }]) // throws XlsxError invalid-input: at least one sheet must be visible
+ * @example validateSheetMeta([{ name: "S", rows: [] }]) // { states: ["visible"], names: ["S"] }
  */
 export function validateSheetMeta(sheets: unknown): {
 	states: SheetState[];
@@ -63,6 +140,9 @@ export function validateSheetMeta(sheets: unknown): {
 	let anyVisible = false;
 	for (let i = 0; i < sheets.length; i++) {
 		const sheet = ownValue(sheets, i);
+		if ((typeof sheet === "object" && sheet !== null) || typeof sheet === "function") {
+			rejectPrototypeFields(sheet, SHEET_FIELDS, `sheets[${i}]`);
+		}
 		const name = sheet == null ? undefined : ownValue(sheet, "name");
 		if (typeof name !== "string" || name.length === 0) {
 			throw new XlsxError("invalid-input", "a sheet name must be a non-empty string");

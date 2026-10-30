@@ -4,6 +4,7 @@ import { createMediaRegistry } from "./images";
 import {
 	contentTypesXml,
 	encode,
+	optionsDate1904,
 	packageRelsXml,
 	requireWorkbookObject,
 	sheetSideParts,
@@ -68,7 +69,7 @@ async function* buildStreamParts(
 	if (inputDate1904 !== undefined && typeof inputDate1904 !== "boolean") {
 		throw new XlsxError("invalid-input", "workbook.date1904 must be a boolean when present");
 	}
-	const optionDate1904 = options == null ? undefined : ownValue(options, "date1904");
+	const optionDate1904 = optionsDate1904(options);
 	const date1904 = optionDate1904 ?? inputDate1904 ?? false;
 	// Read the caller's optional carried theme ONCE (single-read TOCTOU, matching writeXlsx).
 	const carriedTheme = ownValue(workbook, "themeXml");

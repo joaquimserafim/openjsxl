@@ -3,26 +3,7 @@ import { type CellRef, formatRef, MAX_COL, MAX_ROW, parseRef } from "../ooxml/a1
 import { MAX_TABLE_NAME_LEN } from "../ooxml/table";
 import type { DefinedName } from "../ooxml/workbook";
 import type { Workbook } from "../reader/workbook";
-import type {
-	Cell,
-	ColumnProps,
-	Comment,
-	ConditionalFormatting,
-	DataValidation,
-	FreezePane,
-	HeaderFooter,
-	Hyperlink,
-	PageMargins,
-	PageSetup,
-	PrintOptions,
-	RowProps,
-	SheetAutoFilter,
-	SheetImage,
-	SheetProtection,
-	SheetState,
-	TableInfo,
-	Worksheet,
-} from "../types";
+import type { Cell, Worksheet } from "../types";
 import type { CellInput, SheetInput, WorkbookInput } from "./types";
 import { ownValue } from "./xml";
 
@@ -185,7 +166,12 @@ function setArraySlot<T>(array: T[], index: number, value: T): void {
  * and tab order. Rows/columns are left sparse (array holes) — the writer treats a hole as an empty
  * cell — so a workbook with a few far-apart cells does not materialize a dense grid. An unstyled
  * workbook yields bare values only: the exact pre-styles WorkbookInput, and the exact same bytes
- * on rewrite.
+ * on rewrite. Each sheet is an ordinary object whose carried fields are own data properties
+ * (F11.34).
+ *
+ * @example await workbookToInput(await openXlsx(await writeXlsx({ sheets: [{ name: "S", rows: [[1]] }] }))) // { sheets: [{ name: "S", rows: [[1]] }] }
+ * @example await workbookToInput(offGrid) // throws XlsxError invalid-input: sheet "S": cell reference "A99999999999999" has no writable grid position
+ * @example await workbookToInput(caseTwins) // throws XlsxError invalid-input: sheet "S": cells "A1" and "a1" are distinct to the reader but occupy one grid position (A1)
  */
 export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput> {
 	const sheets: SheetInput[] = [];
@@ -242,82 +228,63 @@ export async function workbookToInput(workbook: Workbook): Promise<WorkbookInput
 		}
 		// Geometry (F4.5) and structural metadata (F4.6): carried only when present, so a workbook
 		// using neither produces the exact same WorkbookInput — and the exact same bytes — as before.
-		const sheet: {
-			name: string;
-			rows: CellInput[][];
-			columns?: readonly ColumnProps[];
-			rowProperties?: Readonly<Record<number, RowProps>>;
-			freeze?: FreezePane;
-			merges?: readonly string[];
-			hyperlinks?: readonly Hyperlink[];
-			state?: SheetState;
-			comments?: readonly Comment[];
-			images?: readonly SheetImage[];
-			tables?: readonly TableInfo[];
-			dataValidations?: readonly DataValidation[];
-			conditionalFormatting?: readonly ConditionalFormatting[];
-			autoFilter?: SheetAutoFilter;
-			protection?: SheetProtection;
-			pageMargins?: PageMargins;
-			pageSetup?: PageSetup;
-			printOptions?: PrintOptions;
-			headerFooter?: HeaderFooter;
-		} = { name: info.name, rows };
-		// Carried optional fields are assigned below. Keep this internal record detached from
-		// inherited setters or readonly properties that could intercept those own model values.
-		Object.setPrototypeOf(sheet, null);
 		const columns = worksheet.columns;
-		if (columns.length > 0) sheet.columns = columns;
 		const rowProperties = worksheet.rowProperties;
-		if (rowProperties.size > 0) sheet.rowProperties = Object.fromEntries(rowProperties);
 		const freeze = worksheet.freeze;
-		if (freeze !== undefined) sheet.freeze = freeze;
 		const merges = worksheet.mergedCells;
-		if (merges.length > 0) sheet.merges = merges;
 		const hyperlinks = worksheet.hyperlinks;
-		if (hyperlinks.length > 0) sheet.hyperlinks = hyperlinks;
-		if (info.state !== "visible") sheet.state = info.state;
 		const comments = worksheet.comments;
-		if (comments.length > 0) sheet.comments = comments;
 		// Pictures (F6.4). `images()` is async (media needs decompression) and degrading — it returns
 		// only cell-anchored pictures with resolvable bytes, so what it hands back is exactly a valid
 		// writer input. Attach only when non-empty: an imageless workbook keeps the byte-identity path.
 		const images = await worksheet.images();
-		if (images.length > 0) sheet.images = images;
 		// Tables (F9.1) — structural pass-through; the writer re-derives column names from the header
 		// row (which the bridge also carries), so a read table rewrites cleanly. Names are deduped
 		// workbook-wide (F9.5) — a unique name is passed through UNCHANGED (byte-identity), a collision
 		// gets a suffix.
-		const tables = worksheet.tables;
-		if (tables.length > 0) {
-			sheet.tables = tables.map((t) => {
-				const unique = uniquifyTableName(t.name, seenTableNames);
-				return unique === t.name ? t : { ...t, name: unique };
-			});
-		}
+		const tables = worksheet.tables.map((t) => {
+			const unique = uniquifyTableName(t.name, seenTableNames);
+			return unique === t.name ? t : { ...t, name: unique };
+		});
 		// Data validations (F9.2) — structural pass-through; the reader's rules ARE writer input.
 		const dataValidations = worksheet.dataValidations;
-		if (dataValidations.length > 0) sheet.dataValidations = dataValidations;
 		// Conditional formatting (F9.3) — structural pass-through; the inline dxf re-interns on write.
 		const conditionalFormatting = worksheet.conditionalFormatting;
-		if (conditionalFormatting.length > 0) sheet.conditionalFormatting = conditionalFormatting;
 		// autoFilter (F10.2) — structural pass-through. The writer re-emits <autoFilter> and re-synthesizes
 		// the paired _xlnm._FilterDatabase name (which the reader stripped), so the filter round-trips once.
 		const autoFilter = worksheet.autoFilter;
-		if (autoFilter !== undefined) sheet.autoFilter = autoFilter;
 		// Sheet protection (F10.3) — structural pass-through; per-cell locked/hidden rides along on each
 		// cell's carried style. Password material is carried verbatim (never recomputed).
 		const protection = worksheet.protection;
-		if (protection !== undefined) sheet.protection = protection;
 		// Print setup (F10.4) — structural pass-through of the four page-layout elements.
 		const pageMargins = worksheet.pageMargins;
-		if (pageMargins !== undefined) sheet.pageMargins = pageMargins;
 		const pageSetup = worksheet.pageSetup;
-		if (pageSetup !== undefined) sheet.pageSetup = pageSetup;
 		const printOptions = worksheet.printOptions;
-		if (printOptions !== undefined) sheet.printOptions = printOptions;
 		const headerFooter = worksheet.headerFooter;
-		if (headerFooter !== undefined) sheet.headerFooter = headerFooter;
+		// An object literal defines each carried field as its own data property, so an inherited setter,
+		// getter-only accessor or readonly property on Object.prototype cannot intercept it, and the
+		// sheet stays an ordinary object (F11.34).
+		const sheet: SheetInput = {
+			name: info.name,
+			rows,
+			...(columns.length > 0 ? { columns } : {}),
+			...(rowProperties.size > 0 ? { rowProperties: Object.fromEntries(rowProperties) } : {}),
+			...(freeze !== undefined ? { freeze } : {}),
+			...(merges.length > 0 ? { merges } : {}),
+			...(hyperlinks.length > 0 ? { hyperlinks } : {}),
+			...(info.state !== "visible" ? { state: info.state } : {}),
+			...(comments.length > 0 ? { comments } : {}),
+			...(images.length > 0 ? { images } : {}),
+			...(tables.length > 0 ? { tables } : {}),
+			...(dataValidations.length > 0 ? { dataValidations } : {}),
+			...(conditionalFormatting.length > 0 ? { conditionalFormatting } : {}),
+			...(autoFilter !== undefined ? { autoFilter } : {}),
+			...(protection !== undefined ? { protection } : {}),
+			...(pageMargins !== undefined ? { pageMargins } : {}),
+			...(pageSetup !== undefined ? { pageSetup } : {}),
+			...(printOptions !== undefined ? { printOptions } : {}),
+			...(headerFooter !== undefined ? { headerFooter } : {}),
+		};
 		sheets.push(sheet);
 	}
 	// Carry the source theme verbatim (F5.3) so custom theme colors survive the rewrite. Absent when

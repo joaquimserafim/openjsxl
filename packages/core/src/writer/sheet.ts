@@ -56,8 +56,16 @@ import { commentsParts } from "./comments";
 import type { MediaRegistry } from "./images";
 import { checkKeys, sheetInvalid, shortened } from "./sheet-validation";
 import { colorXml, type Fail, type StyleRegistry, validateColor } from "./styles";
-import type { CellInput, CellValue, SheetInput, StreamSheetInput } from "./types";
-import { escapeAttr, escapeText, isPlainRecord, isXmlSafe, ownValue, preserveAttr } from "./xml";
+import type { CellInput, CellValue, SheetInput, StreamSheetInput, StyledCell } from "./types";
+import {
+	escapeAttr,
+	escapeText,
+	isPlainRecord,
+	isXmlSafe,
+	ownValue,
+	preserveAttr,
+	rejectPrototypeFields,
+} from "./xml";
 
 const encoder = new TextEncoder();
 
@@ -89,12 +97,33 @@ export interface CapturedCell {
 	readonly style: CellStyle | undefined;
 }
 
-// Split a CellInput into its value, (optional) style, and (optional) formula. Discrimination is
-// total: null/undefined are empty, Date instances are dates, primitives are bare values — any OTHER
-// object must be a StyledCell. An object with neither a `value` nor a `formula` property is some
-// stray object (the pre-F4.2 writer rejected every object; keeping that loudness catches typos like
-// { val: 1 } or a nested array). Each caller property is read exactly once (TOCTOU-safe).
-function splitInput(col: number, row: number, input: CellInput): CapturedCell {
+// The StyledCell fields, checked against the type so a new field cannot be left out. A cell's
+// prototype must not supply any of them (F11.34).
+const CELL_FIELDS = Object.keys({
+	value: true,
+	style: true,
+	formula: true,
+} satisfies Record<keyof StyledCell, true>);
+
+/**
+ * Split a CellInput into its value, (optional) style, and (optional) formula. Discrimination is
+ * total: null/undefined are empty, Date instances are dates, primitives are bare values — any OTHER
+ * object must be a StyledCell. An object with neither a `value` nor a `formula` property is some
+ * stray object (the pre-F4.2 writer rejected every object; keeping that loudness catches typos like
+ * { val: 1 } or a nested array). A class instance or `Object.create` record whose prototype supplies
+ * `value`, `style` or `formula` is rejected rather than written without it (F11.34). Each caller
+ * property is read exactly once (TOCTOU-safe).
+ *
+ * @example splitInput(1, 1, null) // { value: null, formula: undefined, style: undefined }
+ * @example splitInput(1, 1, 5) // { value: 5, formula: undefined, style: undefined }
+ * @example splitInput(1, 1, [5] as never) // throws XlsxError invalid-input: cell A1: an array is not a cell value
+ * @example splitInput(1, 1, new (class { value = 5; get style() { return {}; } })()) // throws XlsxError invalid-input: cell A1: "style" comes from a prototype; set it as an own property
+ * @example splitInput(1, 1, { value: 5, typo: 1 } as never) // throws XlsxError invalid-input: cell A1: a cell object allows only "value", "style", and "formula" (got "typo")
+ * @example splitInput(1, 1, {}) // throws XlsxError invalid-input: cell A1: an object cell must be { value, style? } or carry a formula
+ * @example splitInput(1, 1, { value: { value: 5 } } as never) // throws XlsxError invalid-input: cell A1: a cell's value cannot be an object
+ * @example splitInput(1, 1, { formula: "1+1", value: 2, style: { font: { bold: true } } }) // { value: 2, formula: "1+1", style: { font: { bold: true } } }
+ */
+export function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 	if (input === null || input === undefined) {
 		return { value: input, formula: undefined, style: undefined };
 	}
@@ -105,6 +134,7 @@ function splitInput(col: number, row: number, input: CellInput): CapturedCell {
 	if (Array.isArray(input)) {
 		throw new XlsxError("invalid-input", `cell ${ref}: an array is not a cell value`);
 	}
+	rejectPrototypeFields(input, CELL_FIELDS, `cell ${ref}`);
 	// `input` is a StyledCell here — every other CellInput shape returned above — so read it directly,
 	// no cast. Its properties are still caller-controlled: read each once (TOCTOU) and re-validate,
 	// since a JS caller can pass anything past the types.
@@ -1612,6 +1642,29 @@ function tableStyleInfoXml(sheetName: string, what: string, raw: unknown): strin
 }
 
 /**
+ * A table's caller entry for column `c`, read once (single-read TOCTOU: a Proxy array must not return a
+ * different object between the check and its use). An absent entry (no `columns`, a shorter array, a
+ * hole) is `undefined`, and the column takes its name from the header row. A present entry must be a
+ * plain record: a class instance, a string or `null` is rejected rather than ignored, so no
+ * totals-row or formula field it carries is lost without an error (F11.34).
+ *
+ * @example providedColumn("S", "tables[0]", undefined, 0) // undefined
+ * @example providedColumn("S", "tables[0]", [{ name: "Amount" }], 0) // { name: "Amount" }
+ * @example providedColumn("S", "tables[0]", [new (class { name = "Amount" })()], 0) // throws XlsxError invalid-input: sheet "S": tables[0].columns[0] must be an object
+ */
+export function providedColumn(
+	sheetName: string,
+	what: string,
+	columns: readonly unknown[] | undefined,
+	c: number,
+): Record<string, unknown> | undefined {
+	const raw = columns !== undefined ? ownValue(columns, c) : undefined;
+	if (raw === undefined) return undefined;
+	if (!isPlainRecord(raw)) sheetInvalid(sheetName, `${what}.columns[${c}] must be an object`);
+	return raw;
+}
+
+/**
  * Validate and emit a sheet's tables (decision 8). Column names DERIVE from the header row when a
  * `headerText` resolver is supplied (the buffered writer, which has all rows); the streaming writer
  * passes `undefined` and column names come from `tables[i].columns` instead (it can't read the header
@@ -1685,10 +1738,7 @@ export function buildTables(
 		const seen = new Set<string>();
 		const columnXmls: string[] = [];
 		for (let c = 0; c < width; c++) {
-			// Read the caller's column entry ONCE (single-read TOCTOU — a Proxy array must not return a
-			// different object between the isPlainRecord check and its use).
-			const rawColumn = columns !== undefined ? ownValue(columns, c) : undefined;
-			const provided = isPlainRecord(rawColumn) ? rawColumn : undefined;
+			const provided = providedColumn(sheetName, what, columns, c);
 			let columnName: string;
 			if (headerRow && headerText !== undefined) {
 				const text = headerText(from.row, from.col + c);
