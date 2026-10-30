@@ -1,7 +1,7 @@
 import { loadFixture } from "@openjsxl/fixtures";
 import { describe, expect, it } from "vitest";
 import { XlsxError, type XlsxErrorCode } from "../../errors";
-import { openZip } from "../central-directory";
+import { openZip, storedSlices } from "../central-directory";
 import { MAX_CLASSIC_ZIP_ENTRIES } from "../constants";
 
 // The known parts in basic.xlsx; the same list also drives buffered-versus-streamed comparisons.
@@ -826,6 +826,127 @@ describe("readStream", () => {
 			expect(decode(await collectChunks(zip.readStream(part)))).toBe(
 				decode(await zip.read(part)),
 			);
+		}
+	});
+
+	// F11.98: a stored entry arrives in 16 KiB slices, within the 64 KiB the task allows, the size of
+	// Node's inflate chunks.
+	const SLICE = 16 * 1024;
+	// `n` letters whose order shifts between slices, so a reordered or repeated slice cannot join back.
+	const letters = (n: number): string => {
+		let out = "";
+		for (let i = 0; i < n; i++) out += String.fromCharCode(97 + ((i * 7919) % 26));
+		return out;
+	};
+	// Drain a stream, keeping each chunk's size; natural EOF runs the size and CRC checks.
+	async function chunkSizes(chunks: AsyncIterable<Uint8Array>, sizes: number[] = []) {
+		for await (const chunk of chunks) sizes.push(chunk.byteLength);
+		return sizes;
+	}
+
+	it.each([
+		{ size: 0, slices: [] },
+		{ size: 100, slices: [100] },
+		{ size: SLICE, slices: [SLICE] },
+		{ size: SLICE + 1, slices: [SLICE, 1] },
+		{ size: 2 * SLICE, slices: [SLICE, SLICE] },
+		{ size: 3 * SLICE + 123, slices: [SLICE, SLICE, SLICE, 123] },
+	])(
+		"streams a $size-byte stored entry as $slices.length slice(s) that join to it (F11.98)",
+		async ({ size, slices }) => {
+			const name = "stored.xml";
+			const content = letters(size);
+			const zip = openZip(await buildZip({ name, content, method: 0 }), {
+				verifyChecksums: true,
+			});
+			expect(await chunkSizes(zip.readStream(name))).toEqual(slices);
+			expect(decode(await collectChunks(zip.readStream(name)))).toBe(content);
+			expect(decode(await zip.read(name))).toBe(content);
+		},
+	);
+
+	it.each([
+		{ slice: "first", offset: 5 },
+		{ slice: "second", offset: SLICE + 7 },
+		{ slice: "last", offset: 3 * SLICE + 5 },
+	])(
+		"checks a stored entry's CRC over every slice, after the last, with a flip in the $slice (F11.98)",
+		async ({ offset }) => {
+			const name = "stored.xml";
+			const content = letters(3 * SLICE + 123);
+			const damaged = flipEntryPayloadByte(
+				await buildZip({ name, content, method: 0 }),
+				offset,
+			);
+			// Off by default: the damaged bytes read, at full length.
+			const raw = await collectChunks(openZip(damaged).readStream(name));
+			expect(raw.byteLength).toBe(content.length);
+			expect(decode(raw)).not.toBe(content);
+			// On: every slice arrives, then natural EOF fails the CRC.
+			const sizes: number[] = [];
+			const stream = openZip(damaged, { verifyChecksums: true }).readStream(name);
+			await expect(chunkSizes(stream, sizes)).rejects.toMatchObject({ code: "corrupt-zip" });
+			expect(sizes).toEqual([SLICE, SLICE, SLICE, 123]);
+			await expectReadAndStreamError(damaged, name, { verifyChecksums: true }, "corrupt-zip");
+		},
+	);
+
+	it("checks a stored entry's declared size after its last slice (F11.98)", async () => {
+		const name = "stored.xml";
+		const content = letters(2 * SLICE + 9);
+		for (const declared of [content.length - 1, content.length + 1]) {
+			const bytes = await buildZip({
+				name,
+				content,
+				method: 0,
+				centralUncompressedSize: declared,
+			});
+			const sizes: number[] = [];
+			await expect(chunkSizes(openZip(bytes).readStream(name), sizes)).rejects.toMatchObject({
+				code: "corrupt-zip",
+			});
+			expect(sizes).toEqual([SLICE, SLICE, 9]);
+			await expectReadAndStreamError(bytes, name, undefined, "corrupt-zip");
+		}
+	});
+});
+
+describe("storedSlices (F11.98)", () => {
+	const SLICE = 16 * 1024;
+
+	it("yields nothing for an empty part", () => {
+		expect([...storedSlices(new Uint8Array(0))]).toEqual([]);
+	});
+
+	it("yields a part of at most 16 KiB as one view of it", () => {
+		for (const size of [1, 100, SLICE]) {
+			const payload = new Uint8Array(size + 10).subarray(3, 3 + size);
+			const slices = [...storedSlices(payload)];
+			expect(slices).toHaveLength(1);
+			expect(slices[0]?.buffer).toBe(payload.buffer);
+			expect([slices[0]?.byteOffset, slices[0]?.byteLength]).toEqual([3, size]);
+		}
+	});
+
+	it("cuts a larger part into 16 KiB views that join back to it, copying nothing", () => {
+		for (const [size, lengths] of [
+			[SLICE + 1, [SLICE, 1]],
+			[2 * SLICE, [SLICE, SLICE]],
+			[3 * SLICE + 123, [SLICE, SLICE, SLICE, 123]],
+		] as const) {
+			const backing = Uint8Array.from({ length: size + 10 }, (_, i) => (i * 31) & 0xff);
+			const payload = backing.subarray(3, 3 + size);
+			const slices = [...storedSlices(payload)];
+			expect(slices.map((s) => s.byteLength)).toEqual(lengths);
+			expect(slices.map((s) => s.byteOffset)).toEqual(lengths.map((_, i) => 3 + i * SLICE));
+			for (const slice of slices) expect(slice.buffer).toBe(backing.buffer);
+			const joined = new Uint8Array(size);
+			let at = 0;
+			for (const slice of slices) {
+				joined.set(slice, at);
+				at += slice.byteLength;
+			}
+			expect(joined).toEqual(payload);
 		}
 	});
 });

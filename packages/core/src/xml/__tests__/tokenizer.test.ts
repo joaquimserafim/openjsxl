@@ -107,6 +107,22 @@ describe("tokenize", () => {
 		]);
 	});
 
+	it("strips one leading U+FEFF only: a second one is text (F11.69)", () => {
+		expect(textRuns("\uFEFF\uFEFFx")).toEqual(["\uFEFFx"]);
+		expect(textRuns("<t>\uFEFFx</t>")).toEqual(["\uFEFFx"]);
+		expect(tokens("")).toEqual([]);
+	});
+
+	it("keeps a leading U+FEFF as text with keepLeadingBom (F11.69)", () => {
+		expect([...tokenize("\uFEFFx</a>", { keepLeadingBom: true })]).toEqual([
+			{ kind: "text", value: "\uFEFFx" },
+			{ kind: "close", name: "a" },
+		]);
+		expect([...tokenize("\uFEFF<a/>", { keepLeadingBom: false })]).toEqual([
+			{ kind: "open", name: "a", attrs: {}, selfClosing: true },
+		]);
+	});
+
 	it("treats CDATA as literal text and emits one run per character-data span", () => {
 		expect(tokens("<a><![CDATA[<raw> & stuff]]></a>")).toEqual([
 			{ kind: "open", name: "a", attrs: {}, selfClosing: false },

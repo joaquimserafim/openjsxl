@@ -138,6 +138,30 @@ describe("openZip's maxTotalBytes", () => {
 		await expect(drain(zip.readStream("b.bin"))).rejects.toThrow(typed("part-too-large"));
 	});
 
+	it("charges a stored part in several slices for its whole size before the first slice (F11.98)", async () => {
+		let seed = 11;
+		const noise = Uint8Array.from({ length: 200_000 }, () => {
+			seed = (seed * 48271) % 2147483647;
+			return seed & 0xff;
+		});
+		const bytes = await writeZip([{ name: "big.bin", data: noise }]);
+		expect(openZip(bytes).entries.get("big.bin")?.method).toBe(0);
+
+		const short = openZip(bytes, { maxTotalBytes: noise.byteLength - 1 });
+		let delivered = 0;
+		await expect(
+			(async () => {
+				for await (const chunk of short.readStream("big.bin"))
+					delivered += chunk.byteLength;
+			})(),
+		).rejects.toThrow(typed("part-too-large"));
+		expect(delivered).toBe(0);
+
+		const exact = openZip(bytes, { maxTotalBytes: noise.byteLength });
+		expect(await drain(exact.readStream("big.bin"))).toBe(noise.byteLength);
+		await expect(exact.read("big.bin")).rejects.toThrow(typed("part-too-large"));
+	});
+
 	it("counts a part read twice twice, and a stream cut short at its whole size", async () => {
 		const { bytes, sizes } = await archive();
 		const a = sizes[0] ?? 0;

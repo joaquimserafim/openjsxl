@@ -1,6 +1,6 @@
 import { XlsxError } from "../errors";
 import { isWhitespace } from "../utils";
-import { tokenize, type XmlToken } from "./tokenizer";
+import { type TokenizeOptions, tokenize, type XmlToken } from "./tokenizer";
 
 // A chunk-fed wrapper around the streaming tokenizer (./tokenizer). Decompressed worksheet
 // text arrives in arbitrary chunks, and a single token — a tag, a comment, a CDATA section,
@@ -18,6 +18,10 @@ import { tokenize, type XmlToken } from "./tokenizer";
 //
 // Consumers must still concatenate consecutive `text` tokens: a text run split across two
 // chunks emits as two `text` events, exactly as CDATA/entities already split runs.
+//
+// F11.69: a U+FEFF is a byte-order mark only at document offset 0. The stream strips it there, from
+// the first non-empty chunk, and hands every piece to `tokenize` with `keepLeadingBom`, so a U+FEFF
+// that starts a later chunk or follows a construct stays text, as it does in one-shot `tokenize`.
 
 export interface XmlStream {
 	/** Feed the next text chunk; returns the tokens that became complete. */
@@ -25,6 +29,9 @@ export interface XmlStream {
 	/** Tokenize whatever remains after the last chunk (call once at end of input). */
 	flush(): XmlToken[];
 }
+
+// The stream strips the BOM itself (`fromStart`), so no piece it tokenizes has one left (F11.69).
+const PIECE: TokenizeOptions = { keepLeadingBom: true };
 
 const CDATA_OPEN = "<![CDATA[";
 const COMMENT_OPEN = "<!--";
@@ -193,6 +200,15 @@ function safeBoundary(buf: string): {
 	return { cut: safe, open: null };
 }
 
+/**
+ * A chunk-fed tokenizer whose tokens, with adjacent text merged, equal one-shot `tokenize` of the
+ * chunks joined, for any split.
+ *
+ * @example const s = createXmlStream(); [...s.push("<v>a &am"), ...s.push("p;</v>"), ...s.flush()] // [open v, text "a ", text "&", close v]
+ * @example const s = createXmlStream(); [...s.push(""), ...s.push("\uFEFF<a/>")] // [open a] (the BOM at offset 0 is stripped)
+ * @example const s = createXmlStream(); [...s.push("<t>"), ...s.push("\uFEFFx</t>")] // [open t, text "\uFEFFx", close t] (a later U+FEFF is text)
+ * @example const s = createXmlStream(); s.push("<!-- open") // [] (an unfinished construct waits); past MAX_UNFINISHED_CONSTRUCT it throws XlsxError "part-too-large"
+ */
 export function createXmlStream(): XmlStream {
 	// Unclassified input with NO known-open construct. Stays small: complete constructs drain
 	// every push, and the only unclassified remainders are a partial `<!-`/`<![CD` marker
@@ -205,6 +221,21 @@ export function createXmlStream(): XmlStream {
 	let heldLen = 0;
 	let tagState: TagState = TAG_START; // tag resume state (phase + open value-quote) across chunks
 	let tail = ""; // delimited resume state: last term.length-1 SEARCHED chars (never opener bytes)
+	let atStart = true; // no non-empty chunk has arrived yet: a U+FEFF here is the BOM (F11.69)
+
+	/**
+	 * The chunk as document text: a U+FEFF at document offset 0 is dropped, nowhere else.
+	 *
+	 * @example fromStart("") // "" (empty: the document start is still ahead)
+	 * @example fromStart("\uFEFF<a>") // "<a>" (the first non-empty chunk loses its BOM)
+	 * @example fromStart("<a>") // "<a>" (a first chunk without a BOM is kept whole)
+	 * @example fromStart("\uFEFFx") // "\uFEFFx" (after the first non-empty chunk, as is)
+	 */
+	const fromStart = (chunk: string): string => {
+		if (!atStart || chunk === "") return chunk;
+		atStart = false;
+		return chunk.charCodeAt(0) === 0xfeff ? chunk.slice(1) : chunk;
+	};
 
 	const capCheck = () => {
 		if (heldLen + buffer.length > MAX_UNFINISHED_CONSTRUCT) {
@@ -221,7 +252,7 @@ export function createXmlStream(): XmlStream {
 	const classify = (tokens: XmlToken[]): void => {
 		const { cut, open } = safeBoundary(buffer);
 		if (cut > 0) {
-			tokens.push(...tokenize(buffer.slice(0, cut)));
+			tokens.push(...tokenize(buffer.slice(0, cut), PIECE));
 		}
 		if (open !== null) {
 			const rest = buffer.slice(cut);
@@ -256,13 +287,14 @@ export function createXmlStream(): XmlStream {
 		heldLen = 0;
 		tagState = TAG_START;
 		tail = "";
-		tokens.push(...tokenize(construct));
+		tokens.push(...tokenize(construct, PIECE));
 		buffer = text.slice(endInText);
 		classify(tokens);
 	};
 
 	return {
-		push(text: string): XmlToken[] {
+		push(chunk: string): XmlToken[] {
+			const text = fromStart(chunk);
 			const tokens: XmlToken[] = [];
 			if (pending === null) {
 				buffer += text;
@@ -310,7 +342,7 @@ export function createXmlStream(): XmlStream {
 			tail = "";
 			buffer = "";
 			if (rest === "") return [];
-			return [...tokenize(rest)];
+			return [...tokenize(rest, PIECE)];
 		},
 	};
 }

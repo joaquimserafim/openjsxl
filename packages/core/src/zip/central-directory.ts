@@ -42,8 +42,16 @@ export interface ZipArchive {
 	 */
 	read(name: string): Promise<Uint8Array>;
 	/**
-	 * Read an entry as a stream of chunks, without materializing the whole part. It fails as `read`
-	 * does; the `maxTotalBytes` budget is charged for the whole part when the stream starts.
+	 * Read an entry as a stream of chunks, without materializing the whole part: a stored entry in
+	 * 16 KiB slices, a deflated one as it inflates. It fails as `read` does; the `maxTotalBytes` budget
+	 * is charged for the whole part before the first chunk, and the size and CRC-32 checks run at
+	 * natural EOF only.
+	 *
+	 * @example for await (const chunk of zip.readStream("xl/worksheets/sheet1.xml")) total += chunk.byteLength // a 40,000-byte stored part: chunks of 16384, 16384 and 7232 bytes
+	 * @example zip.readStream("nope.xml").next() // rejects XlsxError "missing-part"
+	 * @example openZip(bytes, { maxTotalBytes: 10 }).readStream("xl/workbook.xml").next() // rejects XlsxError "part-too-large", before any chunk
+	 * @example openZip(damaged, { verifyChecksums: true }).readStream(name) // yields every chunk, then rejects XlsxError "corrupt-zip"
+	 * @example zip.readStream("aes.xml").next() // rejects XlsxError "unsupported" (compression method 99)
 	 */
 	readStream(name: string): AsyncGenerator<Uint8Array>;
 }
@@ -181,6 +189,25 @@ export function budgetMeter(limit: number): (name: string, bytes: number) => voi
 		}
 		used += bytes;
 	};
+}
+
+// The slice a stored part is streamed in (F11.98): the size of the chunks Node's inflate yields, so
+// a stored part reaches the XML stream in the same pieces as a deflated one.
+const STORED_SLICE_BYTES = 16 * 1024;
+
+/**
+ * Hand a stored part's bytes out in 16 KiB slices, the way an inflated part arrives in chunks, so a
+ * stream consumer never takes a large part in one piece (F11.98). Each slice is a view into
+ * `payload`; nothing is copied.
+ *
+ * @example [...storedSlices(new Uint8Array(0))] // [] (an empty part yields nothing)
+ * @example [...storedSlices(new Uint8Array(100))].map((s) => s.byteLength) // [100]
+ * @example [...storedSlices(new Uint8Array(3 * 16384 + 123))].map((s) => s.byteLength) // [16384, 16384, 16384, 123]
+ */
+export function* storedSlices(payload: Uint8Array): Generator<Uint8Array> {
+	for (let start = 0; start < payload.byteLength; start += STORED_SLICE_BYTES) {
+		yield payload.subarray(start, start + STORED_SLICE_BYTES);
+	}
 }
 
 // The EOCD record sits at the very end, after an optional ≤64 KB comment. Scan backwards
@@ -418,16 +445,18 @@ export function openZip(
 		);
 	}
 
-	// Read an entry as a stream of chunks, never materializing the whole part. Size/CRC checks run
-	// only after natural EOF, so a caller that cancels early makes no whole-entry integrity claim.
+	// Read an entry as a stream of chunks, never materializing the whole part: a stored part in
+	// 16 KiB slices, a deflated one as it inflates. The budget is charged for the whole
+	// part before the first chunk. Size/CRC checks run only after natural EOF, so a caller that
+	// cancels early makes no whole-entry integrity claim.
 	async function* readStream(name: string): AsyncGenerator<Uint8Array> {
 		const { entry, payload } = locate(name);
 		const integrity = createEntryIntegrityVerifier(entry, verifyChecksums);
 		if (entry.method === 0) {
 			charge(name, outputBound(entry, payload));
-			if (payload.byteLength > 0) {
-				integrity.update(payload);
-				yield payload;
+			for (const slice of storedSlices(payload)) {
+				integrity.update(slice);
+				yield slice;
 			}
 			integrity.finish();
 			return;

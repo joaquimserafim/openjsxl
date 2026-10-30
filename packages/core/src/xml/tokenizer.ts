@@ -31,10 +31,28 @@ export type XmlToken =
 	| { readonly kind: "text"; readonly value: string }
 	| { readonly kind: "close"; readonly name: string };
 
-export function* tokenize(xml: string): Generator<XmlToken> {
+/** Internal options for {@link tokenize}. */
+export interface TokenizeOptions {
+	/**
+	 * Keep a U+FEFF that starts `xml` as text. The chunk-fed stream (./stream) sets it: it strips a
+	 * BOM itself at document offset 0, so no piece it hands in has a BOM left to strip (F11.69).
+	 */
+	readonly keepLeadingBom?: boolean;
+}
+
+/**
+ * Tokenize a whole document, or with `keepLeadingBom` a piece of one whose BOM is already gone.
+ *
+ * @example [...tokenize("")] // [] (nothing to tokenize)
+ * @example [...tokenize("\uFEFF<a>x</a>")] // [open a, text "x", close a] (the leading BOM is skipped)
+ * @example [...tokenize("\uFEFF\uFEFFx")] // [text "\uFEFFx"] (only the first U+FEFF is a BOM)
+ * @example [...tokenize("\uFEFFx</a>", { keepLeadingBom: true })] // [text "\uFEFFx", close a]
+ */
+export function* tokenize(xml: string, options: TokenizeOptions = {}): Generator<XmlToken> {
 	const len = xml.length;
-	// Skip a leading UTF-8 BOM if present (common from LibreOffice and older Excel).
-	let i = xml.charCodeAt(0) === 0xfeff ? 1 : 0;
+	// Skip a leading UTF-8 BOM if present (common from LibreOffice and older Excel), unless the
+	// caller already stripped it.
+	let i = options.keepLeadingBom !== true && xml.charCodeAt(0) === 0xfeff ? 1 : 0;
 
 	while (i < len) {
 		const lt = xml.indexOf("<", i);

@@ -269,3 +269,67 @@ describe("createXmlStream — F9.7 resumable scan", () => {
 		}
 	});
 });
+
+// F11.69: a U+FEFF is a byte-order mark only at document offset 0. One-shot `tokenize` strips it
+// there and keeps every other U+FEFF as text; the stream must do the same wherever the chunks
+// split, including a U+FEFF that starts a chunk or follows a construct.
+describe("createXmlStream — U+FEFF only at document start (F11.69)", () => {
+	const BOM = "\uFEFF";
+
+	// Two chunks split at `at`; `at` 0 pushes an empty chunk first.
+	function streamSplitAt(xml: string, at: number): XmlToken[] {
+		const stream = createXmlStream();
+		return [...stream.push(xml.slice(0, at)), ...stream.push(xml.slice(at)), ...stream.flush()];
+	}
+
+	const samples = [
+		`${BOM}<a>x</a>`, // at document start
+		`${BOM}${BOM}<a>x</a>`, // twice at document start: the second is text
+		`${BOM}${BOM}x`,
+		`<t>${BOM}Name</t>`, // at the start of a text run
+		`<t>a</t><t>${BOM}${BOM}b</t>`,
+		`<t><![CDATA[c]]>${BOM}d</t>`, // after a CDATA section
+		`<t><!-- c -->${BOM}d</t>`, // after a comment
+		`<t>&amp;${BOM}d</t>`, // after an entity
+		`<t>&#xFEFF;x</t>`, // an escaped U+FEFF
+		`${BOM}<?xml version="1.0"?><t>${BOM}</t><t a="${BOM}"/>${BOM}`,
+	];
+
+	it("keeps every U+FEFF but one at document start in one-shot tokenize", () => {
+		expect(mergeText([...tokenize(samples[1] as string)])).toEqual([
+			{ kind: "text", value: BOM },
+			{ kind: "open", name: "a", attrs: {}, selfClosing: false },
+			{ kind: "text", value: "x" },
+			{ kind: "close", name: "a" },
+		]);
+		expect(mergeText([...tokenize(samples[3] as string)])).toEqual([
+			{ kind: "open", name: "t", attrs: {}, selfClosing: false },
+			{ kind: "text", value: `${BOM}Name` },
+			{ kind: "close", name: "t" },
+		]);
+	});
+
+	for (const xml of samples) {
+		it(`matches one-shot tokenize at every split offset: ${JSON.stringify(xml)}`, () => {
+			const expected = mergeText([...tokenize(xml)]);
+			for (let at = 0; at <= xml.length; at++) {
+				expect(mergeText(streamSplitAt(xml, at)), `split at ${at}`).toEqual(expected);
+			}
+			for (let size = 1; size <= xml.length; size++) {
+				expect(mergeText(streamInChunks(xml, size)), `chunk size ${size}`).toEqual(
+					expected,
+				);
+			}
+		});
+	}
+
+	it("strips the BOM from the first non-empty chunk only", () => {
+		const stream = createXmlStream();
+		expect(stream.push("")).toEqual([]);
+		expect(stream.push(BOM)).toEqual([]);
+		expect(mergeText([...stream.push(`${BOM}<a/>`), ...stream.flush()])).toEqual([
+			{ kind: "text", value: BOM },
+			{ kind: "open", name: "a", attrs: {}, selfClosing: true },
+		]);
+	});
+});
