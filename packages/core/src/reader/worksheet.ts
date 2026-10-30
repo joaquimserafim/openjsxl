@@ -245,18 +245,25 @@ export function parseCellStyles(xml: string): Map<string, number> {
  * array-master formulas are returned verbatim; a SHARED dependent (`<f t="shared" si/>` with no text
  * of its own) gets the master's text translated by the dependent's offset from the master.
  * `dataTable` formulas carry no reusable text and are skipped (a documented degradation).
+ *
+ * The scan follows the shared structure tracker (F11.38): rows and cells advance only where the row
+ * assembler admits them, and a formula is only an admitted cell's own direct `<f>`, so an `<f>` in an
+ * extension, in a fake row or cell, or nested in other cell content supplies nothing, and text inside
+ * an extension within the `<f>` is not part of it. An `<f>` its cell closes before `</f>` is dropped.
+ *
+ * @example parseFormulas('<worksheet><sheetData><row r="1"><c r="A1"><f>1+1</f><v>2</v></c></row></sheetData></worksheet>') // Map { "A1" => "1+1" }
+ * @example parseFormulas('<worksheet><sheetData><row r="1"><c r="A1"><v>2</v><extLst><ext><x:f>HACK()</x:f></ext></extLst></c></row></sheetData></worksheet>') // Map {} (the extension's <f> is not the cell's)
  */
 export function parseFormulas(xml: string): Map<string, string> {
 	const formulas = new Map<string, string>();
 	const masters = new Map<string, { anchor: CellRef; text: string }>(); // si → master
 	const deps: { ref: string; cell: CellRef; si: string }[] = []; // shared dependents to resolve
-	let inSheetData = false;
+	const structure = createWorksheetStructure();
 	let rowIndex = 0;
 	let lastRow = 0;
 	let lastCol = 0;
 	let curRef: string | undefined;
 	let curCell: CellRef | undefined;
-	let inF = false;
 	let fType: string | undefined;
 	let fSi: string | undefined;
 	let fText = "";
@@ -299,50 +306,44 @@ export function parseFormulas(xml: string): Map<string, string> {
 	};
 
 	for (const token of tokenize(xml)) {
-		if (token.kind === "open") {
-			const name = localName(token.name);
-			// Only formulas INSIDE <sheetData> are cells. A stray <c><f> in an oleObjects /
-			// AlternateContent block (or anywhere else) must not fabricate a formula on a real cell —
-			// this mirrors the row assembler's own sheetData gate.
-			if (name === "sheetData") {
-				if (!token.selfClosing) inSheetData = true;
-				continue;
+		if (token.kind === "text") {
+			// Only the cell's own open <f> collects text, and not inside an extension within it.
+			if (structure.cellChild?.kind === "f" && structure.cellBarrier === undefined) {
+				fText += token.value;
 			}
-			if (!inSheetData) continue;
-			if (name === "row") {
-				const r = token.attrs.r;
-				const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
-				rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
-				lastRow = rowIndex;
-				lastCol = 0;
-			} else if (name === "c") {
-				const r = token.attrs.r;
-				if (r !== undefined) {
-					curRef = r;
-					const col = safeColumn(r);
-					curCell = col !== undefined ? { col, row: rowIndex } : undefined;
-					if (col !== undefined) lastCol = col;
-				} else {
-					lastCol += 1;
-					curCell = { col: lastCol, row: rowIndex };
-					curRef = formatRef(curCell);
-				}
-			} else if (name === "f") {
-				fType = token.attrs.t;
-				fSi = token.attrs.si;
-				fText = "";
-				if (token.selfClosing) finalize("");
-				else inF = true;
+			continue;
+		}
+		if (token.kind === "close") {
+			if (pushWorksheetClose(structure, token.name) === "f") finalize(fText);
+			continue;
+		}
+		// Only formulas of admitted cells INSIDE canonical <sheetData> are cells' formulas. A stray
+		// <c><f> in an oleObjects / AlternateContent block, an extension, or a fake row must not
+		// fabricate a formula on a real cell; this is the row assembler's own structural gate.
+		const opened = pushWorksheetOpen(structure, token.name, token.selfClosing);
+		if (opened === "row") {
+			const r = token.attrs.r;
+			const parsed = r !== undefined ? Number.parseInt(r, 10) : Number.NaN;
+			rowIndex = Number.isInteger(parsed) && parsed > 0 ? parsed : lastRow + 1;
+			lastRow = rowIndex;
+			lastCol = 0;
+		} else if (opened === "c") {
+			const r = token.attrs.r;
+			if (r !== undefined) {
+				curRef = r;
+				const col = safeColumn(r);
+				curCell = col !== undefined ? { col, row: rowIndex } : undefined;
+				if (col !== undefined) lastCol = col;
+			} else {
+				lastCol += 1;
+				curCell = { col: lastCol, row: rowIndex };
+				curRef = formatRef(curCell);
 			}
-		} else if (token.kind === "text") {
-			if (inF) fText += token.value;
-		} else {
-			const name = localName(token.name);
-			if (name === "sheetData") inSheetData = false;
-			else if (inF && name === "f") {
-				finalize(fText);
-				inF = false;
-			}
+		} else if (opened === "f") {
+			fType = token.attrs.t;
+			fSi = token.attrs.si;
+			fText = "";
+			if (token.selfClosing) finalize("");
 		}
 	}
 
@@ -606,17 +607,27 @@ export async function* streamRows(
  * Column width/visibility declarations from `<cols>`, in document order. Entries carrying only a
  * default STYLE (no width, not hidden) are style plumbing, not geometry — they are omitted here
  * (style resolution already honors them). Ranges outside Excel's grid and out-of-ceiling widths
- * degrade to absent.
+ * degrade to absent. Only a `<col>` the shared structure tracker admits, a direct child of the
+ * worksheet's canonical `<cols>`, is a column (F11.38): a `<col>` in an extension, in `sheetPr`, or
+ * in any other container supplies nothing.
+ *
+ * @example parseColumnProps('<worksheet><cols><col min="1" max="1" width="12"/></cols><sheetData/></worksheet>') // [{ min: 1, max: 1, width: 12 }]
+ * @example parseColumnProps('<worksheet><sheetPr><extLst><ext><col min="1" max="1" width="77"/></ext></extLst></sheetPr><sheetData/></worksheet>') // []
  */
 export function parseColumnProps(xml: string): ColumnProps[] {
 	const out: ColumnProps[] = [];
+	const structure = createWorksheetStructure();
 	for (const token of tokenize(xml)) {
-		if (token.kind !== "open") continue;
-		const name = localName(token.name);
-		// <cols> always precedes <sheetData>; a col-named element after it (extension lists,
-		// alternate content) is not column geometry — stop scanning at the cell region.
-		if (name === "sheetData") break;
-		if (name !== "col") continue;
+		if (token.kind === "text") continue;
+		if (token.kind === "close") {
+			pushWorksheetClose(structure, token.name);
+			continue;
+		}
+		// <cols> always precedes <sheetData>; stop scanning at the worksheet's own cell region, as
+		// the scan always has. Only the canonical one counts, not a sheetData-named extension element.
+		const direct = structure.phase === "worksheet" && structure.directChild === undefined;
+		if (direct && localName(token.name) === "sheetData") break;
+		if (pushWorksheetOpen(structure, token.name, token.selfClosing) !== "col") continue;
 		const min = Number(token.attrs.min);
 		const max = Number(token.attrs.max);
 		if (!Number.isInteger(min) || !Number.isInteger(max)) continue;
@@ -635,24 +646,24 @@ export function parseColumnProps(xml: string): ColumnProps[] {
 /**
  * Per-row height/visibility from `<row ht hidden>` attributes, keyed by 1-based row index (the
  * `r` attribute, or positional — one past the previous row — when absent, matching the row
- * assembler). Rows with neither property are absent; heights outside (0, 409.5] degrade.
+ * assembler). Rows with neither property are absent; heights outside (0, 409.5] degrade. Only rows
+ * the shared structure tracker admits count, for both the properties and the positional index
+ * (F11.38): a `<row>` in an extension or inside a cell supplies nothing and moves no later row.
+ *
+ * @example parseRowProperties('<worksheet><sheetData><row r="2" ht="20" customHeight="1"/></sheetData></worksheet>') // Map { 2 => { height: 20 } }
+ * @example parseRowProperties('<worksheet><sheetData><row r="2"><c r="A2"><extLst><ext><row r="2" ht="300"/></ext></extLst></c></row></sheetData></worksheet>') // Map {}
  */
 export function parseRowProperties(xml: string): Map<number, RowProps> {
 	const out = new Map<number, RowProps>();
+	const structure = createWorksheetStructure();
 	let lastRow = 0;
-	let inSheetData = false;
 	for (const token of tokenize(xml)) {
 		if (token.kind === "text") continue;
-		const name = localName(token.name);
 		if (token.kind === "close") {
-			if (name === "sheetData") inSheetData = false;
+			pushWorksheetClose(structure, token.name);
 			continue;
 		}
-		if (name === "sheetData") {
-			if (!token.selfClosing) inSheetData = true;
-			continue;
-		}
-		if (!inSheetData || name !== "row") continue;
+		if (pushWorksheetOpen(structure, token.name, token.selfClosing) !== "row") continue;
 		// Resolve the row index with the EXACT rule the row assembler uses (parseInt, positional
 		// fallback) — Number() disagrees with parseInt on tolerated-malformed values ("1e3",
 		// "3abc"), which would attach a height to a different row than its cells and cascade the

@@ -5,6 +5,7 @@ import {
 	closesOwner,
 	createRegionChild,
 	isCellContent,
+	pushCellChildOpen,
 	pushColsOpen,
 	pushNestedOpen,
 	pushRegionChildClose,
@@ -162,7 +163,10 @@ describe("worksheet structure helpers — opening transitions", () => {
 	it("allows known cell content and barriers only unknown non-self-closing content", () => {
 		const known = createWorksheetStructure();
 		known.rowChild = { name: "c", kind: "c", sameNameDepth: 0 };
-		for (const name of ["f", "v", "is", "t", "r", "rPr", "rPh", "phoneticPr"])
+		// The cell's first direct child is admitted (F11.26); known content inside it only nests.
+		expect(pushRowOpen(known, "f", false)).toBe("f");
+		expect(known.cellChild).toEqual({ name: "f", kind: "f", sameNameDepth: 0 });
+		for (const name of ["v", "is", "t", "r", "rPr", "rPh", "phoneticPr"])
 			expect(pushRowOpen(known, name, false)).toBeUndefined();
 		expect(known.cellBarrier).toBeUndefined();
 		expect(pushRowOpen(known, "ext", true)).toBeUndefined();
@@ -257,6 +261,96 @@ describe("worksheet structure helpers — opening transitions", () => {
 		expect(state.blockedRows).toBe(1);
 		expect(pushSheetDataOpen(state, "ext", false)).toBeUndefined();
 		expect(state.regionChild.sameNameDepth).toBe(1);
+	});
+});
+
+describe("worksheet structure helpers — a cell's direct child (F11.26)", () => {
+	const inCell = () => {
+		const state = createWorksheetStructure();
+		state.region = "sheetData";
+		state.regionChild = { name: "row", kind: "row", sameNameDepth: 0 };
+		state.rowChild = { name: "c", kind: "c", sameNameDepth: 0 };
+		return state;
+	};
+
+	it("admits f, v and is as direct children and records other known content as other", () => {
+		for (const name of ["f", "v", "is"] as const) {
+			const state = inCell();
+			expect(pushCellChildOpen(state, name, false)).toBe(name);
+			expect(state.cellChild).toEqual({ name, kind: name, sameNameDepth: 0 });
+		}
+		const shared = inCell();
+		expect(pushCellChildOpen(shared, "f", true)).toBe("f");
+		expect(shared.cellChild).toBeUndefined();
+		const misplaced = inCell();
+		expect(pushCellChildOpen(misplaced, "t", false)).toBeUndefined();
+		expect(misplaced.cellChild).toEqual({ name: "t", kind: "other", sameNameDepth: 0 });
+	});
+
+	it("admits only the first direct child, and none inside a barrier", () => {
+		const state = inCell();
+		expect(pushRowOpen(state, "v", false)).toBe("v");
+		expect(pushRowOpen(state, "f", false)).toBeUndefined();
+		expect(pushRowOpen(state, "v", false)).toBeUndefined();
+		expect(state.cellChild).toEqual({ name: "v", kind: "v", sameNameDepth: 1 });
+
+		const barred = inCell();
+		expect(pushRowOpen(barred, "extLst", false)).toBeUndefined();
+		expect(pushRowOpen(barred, "v", false)).toBeUndefined();
+		expect(barred.cellChild).toBeUndefined();
+	});
+
+	it("ends the direct child at its own close, never at a same-name close from a barrier", () => {
+		const state = inCell();
+		pushRowOpen(state, "is", false);
+		pushRowOpen(state, "t", false);
+		expect(pushRegionChildClose(state, "t")).toBeUndefined();
+		pushRowOpen(state, "ext", false);
+		// An <is> opened inside the barrier only nests, so its close does not end the cell's own.
+		expect(pushRowOpen(state, "is", false)).toBeUndefined();
+		expect(pushRegionChildClose(state, "is")).toBeUndefined();
+		expect([state.cellChild?.name, state.cellBarrier?.name]).toEqual(["is", "ext"]);
+		expect(pushRegionChildClose(state, "ext")).toBeUndefined();
+		expect(pushRegionChildClose(state, "is")).toBe("is");
+		expect(state.cellChild).toBeUndefined();
+
+		// The cell's own close recovers across an unclosed barrier, and clears it.
+		const unclosed = inCell();
+		pushRowOpen(unclosed, "f", false);
+		pushRowOpen(unclosed, "ext", false);
+		pushRowOpen(unclosed, "c", false);
+		expect(unclosed.blockedCells).toBe(1);
+		expect(pushRegionChildClose(unclosed, "f")).toBe("f");
+		expect([unclosed.cellChild, unclosed.cellBarrier, unclosed.blockedCells]).toEqual([
+			undefined,
+			undefined,
+			0,
+		]);
+
+		const nested = inCell();
+		pushRowOpen(nested, "v", false);
+		pushRowOpen(nested, "v", false);
+		expect(pushRegionChildClose(nested, "v")).toBeUndefined();
+		expect(pushRegionChildClose(nested, "v")).toBe("v");
+
+		const other = inCell();
+		pushRowOpen(other, "t", false);
+		expect(pushRegionChildClose(other, "t")).toBeUndefined();
+		expect(other.cellChild).toBeUndefined();
+	});
+
+	it("clears the direct child when the cell or row ends or recovers", () => {
+		for (const end of [
+			(state: WorksheetStructure) => pushRegionChildClose(state, "c"),
+			(state: WorksheetStructure) => pushRegionChildClose(state, "row"),
+			(state: WorksheetStructure) => pushRowOpen(state, "c", false),
+			(state: WorksheetStructure) => pushSheetDataOpen(state, "row", false),
+		]) {
+			const state = inCell();
+			pushRowOpen(state, "f", false);
+			end(state);
+			expect(state.cellChild).toBeUndefined();
+		}
 	});
 });
 
@@ -419,6 +513,7 @@ describe("worksheet structure helpers — direct-child reset", () => {
 			state.regionChild = { name: "row", kind: "row", sameNameDepth: 6 };
 			state.rowChild = { name: "c", kind: "c", sameNameDepth: 5 };
 			state.cellBarrier = { name: "ext", kind: "other", sameNameDepth: 4 };
+			state.cellChild = { name: "is", kind: "is", sameNameDepth: 1 };
 			state.blockedRows = 3;
 			state.blockedCells = 2;
 
@@ -434,9 +529,11 @@ describe("worksheet structure helpers — direct-child reset", () => {
 				regionChild: undefined,
 				rowChild: undefined,
 				cellBarrier: undefined,
+				cellChild: undefined,
 				blockedRows: 0,
 				blockedCells: 0,
 			});
+			expect(Object.keys(state)).toContain("cellChild");
 		}
 	});
 });

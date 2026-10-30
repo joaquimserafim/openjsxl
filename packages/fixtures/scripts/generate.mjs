@@ -207,6 +207,149 @@ const imagesEdgeDrawing =
 	`<oneCellAnchor>${from(0, 11)}<ext cx="50" cy="50"/>${pic(6, "F", "rId3")}</oneCellAnchor>` +
 	"</wsDr>";
 
+// A crafted workbook of plain worksheets, built part by part: each sheet's XML is used verbatim, and
+// the optional shared strings become xl/sharedStrings.xml.
+const MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const CT_SHEETML = "application/vnd.openxmlformats-officedocument.spreadsheetml";
+function worksheetPackage(sheets, sharedStrings) {
+	const sst = sharedStrings === undefined ? [] : [sharedStrings];
+	const overrides =
+		`<Override PartName="/xl/workbook.xml" ContentType="${CT_SHEETML}.sheet.main+xml"/>` +
+		sheets
+			.map(
+				(_, i) =>
+					`<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="${CT_SHEETML}.worksheet+xml"/>`,
+			)
+			.join("") +
+		sst
+			.map(
+				() =>
+					`<Override PartName="/xl/sharedStrings.xml" ContentType="${CT_SHEETML}.sharedStrings+xml"/>`,
+			)
+			.join("");
+	const rels =
+		sheets
+			.map(
+				(_, i) =>
+					`<Relationship Id="rId${i + 1}" Type="${R_NS}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`,
+			)
+			.join("") +
+		sst
+			.map(
+				() =>
+					`<Relationship Id="rId${sheets.length + 1}" Type="${R_NS}/sharedStrings" Target="sharedStrings.xml"/>`,
+			)
+			.join("");
+	return [
+		{
+			name: "[Content_Types].xml",
+			xml: `${XMLD}\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${overrides}</Types>`,
+		},
+		{
+			name: "_rels/.rels",
+			xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}"><Relationship Id="rId1" Type="${OFFICE_DOC}" Target="xl/workbook.xml"/></Relationships>`,
+		},
+		{
+			name: "xl/workbook.xml",
+			xml: `${XMLD}\n<workbook xmlns="${MAIN_NS}" xmlns:r="${R_NS}"><sheets>${sheets.map(({ name }, i) => `<sheet name="${name}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`,
+		},
+		{
+			name: "xl/_rels/workbook.xml.rels",
+			xml: `${XMLD}\n<Relationships xmlns="${RELS_NS}">${rels}</Relationships>`,
+		},
+		...sheets.map(({ xml }, i) => ({
+			name: `xl/worksheets/sheet${i + 1}.xml`,
+			xml: `${XMLD}\n${xml}`,
+		})),
+		...sst.map((strings) => ({
+			name: "xl/sharedStrings.xml",
+			xml: `${XMLD}\n<sst xmlns="${MAIN_NS}" count="${strings.length}" uniqueCount="${strings.length}">${strings.map((t) => `<si><t>${t}</t></si>`).join("")}</sst>`,
+		})),
+	];
+}
+
+// Extension content inside cells, rows and sheetPr (F11.26, F11.38): content wrapped in an element the
+// worksheet schema does not place there (`<extLst>`, `<ext>`, `<foreign:ext>`) is foreign content the
+// reader must not take for a cell value, formula, row or column, whatever its namespace. Each sheet pairs it with the real content it must not
+// change. `DefaultNs` repeats the geometry cases with the fake elements in the default namespace, and
+// `Prefixed` binds the SpreadsheetML namespace to a prefix.
+const FOREIGN = 'xmlns:foreign="urn:openjsxl:foreign"';
+const EXT = (content) => `<extLst><ext uri="urn:openjsxl:test">${content}</ext></extLst>`;
+const extensionValues =
+	`<worksheet xmlns="${MAIN_NS}" ${FOREIGN}><sheetData>` +
+	// A number with a foreign <v> after it, and one before it.
+	`<row r="1"><c r="A1"><v>7</v>${EXT("<foreign:v>99</foreign:v>")}</c></row>` +
+	`<row r="2"><c r="A2">${EXT("<foreign:v>99</foreign:v>")}<v>7</v></c></row>` +
+	// An inline string with a foreign one after it, and before it.
+	`<row r="3"><c r="A3" t="inlineStr"><is><t>good</t></is>${EXT("<foreign:is><foreign:t>bad</foreign:t></foreign:is>")}</c></row>` +
+	`<row r="4"><c r="A4" t="inlineStr">${EXT("<foreign:is><foreign:t>bad</foreign:t></foreign:is>")}<is><t>good</t></is></c></row>` +
+	// A foreign element between two rich-text runs.
+	`<row r="5"><c r="A5" t="inlineStr"><is><r><t>go</t></r><foreign:ext><foreign:t>bad</foreign:t></foreign:ext><r><t>od</t></r></is></c></row>` +
+	// Nested extensions, and self-closing ones.
+	`<row r="6"><c r="A6"><v>7</v><extLst><ext uri="urn:a"><ext uri="urn:b"><foreign:v>9</foreign:v></ext><foreign:v>8</foreign:v></ext></extLst></c></row>` +
+	`<row r="7"><c r="A7"><extLst/><v>7</v><extLst><ext uri="urn:openjsxl:test"/></extLst></c></row>` +
+	// Foreign elements whose close tags carry the canonical names is, t, v and c.
+	`<row r="8"><c r="A8" t="inlineStr"><is><t>good</t></is>${EXT('<foreign:is><foreign:t>bad</foreign:t></foreign:is><foreign:v>9</foreign:v><foreign:c r="A8"><foreign:v>1</foreign:v></foreign:c>')}</c></row>` +
+	// Rich text with phonetic runs, which stay excluded.
+	`<row r="9"><c r="A9" t="inlineStr"><is><r><rPr><b/></rPr><t>漢</t></r><r><t>字</t></r><rPh sb="0" eb="2"><t>かんじ</t></rPh><phoneticPr fontId="0"/></is></c></row>` +
+	// A shared-string index with a foreign digit after it.
+	`<row r="10"><c r="A10" t="s"><v>0</v>${EXT("<foreign:v>1</foreign:v>")}</c></row>` +
+	// An empty inline string.
+	`<row r="11"><c r="A11" t="inlineStr"><is/></c></row>` +
+	"</sheetData></worksheet>";
+const extensionFormulas =
+	`<worksheet xmlns="${MAIN_NS}" ${FOREIGN}><sheetData>` +
+	// A foreign formula on a cell with none, after a real one, and before a real one.
+	`<row r="1"><c r="A1">${EXT("<foreign:f>EVIL()</foreign:f>")}<v>5</v></c></row>` +
+	`<row r="2"><c r="A2"><f>1+1</f><v>2</v>${EXT("<foreign:f>HACK()</foreign:f>")}</c></row>` +
+	`<row r="3"><c r="A3">${EXT("<foreign:f>HACK()</foreign:f>")}<f>2+2</f><v>4</v></c></row>` +
+	// Foreign text inside a real formula.
+	`<row r="4"><c r="A4"><f>SUM(A1:A3)<foreign:ext>+99</foreign:ext></f><v>11</v></c></row>` +
+	// A shared formula whose dependent carries a foreign master for the same index.
+	`<row r="5"><c r="A5"><f t="shared" ref="A5:A6" si="0">A1*2</f><v>10</v></c></row>` +
+	`<row r="6"><c r="A6"><f t="shared" si="0"/><v>4</v>${EXT('<foreign:f t="shared" si="0">EVIL()</foreign:f>')}</c></row>` +
+	"</sheetData></worksheet>";
+const extensionGeometry = (fake) =>
+	`<worksheet xmlns="${MAIN_NS}" ${FOREIGN}><sheetPr>${EXT(`<${fake}col min="1" max="1" width="77" customWidth="1"/>`)}</sheetPr>` +
+	`<cols><col min="2" max="2" width="12" customWidth="1"/></cols><sheetData>` +
+	// A fake row inside a cell's extension, with its own height and visibility.
+	`<row r="1" ht="20" customHeight="1"><c r="A1"><v>1</v>${EXT(`<${fake}row r="1" ht="300" hidden="1" customHeight="1"/>`)}</c></row>` +
+	// r-less rows around a row extension that holds a fake row with a formula cell.
+	`<row><c><v>2</v></c>${EXT(`<${fake}row r="50" ht="99" customHeight="1"><${fake}c><${fake}f>X()</${fake}f><${fake}v>0</${fake}v></${fake}c></${fake}row>`)}</row>` +
+	"<row><c><f>1+2</f><v>3</v></c></row>" +
+	"</sheetData></worksheet>";
+const extensionPrefixed =
+	`<x:worksheet xmlns:x="${MAIN_NS}" ${FOREIGN}><x:sheetData><x:row r="1">` +
+	'<x:c r="A1"><x:v>7</x:v><x:extLst><x:ext uri="urn:openjsxl:test"><foreign:v>99</foreign:v><x:v>98</x:v></x:ext></x:extLst></x:c>' +
+	'<x:c r="B1"><x:f>1+1</x:f><x:v>2</x:v><x:extLst><x:ext uri="urn:openjsxl:test"><x:f>HACK()</x:f></x:ext></x:extLst></x:c>' +
+	"</x:row></x:sheetData></x:worksheet>";
+
+// Realistic Excel 2010 (x14) worksheet extensions after </sheetData> (F11.38 no-change case): a
+// data-bar rule with its <xm:sqref>, and a list validation and a sparkline group with <xm:f> and
+// <xm:sqref>. `Empty`
+// repeats them with a self-closing <sheetData/>.
+const X14 = 'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"';
+const XM = 'xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"';
+const x14Extensions = (sheet, cf, dv, spark) =>
+	"<extLst>" +
+	`<ext uri="{78C0D931-6437-407d-A8EE-F0AAD7539E65}" ${X14}><x14:conditionalFormattings><x14:conditionalFormatting ${XM}><x14:cfRule type="dataBar" id="{6A1E1B9C-0000-4000-8000-000000000001}"><x14:dataBar minLength="0" maxLength="100" gradient="0"><x14:cfvo type="autoMin"/><x14:cfvo type="autoMax"/><x14:negativeFillColor rgb="FFFF0000"/><x14:axisColor rgb="FF000000"/></x14:dataBar></x14:cfRule><xm:sqref>${cf}</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext>` +
+	`<ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" ${X14}><x14:dataValidations count="1" ${XM}><x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1"><x14:formula1><xm:f>Lists!$A$1:$A$2</xm:f></x14:formula1><xm:sqref>${dv}</xm:sqref></x14:dataValidation></x14:dataValidations></ext>` +
+	`<ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}" ${X14}><x14:sparklineGroups ${XM}><x14:sparklineGroup displayEmptyCellsAs="gap"><x14:colorSeries rgb="FF376092"/><x14:colorNegative rgb="FFD00000"/><x14:colorAxis rgb="FF000000"/><x14:colorMarkers rgb="FFD00000"/><x14:colorFirst rgb="FFD00000"/><x14:colorLast rgb="FFD00000"/><x14:colorHigh rgb="FFD00000"/><x14:colorLow rgb="FFD00000"/><x14:sparklines><x14:sparkline><xm:f>${sheet}!A1:C1</xm:f><xm:sqref>${spark}</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext>` +
+	"</extLst>";
+const X14_ROOT = `<worksheet xmlns="${MAIN_NS}" xmlns:r="${R_NS}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" mc:Ignorable="x14ac">`;
+const x14Data =
+	`${X14_ROOT}<dimension ref="A1:D3"/><sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>` +
+	'<cols><col min="1" max="1" width="14" customWidth="1"/></cols><sheetData>' +
+	'<row r="1" spans="1:4" ht="18" customHeight="1" x14ac:dyDescent="0.25"><c r="A1"><v>10</v></c><c r="B1"><v>20</v></c><c r="C1"><v>30</v></c><c r="D1"><f>SUM(A1:C1)</f><v>60</v></c></row>' +
+	'<row r="2" spans="1:4" x14ac:dyDescent="0.25"><c r="A2"><v>5</v></c><c r="B2" t="inlineStr"><is><t>Yes</t></is></c></row>' +
+	'<row r="3" spans="1:4" x14ac:dyDescent="0.25"><c r="A3"><v>15</v></c></row>' +
+	"</sheetData>" +
+	`<conditionalFormatting sqref="A1:A3"><cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF638EC6"/></dataBar><extLst><ext uri="{B025F937-C7B1-47D3-B67F-A62EFF666E3E}" ${X14}><x14:id>{6A1E1B9C-0000-4000-8000-000000000001}</x14:id></ext></extLst></cfRule></conditionalFormatting>` +
+	x14Extensions("Data", "A1:A3", "B2:B3", "E1") +
+	"</worksheet>";
+const x14Lists = `<worksheet xmlns="${MAIN_NS}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Yes</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>No</t></is></c></row></sheetData></worksheet>`;
+const x14Empty = `${X14_ROOT}<dimension ref="A1"/><sheetData/>${x14Extensions("Empty", "A1:A3", "B1:B3", "E1")}</worksheet>`;
+
 const crafted = [
 	// A macro-enabled workbook (.xlsm): the same XML workbook/worksheet as any .xlsx, but the package
 	// declares the macroEnabled main content type and carries an `xl/vbaProject.bin` part. openXlsx
@@ -319,6 +462,27 @@ const crafted = [
 			},
 			{ name: "xl/media/shared.png", data: SHARED_MEDIA },
 		],
+	},
+	{
+		file: "extension-content.xlsx",
+		parts: worksheetPackage(
+			[
+				{ name: "Values", xml: extensionValues },
+				{ name: "Formulas", xml: extensionFormulas },
+				{ name: "Geometry", xml: extensionGeometry("foreign:") },
+				{ name: "DefaultNs", xml: extensionGeometry("") },
+				{ name: "Prefixed", xml: extensionPrefixed },
+			],
+			["shared", "wrong"],
+		),
+	},
+	{
+		file: "x14-worksheet-extlst.xlsx",
+		parts: worksheetPackage([
+			{ name: "Data", xml: x14Data },
+			{ name: "Lists", xml: x14Lists },
+			{ name: "Empty", xml: x14Empty },
+		]),
 	},
 ];
 

@@ -1,6 +1,11 @@
 export type WorksheetRegion = "cols" | "sheetData";
-export type WorksheetOpen = "col" | "row" | "c";
-export type WorksheetClose = WorksheetRegion | "row" | "c";
+/**
+ * The direct children of an admitted cell that carry its content: the formula, the cell value and the
+ * inline string (F11.26, F11.38). Only these, outside any extension barrier, open a channel.
+ */
+export type CellChild = "f" | "v" | "is";
+export type WorksheetOpen = "col" | "row" | "c" | CellChild;
+export type WorksheetClose = WorksheetRegion | "row" | "c" | CellChild;
 
 export interface RegionChild {
 	name: string;
@@ -22,6 +27,11 @@ export interface WorksheetStructure {
 	regionChild: RegionChild | undefined;
 	rowChild: RegionChild | undefined;
 	cellBarrier: RegionChild | undefined;
+	/**
+	 * The admitted cell's open direct child, when it is cell content (F11.26): `f`, `v` and `is` carry
+	 * the cell's formula and value; any other known content name is tracked as `"other"`.
+	 */
+	cellChild: RegionChild | undefined;
 	blockedRows: number;
 	blockedCells: number;
 }
@@ -46,7 +56,7 @@ export function isSheetRoot(name: string): name is SheetRootName {
 /**
  * Create one fixed-size owner record.
  * Example: input `("row", "row")` returns `{ name: "row", kind: "row", sameNameDepth: 0 }`;
- * `"col"`, `"c"`, and `"other"` kinds produce the same shape with that supplied kind.
+ * `"col"`, `"c"`, `"f"`, `"v"`, `"is"` and `"other"` kinds produce the same shape with that kind.
  */
 export function createRegionChild(name: string, kind: RegionChild["kind"]): RegionChild {
 	return { name, sameNameDepth: 0, kind };
@@ -126,8 +136,13 @@ export function pushColsOpen(
  * Examples:
  * - no child + `<c/>` returns `"c"`; `<c>` also records the active cell;
  * - no child + `<ext>` returns nothing and opens a row-child barrier; `<ext/>` opens none;
- * - active cell + known `<v>`, `<f>`, or rich-text content returns nothing and stays in the cell;
- * - active cell + unknown `<ext>` returns nothing and opens a cell barrier;
+ * - active cell, no barrier and no open direct child + `<f>`, `<v>` or `<is>` returns `"f"`, `"v"`
+ *   or `"is"` and, when not self-closing, records it as the cell's direct child (F11.26);
+ * - the same with other known content (`<t>`, `<r>`, `<rPh>`, …) returns nothing and records an
+ *   `"other"` direct child;
+ * - known content inside the open direct child returns nothing and only tracks same-name nesting,
+ *   so a nested `<v>` or `<f>` is not the cell's own;
+ * - active cell + unknown `<ext>` returns nothing and opens a cell barrier, at any depth;
  * - active cell + unknown `<ext/>` returns nothing and opens no barrier;
  * - active cell + another `<c>` returns `"c"` and recovers the missing prior `</c>`; the new
  *   non-self-closing cell replaces the owner, while `<c/>` leaves no active cell;
@@ -159,17 +174,39 @@ export function pushRowOpen(
 		// A new cell recovers a missing prior </c>, matching the row assembler's existing contract.
 		state.rowChild = selfClosing ? undefined : createRegionChild(name, "c");
 		state.cellBarrier = undefined;
+		state.cellChild = undefined;
 		return "c";
 	}
 	if (owner.kind === "other") {
 		if (name === "c" && !selfClosing) state.blockedCells++;
 		pushNestedOpen(owner, name, selfClosing);
-	} else if (state.cellBarrier !== undefined)
+	} else if (state.cellBarrier !== undefined) {
 		pushNestedOpen(state.cellBarrier, name, selfClosing);
-	else if (!selfClosing && !isCellContent(name))
-		state.cellBarrier = createRegionChild(name, "other");
+		// Count the direct child's name inside the extension too, so that only the direct child's own
+		// close, never a same-name element's from inside the extension, can end it there.
+		if (state.cellChild !== undefined) pushNestedOpen(state.cellChild, name, selfClosing);
+	} else if (!isCellContent(name)) {
+		if (!selfClosing) state.cellBarrier = createRegionChild(name, "other");
+	} else if (state.cellChild !== undefined) pushNestedOpen(state.cellChild, name, selfClosing);
+	else return pushCellChildOpen(state, name, selfClosing);
 	// Known elements beneath an active cell are its value/formula/rich-text content.
 	return undefined;
+}
+
+/**
+ * Process known cell content that opens directly beneath an admitted cell, outside any barrier.
+ * Examples: `<v>` returns `"v"` and records the cell's direct child until `</v>`; `<f/>` (a shared
+ * formula's dependent) returns `"f"` and records nothing; `<t>` (not a direct child the schema
+ * allows) returns nothing and records an `"other"` direct child.
+ */
+export function pushCellChildOpen(
+	state: WorksheetStructure,
+	name: string,
+	selfClosing: boolean,
+): CellChild | undefined {
+	const kind = name === "f" || name === "v" || name === "is" ? name : undefined;
+	if (!selfClosing) state.cellChild = createRegionChild(name, kind ?? "other");
+	return kind;
 }
 
 /**
@@ -213,6 +250,7 @@ export function pushSheetDataOpen(
 			state.regionChild = selfClosing ? undefined : createRegionChild(name, "row");
 			state.rowChild = undefined;
 			state.cellBarrier = undefined;
+			state.cellChild = undefined;
 			state.blockedRows = 0;
 			state.blockedCells = 0;
 			return "row";
@@ -235,7 +273,13 @@ export function pushSheetDataOpen(
  *   unclosed lower extension barrier;
  * - closing the canonical cell returns `"c"` and clears cell scope, also across such a barrier;
  * - a close for a direct, row-child, or cell extension owner returns nothing; only its matching
- *   outer close clears that barrier, while inner same-name closes only reduce its depth.
+ *   outer close clears that barrier, while inner same-name closes only reduce its depth;
+ * - with no barrier open, closing the cell's direct child returns `"f"`, `"v"` or `"is"` for those
+ *   (nothing for other content) and clears it; a nested same-name close only reduces its depth;
+ * - inside a cell barrier, a close of the direct child's name ends the direct child, and the barrier
+ *   with it, only when it is not a same-name element's from inside the barrier: an extension's
+ *   `</x:v>` cannot close the cell's value, while the cell's own `</v>` recovers across an unclosed
+ *   extension, as `</c>` and `</row>` do (F11.26).
  */
 export function pushRegionChildClose(
 	state: WorksheetStructure,
@@ -258,6 +302,7 @@ export function pushRegionChildClose(
 		state.regionChild = undefined;
 		state.rowChild = undefined;
 		state.cellBarrier = undefined;
+		state.cellChild = undefined;
 		state.blockedRows = 0;
 		state.blockedCells = 0;
 		state.rootSameNameDepth = 0;
@@ -270,6 +315,7 @@ export function pushRegionChildClose(
 	if (owner.kind === "row" && state.rowChild?.kind === "c" && name === "c") {
 		state.rowChild = undefined;
 		state.cellBarrier = undefined;
+		state.cellChild = undefined;
 		state.blockedRows = 0;
 		state.blockedCells = 0;
 		state.rootSameNameDepth = 0;
@@ -293,7 +339,8 @@ export function pushRegionChildClose(
 		}
 		return undefined;
 	}
-	if (state.cellBarrier !== undefined) {
+	const child = state.cellChild;
+	if (state.cellBarrier !== undefined && (child === undefined || name !== child.name)) {
 		if (closesOwner(state.cellBarrier, name)) {
 			state.cellBarrier = undefined;
 			state.blockedRows = 0;
@@ -302,14 +349,23 @@ export function pushRegionChildClose(
 		}
 		return undefined;
 	}
+	if (child !== undefined && closesOwner(child, name)) {
+		state.cellChild = undefined;
+		state.cellBarrier = undefined;
+		state.blockedRows = 0;
+		state.blockedCells = 0;
+		return child.kind === "f" || child.kind === "v" || child.kind === "is"
+			? child.kind
+			: undefined;
+	}
 	return undefined;
 }
 
 /**
  * Release the current worksheet direct child and all nested structural state.
- * Example: an active `sheetData > row > c > ext` becomes no direct child, region, row, cell, or
- * barrier, with both blocked counters and both same-name depths reset to zero. The worksheet phase
- * itself is preserved. The function returns no value.
+ * Example: an active `sheetData > row > c > ext` becomes no direct child, region, row, cell, cell
+ * child, or barrier, with both blocked counters and both same-name depths reset to zero. The
+ * worksheet phase itself is preserved. The function returns no value.
  */
 export function clearDirectChild(state: WorksheetStructure): void {
 	state.directChild = undefined;
@@ -318,6 +374,7 @@ export function clearDirectChild(state: WorksheetStructure): void {
 	state.regionChild = undefined;
 	state.rowChild = undefined;
 	state.cellBarrier = undefined;
+	state.cellChild = undefined;
 	state.blockedRows = 0;
 	state.blockedCells = 0;
 	state.rootSameNameDepth = 0;

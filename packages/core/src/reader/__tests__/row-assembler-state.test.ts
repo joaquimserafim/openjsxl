@@ -155,23 +155,81 @@ describe("row assembler state — token transitions", () => {
 		pushOpen(state, open("sheetData"));
 		pushOpen(state, open("row", { r: "1" }));
 		pushOpen(state, open("c", { r: "A1" }));
-		openValueChannel(state.cell, "is", false);
+		openValueChannel(state.cell, "is", "is", false);
 		pushText(state, "ignored");
 		expect(state.cell.value).toBe("");
-		openValueChannel(state.cell, "v", false);
+		openValueChannel(state.cell, "v", "v", false);
 		pushText(state, "12");
 		expect(state.cell).toMatchObject({ hasValue: true, inValue: true, value: "12" });
 
 		Object.assign(state.cell, createCellAssembly(), { open: true, inline: true });
-		openValueChannel(state.cell, "is", false);
-		openValueChannel(state.cell, "t", false);
+		openValueChannel(state.cell, "is", "is", false);
+		openValueChannel(state.cell, undefined, "t", false);
 		pushText(state, "漢字");
-		openValueChannel(state.cell, "rPh", false);
+		openValueChannel(state.cell, undefined, "rPh", false);
 		pushText(state, "かんじ");
 		expect(state.cell.inlineText).toBe("漢字");
 		pushClose(state, "rPh");
 		pushClose(state, "t");
 		expect(state.cell).toMatchObject({ value: "漢字", inlineText: "", textDepth: 0 });
+	});
+
+	it("opens a channel only for the cell's own direct <v> or <is> (F11.26)", () => {
+		const number = createCellAssembly();
+		openValueChannel(number, undefined, "v", false);
+		expect(number).toMatchObject({ hasValue: false, inValue: false });
+		openValueChannel(number, "is", "is", false);
+		expect(number).toMatchObject({ hasValue: false, inInline: false });
+		openValueChannel(number, "v", "v", false);
+		expect(number).toMatchObject({ hasValue: true, inValue: true });
+
+		const inline = Object.assign(createCellAssembly(), { inline: true });
+		openValueChannel(inline, undefined, "is", false);
+		openValueChannel(inline, "v", "v", false);
+		expect(inline).toMatchObject({ hasValue: false, inInline: false, inValue: false });
+		openValueChannel(inline, "is", "is", false);
+		openValueChannel(inline, "f", "f", false);
+		openValueChannel(inline, undefined, "t", false);
+		expect(inline).toMatchObject({ hasValue: true, inInline: true, textDepth: 1 });
+	});
+
+	it("ignores text, opens and closes inside a cell's extension (F11.26)", () => {
+		const rows = [
+			open("worksheet"),
+			open("sheetData"),
+			open("row", { r: "1" }),
+			open("c", { r: "A1", t: "inlineStr" }),
+			open("is"),
+			open("t"),
+			text("go"),
+			open("x:ext"),
+			text("bad"),
+			close("x:t"),
+			close("x:is"),
+			open("x:is"),
+			close("x:ext"),
+			text("od"),
+			close("t"),
+			close("is"),
+			close("c"),
+			open("c", { r: "B1" }),
+			open("v"),
+			text("7"),
+			close("v"),
+			open("extLst"),
+			open("x:v"),
+			text("99"),
+			close("x:v"),
+			close("extLst"),
+			close("c"),
+			close("row"),
+		];
+		const state = createRowAssemblyState({ sharedStrings: [] });
+		const out = rows.flatMap((token) => pushToken(state, token));
+		expect(out.flatMap((row) => row.cells.map((c) => [c.ref, c.value]))).toEqual([
+			["A1", "good"],
+			["B1", 7],
+		]);
 	});
 
 	it("gates rows on sheetData and captures prefixed column styles first", () => {

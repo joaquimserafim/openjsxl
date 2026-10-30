@@ -55,6 +55,26 @@ so they are safe to commit and diff.
   returns and as the same content in a worksheet, bridges them, and pins that `Chart1` gives no
   cells. Built part by part by the generator, not exported from Excel.
 
+- **`extension-content.xlsx`** — a crafted workbook of extension content beside real worksheet content
+  (F11.26, F11.38). `Values` puts foreign `<v>`, `<is>`/`<t>` and close tags named `is`, `t`, `v` and
+  `c` in cell extensions (before and after the real value, nested and self-closing), a foreign element
+  between rich-text runs, and a foreign digit after a shared-string index, beside rich text with
+  phonetic runs and an empty inline string. `Formulas` puts foreign `<f>`s before and after real ones,
+  a foreign `<ext>` inside a real one, and a foreign shared master for a dependent's index. `Geometry`
+  puts a fake `<row>` in a cell extension, a fake row with a formula cell in a row extension between
+  r-less rows, and a fake `<col>` in `sheetPr`; `DefaultNs` repeats it with the fakes in the
+  SpreadsheetML namespace, and `Prefixed` binds that namespace to `x:`.
+  `reader/__tests__/extension-content.test.ts` reads the real values, formulas and geometry only,
+  buffered, streamed and bridged. openpyxl 3.1.5 reads the same for every sheet but `DefaultNs`, where
+  it takes the namespaced fake row and column for real ones. Built part by part by the generator.
+
+- **`x14-worksheet-extlst.xlsx`** — a crafted workbook with realistic Excel 2010 worksheet extensions
+  after `</sheetData>` (F11.38 no-change case): a data-bar rule with its `<xm:sqref>`, and a list
+  validation and a sparkline group with `<xm:f>` and `<xm:sqref>`, on a `Data` sheet with a formula, a row height and a column
+  width, and again on `Empty`, whose `<sheetData/>` self-closes. `reader/__tests__/x14-extlst.test.ts`
+  pins that every accessor reads as before; openpyxl 3.1.5 reads the same cells and geometry. Built part
+  by part by the generator, not exported from Excel.
+
 - **`ods-edge.ods`** — a hand-crafted OpenDocument spreadsheet (F7.1) covering the shapes a real
   producer (LibreOffice) emits that odfpy won't: the **repeat bomb** (row 1 padded with an empty
   cell repeated to column 16 384, and an empty row repeated ~1e6 times to the 2^20 grid edge — a

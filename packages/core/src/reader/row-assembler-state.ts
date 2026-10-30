@@ -14,6 +14,7 @@ import {
 	isWorksheetRow,
 	pushWorksheetClose,
 	pushWorksheetOpen,
+	type WorksheetOpen,
 	type WorksheetStructure,
 } from "./worksheet-structure";
 
@@ -176,10 +177,26 @@ export function startCell(
 	if (selfClosing) finishCell(state);
 }
 
-/** Open the selected value channel. Example: inline `<is>` marks a present inline value. */
-export function openValueChannel(cell: CellAssembly, name: string, selfClosing: boolean): void {
+/**
+ * Open the selected value channel for one opening inside an open cell, outside any extension barrier
+ * (F11.26). `opened` is what the structure tracker admitted: only the cell's own direct `<v>` or `<is>`
+ * opens the value or inline channel; `<t>`, `<rPh>` and `<phoneticPr>` count by name inside that
+ * `<is>`.
+ *
+ * @example openValueChannel(inlineCell, "is", "is", false) // hasValue, inInline
+ * @example openValueChannel(inlineCell, undefined, "t", false) // textDepth + 1 inside <is>
+ * @example openValueChannel(inlineCell, undefined, "rPh", false) // phoneticDepth + 1 inside <is>
+ * @example openValueChannel(numberCell, "v", "v", false) // hasValue, inValue
+ * @example openValueChannel(numberCell, undefined, "v", false) // no change: a nested <v> is not the cell's
+ */
+export function openValueChannel(
+	cell: CellAssembly,
+	opened: WorksheetOpen | undefined,
+	name: string,
+	selfClosing: boolean,
+): void {
 	if (cell.inline) {
-		if (name === "is") {
+		if (opened === "is") {
 			cell.hasValue = true;
 			if (!selfClosing) cell.inInline = true;
 		} else if (name === "t") {
@@ -187,13 +204,23 @@ export function openValueChannel(cell: CellAssembly, name: string, selfClosing: 
 		} else if (name === "rPh" || name === "phoneticPr") {
 			if (cell.inInline && !selfClosing) cell.phoneticDepth++;
 		}
-	} else if (name === "v") {
+	} else if (opened === "v") {
 		cell.hasValue = true;
 		if (!selfClosing) cell.inValue = true;
 	}
 }
 
-/** Handle an opening token. Example: canonical `<sheetData>` opens row scope and emits `[]`. */
+/**
+ * Handle an opening token, after the structure tracker records it.
+ * Examples:
+ * - an admitted `<col>` adds its column style and emits `[]`;
+ * - anything outside canonical `<sheetData>` emits `[]`;
+ * - an admitted `<row>` emits the row it recovers, if one was open;
+ * - anything outside an admitted row emits `[]`;
+ * - an admitted `<c>` starts the cell and emits `[]`;
+ * - anything else in an open cell, outside an extension, may open a value channel (F11.26) and
+ *   emits `[]`; inside an extension it changes nothing.
+ */
 export function pushOpen(
 	state: RowAssemblyState,
 	token: Extract<XmlToken, { kind: "open" }>,
@@ -214,14 +241,21 @@ export function pushOpen(
 		startCell(state, token.attrs, token.selfClosing);
 		return [];
 	}
-	if (state.cell.open) openValueChannel(state.cell, name, token.selfClosing);
+	// Extension content inside a cell never opens a channel (F11.26).
+	if (state.cell.open && state.structure.cellBarrier === undefined) {
+		openValueChannel(state.cell, opened, name, token.selfClosing);
+	}
 	return [];
 }
 
-/** Append text only inside the active channel. Input numeric `<v>` + `"12"`; output value `"12"`. */
+/**
+ * Append text only inside the active channel, never inside an extension barrier (F11.26).
+ * Examples: numeric `<v>` + `"12"` gives value `"12"`; inline `<is><t>` + `"a"` gives inline text
+ * `"a"`; text with no open cell, inside an extension, or outside the active channel is ignored.
+ */
 export function pushText(state: RowAssemblyState, value: string): void {
 	const { cell } = state;
-	if (!cell.open) return;
+	if (!cell.open || state.structure.cellBarrier !== undefined) return;
 	const collect = cell.inline
 		? cell.inInline && cell.textDepth > 0 && cell.phoneticDepth === 0
 		: cell.inValue;
@@ -231,9 +265,19 @@ export function pushText(state: RowAssemblyState, value: string): void {
 	cell.hasValue = true;
 }
 
-/** Handle a closing token. Example: `</row>` emits the completed row exactly once. */
+/**
+ * Handle a closing token, after the structure tracker records it.
+ * Examples:
+ * - `</sheetData>` or the canonical `</row>` emits the open row, if any, exactly once;
+ * - the canonical `</c>` finishes the cell and emits `[]`;
+ * - the cell's own `</v>` or `</is>` closes its channel, also across an unclosed extension;
+ * - `</t>`, `</rPh>` or `</phoneticPr>` in the open cell, outside an extension, closes that run;
+ * - anything else, and any close inside an extension, emits `[]` and ends no channel, so an
+ *   extension's `</v>` or `</is>` cannot close the cell's own (F11.26).
+ */
 export function pushClose(state: RowAssemblyState, nameWithPrefix: string): Row[] {
 	const name = localName(nameWithPrefix);
+	const inBarrier = state.structure.cellBarrier !== undefined;
 	const ended = pushWorksheetClose(state.structure, nameWithPrefix);
 	if (ended === "sheetData") {
 		const row = finishRow(state);
@@ -252,8 +296,9 @@ export function pushClose(state: RowAssemblyState, nameWithPrefix: string): Row[
 
 	const { cell } = state;
 	if (!cell.open) return [];
-	if (name === "v") cell.inValue = false;
-	else if (name === "is") cell.inInline = false;
+	if (ended === "v") cell.inValue = false;
+	else if (ended === "is") cell.inInline = false;
+	else if (inBarrier) return [];
 	else if (name === "t") {
 		if (cell.textDepth > 0) {
 			cell.textDepth--;

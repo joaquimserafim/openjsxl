@@ -12,6 +12,7 @@ import {
 } from "./worksheet-structure-helpers";
 
 export type {
+	CellChild,
 	WorksheetClose,
 	WorksheetOpen,
 	WorksheetRegion,
@@ -34,6 +35,7 @@ export function createWorksheetStructure(): WorksheetStructure {
 		regionChild: undefined,
 		rowChild: undefined,
 		cellBarrier: undefined,
+		cellChild: undefined,
 		blockedRows: 0,
 		blockedCells: 0,
 	};
@@ -70,7 +72,8 @@ export function isWorksheetRow(state: WorksheetStructure): boolean {
  *   direct-child position; self-closing direct children return nothing and own nothing;
  * - below canonical `<cols>`, only a direct `<col>` returns `"col"`;
  * - below canonical `<sheetData>`, only an admitted direct `<row>` or row child `<c>` returns
- *   `"row"` or `"c"`;
+ *   `"row"` or `"c"`, and only a direct `<f>`, `<v>` or `<is>` child of that cell, outside any
+ *   barrier, returns `"f"`, `"v"` or `"is"` (F11.26);
  * - a non-self-closing fake `<row>`/`<c>` below a barrier returns nothing and increments its
  *   blocked counter; its self-closing form returns nothing without incrementing;
  * - `<sheetData><ext><row>` and every opening under a noncanonical direct child return nothing;
@@ -104,6 +107,7 @@ export function pushWorksheetOpen(
 		state.regionChild = undefined;
 		state.rowChild = undefined;
 		state.cellBarrier = undefined;
+		state.cellChild = undefined;
 		state.blockedRows = 0;
 		state.blockedCells = 0;
 		return undefined;
@@ -122,6 +126,8 @@ export function pushWorksheetOpen(
  * - before-root/closed state or an unrelated close returns nothing and changes no owner;
  * - prefixed names such as `</x:row>` have the same result as their local name;
  * - `</c>` / `</row>` for admitted owners returns `"c"` / `"row"` and releases that scope;
+ * - `</f>`, `</v>` or `</is>` that ends the admitted cell's direct child, outside any barrier,
+ *   returns `"f"`, `"v"` or `"is"`;
  * - an extension/barrier close returns nothing, clearing it only at its matching outer close;
  * - a well-formed blocked fake `</row>` / `</c>` returns nothing and decrements its blocked
  *   counter, so it cannot close the admitted owner;
