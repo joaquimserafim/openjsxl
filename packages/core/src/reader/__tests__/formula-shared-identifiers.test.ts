@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateWorkbook } from "../../formula/eval";
 import { workbookToInput } from "../../writer/from-workbook";
-import type { SheetInput } from "../../writer/types";
+import type { CellInput, SheetInput } from "../../writer/types";
 import { writeXlsx } from "../../writer/workbook";
 import { writeZip } from "../../writer/zip";
 import { openZip } from "../../zip";
@@ -10,14 +10,21 @@ import { openXlsx, type Workbook } from "../workbook";
 // F11.9 reopening: reference-shaped text inside a name or a sheet qualifier must survive shared
 // expansion. These are complete XLSX packages with real defined names, supporting sheets, and table
 // metadata. Only the formula grouping is patched because the writer emits ordinary formulas.
-async function sharedWorkbook(master: string, supportingSheets: readonly SheetInput[] = []) {
+async function sharedWorkbook(
+	master: string,
+	supportingSheets: readonly SheetInput[] = [],
+	[first, second]: readonly [readonly CellInput[], readonly CellInput[]] = [
+		[1, null],
+		[2, null],
+	],
+) {
 	const bytes = await writeXlsx({
 		sheets: [
 			{
 				name: "S",
 				rows: [
-					[1, null, { formula: master, value: 8 }],
-					[2, null, { formula: "0", value: 9 }],
+					[...first, { formula: master, value: 8 }],
+					[...second, { formula: "0", value: 9 }],
 				],
 			},
 			...supportingSheets,
@@ -110,20 +117,49 @@ describe("shared formulas preserve identifiers and sheet qualifiers (F11.9)", ()
 		await assertFormulaRoundTrip(book, "SUM(A1:#REF!)", "SUM(A2:#REF!)");
 	});
 
+	// Unquoted, `a1:b2!A1` is a range, as `parseFormula` reads it (F11.36, pinned below).
 	it.each([
-		["1", "2"],
-		["a1", "b2"],
+		["1:2", "1", "2"],
+		["'a1:b2'", "a1", "b2"],
+		["A1B:XFE1", "A1B", "XFE1"],
 	])(
-		"preserves the 3-D sheet span %s:%s while shifting only its cell reference",
-		async (from, to) => {
-			const master = `SUM(${from}:${to}!A1)+A1`;
-			const dependent = `SUM(${from}:${to}!A2)+A2`;
+		"preserves the 3-D sheet span %s while shifting only its cell reference",
+		async (span, from, to) => {
+			const master = `SUM(${span}!A1)+A1`;
+			const dependent = `SUM(${span}!A2)+A2`;
 			const book = await sharedWorkbook(master, [
 				{ name: from, rows: [[3], [4]] },
 				{ name: to, rows: [[5], [6]] },
 			]);
 			// The evaluator deliberately does not support 3-D references; this pins reader/bridge fidelity.
 			await assertFormulaRoundTrip(book, master, dependent);
+		},
+	);
+
+	// F11.36: the unquoted `A1:` is a cell, as when the sheet is quoted. `A2:S!B2` is one range on S,
+	// the sheet its qualified end names (`rangeSheet`, F11.65): 10 + 12 = 22. Reading `A1:S!` as a
+	// 3-D span kept A1:B2, 33.
+	it.each(["S", "'S'"])(
+		"shifts the cell endpoint of a range ending in %s!B1 through expansion, evaluation and the bridge",
+		async (sheet) => {
+			const master = `SUM(A1:${sheet}!B1)`;
+			const dependent = `SUM(A2:${sheet}!B2)`;
+			const book = await sharedWorkbook(
+				master,
+				[],
+				[
+					[11, null],
+					[10, 12],
+				],
+			);
+			const result = await evaluateWorkbook(book);
+			expect(result.get("S", "C1")).toBe(11);
+			expect(result.get("S", "C2")).toBe(22);
+
+			const rewritten = await assertFormulaRoundTrip(book, master, dependent);
+			const evaluatedAgain = await evaluateWorkbook(rewritten);
+			expect(evaluatedAgain.get("S", "C1")).toBe(11);
+			expect(evaluatedAgain.get("S", "C2")).toBe(22);
 		},
 	);
 });

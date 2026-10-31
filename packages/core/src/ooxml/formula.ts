@@ -21,7 +21,10 @@ import { columnToIndex, indexToColumn, MAX_COL, MAX_ROW } from "./a1";
 // unbalanced `[` is ambiguous text: from that point on the formula is copied unchanged (never a
 // partial rewrite, never a throw). A reference must have complete identifier boundaries (`2e5` is a
 // number, `ñA1` and `a1é` are names) and its row is 1-based (`A0`, `0:0`, `A01` are names).
-// Sheet qualifiers are opaque too: in `1:2!A1` only the final cell reference may shift.
+// Sheet qualifiers are opaque too: in `1:2!A1` only the final cell reference may shift. F11.36: an
+// unquoted run that opens with an in-grid cell is a range, not a qualifier, as `parseFormula` and
+// 1.0.0 read `A1:Sheet2!B2`, so the tokenizer reads all of it. After a `]` (`[1]a1:b2!C3`, a
+// workbook index) the run stays that workbook's span.
 // Translation is a single left-to-right pass — linear in the text.
 
 /** Excel's hard ceiling on formula text length (characters). The writer refuses anything longer. */
@@ -84,6 +87,30 @@ export function sheetQualifierRunEnd(formula: string, start: number): number {
 		end++;
 	}
 	return end;
+}
+
+// An unquoted qualifier run that opens with a cell and a `:` is a range, not a 3-D span:
+// `parseFormula` and 1.0.0 read `A1:Sheet2!B2` as the cell `A1` and `Sheet2!B2`. The cell must be
+// complete (a reference boundary before it, so not `?A1`), in the cell grammar and in the grid, and
+// the run must not follow a `]`: `[1]a1:b2!C3` is a workbook's span. The search for the `:` stops at
+// the run's end, so each run costs its own length.
+/**
+ * Whether the unquoted qualifier run [start, end) opens with an in-grid cell and a `:`.
+ *
+ * @example opensWithCell("A1:Sheet2!B2", 0, 9) // true (the cell `A1`)
+ * @example opensWithCell("[1]a1:b2!C3", 3, 8) // false (after `]`: a workbook's span)
+ * @example opensWithCell("?A1:S!B2", 1, 5) // false (`?A1` has no reference boundary)
+ * @example opensWithCell("Sheet2!B2", 0, 6) // false (no `:`: the run is one sheet name)
+ * @example opensWithCell("XFE1:Sheet3!A1", 0, 11) // false (past column XFD: a sheet name)
+ * @internal Exported for direct unit tests only — not part of the public API.
+ */
+export function opensWithCell(formula: string, start: number, end: number): boolean {
+	const before = start > 0 ? formula.charCodeAt(start - 1) : -1;
+	if (before === 0x5d || !refCanStartAfter(before)) return false; // `]`, or the tail of a name
+	let colon = start;
+	while (colon < end && formula[colon] !== ":") colon++;
+	// shiftRef is undefined exactly when the text is not an in-grid cell.
+	return colon < end && shiftRef(formula.slice(start, colon), 0, 0) !== undefined;
 }
 
 // Shift one already-matched reference by the delta, honoring `$` pins. Returns the rewritten ref in
@@ -163,12 +190,18 @@ export function bracketSpanEnd(formula: string, open: number): number {
  * case-insensitively and rewritten in canonical uppercase. A shift off the grid becomes `#REF!`.
  * An unbalanced `[` leaves the remainder of the text unchanged. A zero offset (the master cell
  * itself) returns the text unchanged.
+ *
+ * @example translateFormula("A1", 0, 0) // "A1" (the master cell itself)
+ * @example translateFormula("A1+T[x", 1, 0) // "A2+T[x" (from an unbalanced `[` on, unchanged)
+ * @example translateFormula("A1:Sheet2!B2", 1, 0) // "A2:Sheet2!B3" (a cell, then a qualified cell)
+ * @example translateFormula("[1]a1:b2!C3", 1, 0) // "[1]a1:b2!C4" (a workbook's 3-D span stays)
  */
 export function translateFormula(formula: string, dRow: number, dCol: number): string {
 	if (dRow === 0 && dCol === 0) return formula;
 	let out = "";
 	let pos = 0;
 	let qualifierRunEnd = 0;
+	let rangeRunEnd = 0;
 	while (pos < formula.length) {
 		if (formula[pos] === "[") {
 			const end = bracketSpanEnd(formula, pos);
@@ -182,10 +215,15 @@ export function translateFormula(formula: string, dRow: number, dCol: number): s
 		if (pos >= qualifierRunEnd && formula[pos - 1] !== "!") {
 			qualifierRunEnd = sheetQualifierRunEnd(formula, pos);
 			if (qualifierRunEnd > pos && formula[qualifierRunEnd] === "!") {
-				// Includes both names in a 3-D span (`a1:b2!`, `1:2!`), never their following refs.
-				out += formula.slice(pos, qualifierRunEnd + 1);
-				pos = qualifierRunEnd + 1;
-				continue;
+				if (!opensWithCell(formula, pos, qualifierRunEnd)) {
+					// Copies both names of a 3-D span (`Sheet1:Sheet3!`, `1:2!`), never their refs.
+					out += formula.slice(pos, qualifierRunEnd + 1);
+					pos = qualifierRunEnd + 1;
+					continue;
+				}
+				// A run that opens with a cell is a range (`A1:Sheet2!B2`): the tokenizer reads all
+				// of it, without rescanning, since `qualifierRunEnd` still marks the run's end.
+				rangeRunEnd = qualifierRunEnd;
 			}
 		}
 		TOKEN.lastIndex = pos;
@@ -205,9 +243,12 @@ export function translateFormula(formula: string, dRow: number, dCol: number): s
 			out += m[0];
 		} else if (colRange !== undefined) {
 			// `A:A[` cannot start a structured reference, but keep the same guard shape as cells.
-			out += next === "!" ? colRange : shiftColRange(colRange, dCol);
+			// Inside a run read as a range, a pair is two names: `A1:Jan:Dec:S!B2` (F11.36).
+			out += next === "!" || start < rangeRunEnd ? colRange : shiftColRange(colRange, dCol);
 		} else if (rowRange !== undefined) {
-			out += shiftRowRange(rowRange, dRow);
+			// Inside a run read as a range, a pair before another `:` is two numbers
+			// (`A1:1:2:S!B2`); one before `!` shifts, as the tokenizer reads `A1:1:2!B1` (F11.36).
+			out += next !== "!" && start < rangeRunEnd ? rowRange : shiftRowRange(rowRange, dRow);
 		} else if (ref !== undefined) {
 			// A ref-shaped token is NOT a cell when it's a function name (`LOG10(`), an unquoted sheet
 			// name (`ABC1!…`), or a table name (`A1[Col]`); those stay verbatim. Everything else shifts.

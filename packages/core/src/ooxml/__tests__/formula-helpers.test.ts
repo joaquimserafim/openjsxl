@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_COL, MAX_ROW } from "../a1";
 import {
 	bracketSpanEnd,
+	opensWithCell,
 	refCanStartAfter,
 	sheetQualifierRunEnd,
 	shiftColRange,
@@ -119,6 +120,52 @@ describe("sheetQualifierRunEnd — a single scan of a possible unquoted qualifie
 		}
 		expect(sheetQualifierRunEnd("A1#Sheet:B2#Sheet!A1", 0)).toBe(17);
 		expect(sheetQualifierRunEnd("A1#REF!A1", 0)).toBe(6);
+	});
+});
+
+describe("opensWithCell — a qualifier run that is a range (F11.36)", () => {
+	it("is true for an in-grid cell and a `:`, pinned or not, in any case", () => {
+		for (const cell of ["A1", "a1", "$A1", "A$1", "$A$1", "XFD1048576", "$XFD$1048576"]) {
+			const run = `${cell}:Sheet2`;
+			expect(opensWithCell(`${run}!B2`, 0, run.length), cell).toBe(true);
+		}
+	});
+
+	it("starts at the given offset", () => {
+		expect(opensWithCell("SUM(A1:S!B2)", 4, 8)).toBe(true);
+		expect(opensWithCell("+A1:S!B2", 1, 5)).toBe(true);
+		expect(opensWithCell("A1:B2:S!C3", 3, 7)).toBe(true);
+	});
+
+	it("is false when the run opens with a sheet name", () => {
+		for (const run of [
+			"Sheet1:Sheet3",
+			"Jan:Dec",
+			"1:2",
+			"A:B",
+			"A1B:S",
+			"XFE1:S",
+			"A1048577:S",
+		]) {
+			expect(opensWithCell(`${run}!A1`, 0, run.length), run).toBe(false);
+		}
+		for (const run of ["A0:S", "A01:S", "a1é:S", "A1#:S", "@A1:S", "MyName:A1:S", ":A1:S"]) {
+			expect(opensWithCell(`${run}!A1`, 0, run.length), run).toBe(false);
+		}
+		expect(opensWithCell("A1!B2", 0, 2)).toBe(false); // no `:`: the cell-shaped sheet `A1`
+	});
+
+	it("is false after a `]` or a name character", () => {
+		expect(opensWithCell("[1]a1:b2!C3", 3, 8)).toBe(false);
+		expect(opensWithCell("T[x]A1:S!B2", 4, 8)).toBe(false);
+		expect(opensWithCell("]A1:S!B2", 1, 5)).toBe(false);
+		expect(opensWithCell("?A1:S!B2", 1, 5)).toBe(false);
+	});
+
+	it("looks for the `:` only inside the run", () => {
+		expect(opensWithCell("A1:B2", 0, 3)).toBe(true);
+		expect(opensWithCell("A1:B2", 0, 2)).toBe(false);
+		expect(opensWithCell("A1:B2", 0, 1)).toBe(false);
 	});
 });
 

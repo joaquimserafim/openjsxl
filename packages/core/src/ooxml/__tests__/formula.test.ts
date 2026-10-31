@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MAX_FORMULA_LEN, translateFormula } from "../formula";
+import { parseFormula } from "../../formula/parser";
+import { MAX_FORMULA_LEN, shiftRef, translateFormula } from "../formula";
+import { bestDoublingRatio, LINEAR_RATIO_LIMIT } from "./complexity";
 
 // F5.4 — the shared-formula translator. The vectors below are openpyxl's own Translator output
 // (openpyxl.formula.translate.Translator) for a master formula shifted by (Δrow, Δcol); matching
@@ -108,9 +110,10 @@ const IDENTIFIER_VECTORS: [string, number, number, string][] = [
 	["SUM(a1é[A1])+A1", 1, 1, "SUM(a1é[A1])+B2"],
 	["a1é!a1", 1, 1, "a1é!B2"],
 	["SUM(1:2!A1)", 1, 1, "SUM(1:2!B2)"],
-	["SUM(a1:b2!C3)", 1, 1, "SUM(a1:b2!D4)"],
-	["SUM(A1:B2!C3)", 1, 1, "SUM(A1:B2!D4)"],
-	["SUM(a1:Sheet2!C3)", 1, 1, "SUM(a1:Sheet2!D4)"],
+	// F11.36: an unquoted `a1:` before `b2!` is a cell, as `parseFormula` reads it.
+	["SUM(a1:b2!C3)", 1, 1, "SUM(B2:b2!D4)"],
+	["SUM(A1:B2!C3)", 1, 1, "SUM(B2:B2!D4)"],
+	["SUM(a1:Sheet2!C3)", 1, 1, "SUM(B2:Sheet2!D4)"],
 	["SUM(Sheet1:b2!C3)", 1, 1, "SUM(Sheet1:b2!D4)"],
 	["S!A1:S!B2", 1, 1, "S!B2:S!C3"],
 	["'S'!A1:S!B2", 1, 1, "'S'!B2:S!C3"],
@@ -152,6 +155,160 @@ const IDENTIFIER_VECTORS: [string, number, number, string][] = [
 	["a1é+SUM(1:2!A1)", 0, 0, "a1é+SUM(1:2!A1)"],
 	["a1é+SUM(1:2!A1)", -1, -1, "a1é+SUM(1:2!#REF!)"],
 ];
+
+// F11.36 (the owner's 2026-10-31 ruling adopts the lead's acceptance): an unquoted run that opens with
+// a complete in-grid cell, not after a `]`, is a range, so the tokenizer reads all of it and shifts
+// exactly the cells `parseFormula` reads (1.0.0's text, in canonical uppercase). Divergence from
+// openpyxl 3.1.5, which leaves the first endpoint unshifted even when the sheet is quoted
+// (`A1:'Sheet 2'!B2` gives `A1:'Sheet 2'!C3`).
+const QUALIFIED_ENDPOINT_VECTORS: [string, number, number, string][] = [
+	["A1:Sheet2!B2", 1, 0, "A2:Sheet2!B3"],
+	["SUM(A1:S!B1)", 1, 0, "SUM(A2:S!B2)"],
+	["$A1:Sheet2!B2", 1, 1, "$A2:Sheet2!C3"],
+	["$A1:S!$B$2", 1, 1, "$A2:S!$B$2"],
+	["A$1:Sheet2!B2", 1, 1, "B$1:Sheet2!C3"],
+	["A1:A2:S!B1", 1, 0, "A2:A3:S!B2"],
+	["B2:S!C3", -1, -1, "A1:S!B2"],
+	["a1:s!b2", 1, 1, "B2:s!C3"],
+	["A1:B2:Sheet3!C3", 1, 1, "B2:C3:Sheet3!D4"],
+	["A1:A1:A1:S!B2", 1, 1, "B2:B2:B2:S!C3"],
+	["A1:Sheet1:Sheet3!C3", 1, 1, "B2:Sheet1:Sheet3!D4"], // a cell, then a 3-D span
+	["A1:B:C!D1", 1, 1, "B2:B:C!E2"],
+	["b2:Sheet2:c3:S!B2", 1, 1, "C3:Sheet2:D4:S!C3"],
+	["A1:Sheet2!B2:C3", 1, 1, "B2:Sheet2!C3:D4"],
+	["IF(A1>0,A1:S!B2,0)", 1, 1, "IF(B2>0,B2:S!C3,0)"],
+	// Inside the run, a column or row pair before another `:` is two names or numbers.
+	["A1:B:Jan:Dec!D1", 1, 1, "B2:B:Jan:Dec!E2"],
+	["A1:JAN:DEC:S!B2", 1, 1, "B2:JAN:DEC:S!C3"],
+	["A1:Jan:Dec:S!B2", 1, 0, "A2:Jan:Dec:S!B3"],
+	["$A$1:JAN:DEC:S!B2", 1, 1, "$A$1:JAN:DEC:S!C3"],
+	["A1:xfd:$A$1:S!B2", 1, 1, "B2:xfd:$A$1:S!C3"],
+	["A1:1:2:S!B2", 1, 1, "B2:1:2:S!C3"],
+];
+
+// The same runs where parseFormula reads no text: the ordinary tokenizer's output.
+const QUALIFIED_ENDPOINT_EDGES: [string, number, number, string][] = [
+	["A1:1:2!C3", 1, 1, "B2:2:3!D4"], // the tokenizer shifts the row range, as 1.0.0 does
+	["XFD1048576:S!A1", 1, 1, "#REF!:S!B2"], // an in-grid cell shifted off the grid
+	["XFD1048576:S!A1", 1, 0, "#REF!:S!A2"],
+	["A1:S!B1", -1, 0, "#REF!:S!#REF!"],
+	["SUM(A1:#SPILL!)", 0, 1, "SUM(B1:#SPILL!)"], // `#SPILL!` is no qualifier stop: A1 is a cell
+	["A1:!B2", 1, 1, "B2:!C3"], // tolerant: a `:` with no sheet name, as in 1.0.0
+	["A1:1:2:3!B1", 1, 1, "B2:1:2:3!C2"], // inner numbers stay, as in A1:1:2:S!B2
+	["A1:S!B2+SUM(A:B)+1:2", 0, 1, "B1:S!C2+SUM(B:C)+1:2"], // past the run, pairs shift again
+	["A1:S!B2+SUM(1:2)", 1, 0, "A2:S!B3+SUM(2:3)"],
+];
+
+// Every other run stays as at HEAD (`e656163`), including F11.9's spans (`49cf712`).
+const QUALIFIER_VECTORS: [string, number, number, string][] = [
+	["Sheet1:Sheet3!A1", 1, 1, "Sheet1:Sheet3!B2"],
+	["A1B:Sheet3!A1", 1, 1, "A1B:Sheet3!B2"],
+	["XFE1:Sheet3!A1", 1, 1, "XFE1:Sheet3!B2"], // past column XFD
+	["A1048577:S!A1", 1, 1, "A1048577:S!B2"], // past the last row
+	["A0:S!A1", 1, 1, "A0:S!B2"], // row 0 is a name
+	["R1C1:S!A1", 1, 1, "R1C1:S!B2"],
+	["JAN:DEC!B2", 1, 1, "JAN:DEC!C3"], // column-shaped names in a span stay
+	['"A1:S!B2"&A1', 1, 1, '"A1:S!B2"&B2'], // a string literal
+	["Jan:Dec!B2", 1, 1, "Jan:Dec!C3"],
+	["1:2!A1", 1, 1, "1:2!B2"],
+	["A:B!a1", 1, 1, "A:B!B2"],
+	["$A$1:Sheet2!B2", 1, 1, "$A$1:Sheet2!C3"], // a cell either way: its pins keep it in place
+	["[1]a1:b2!C3", 1, 1, "[1]a1:b2!D4"], // after a workbook index: that workbook's span
+	["[1]A1:Sheet2!B2", 1, 1, "[1]A1:Sheet2!C3"],
+	["[1]A1:S!B2", 1, 1, "[1]A1:S!C3"],
+	["[1]A1:A1:A1!C3", 1, 1, "[1]A1:A1:A1!D4"],
+	["T[x]A1:S!B2", 1, 1, "T[x]A1:S!C3"],
+	["]A1:S!B2", 1, 1, "]A1:S!C3"], // any `]` before the run keeps it
+	["?A1:S!B2", 1, 1, "?A1:S!C3"], // `?A1` has no reference boundary, as in `?A1+1`
+	["?A1:1:2!B1", 1, 1, "?A1:1:2!C2"],
+	["S!A1:Sheet1:Sheet3!B2", 1, 1, "S!B2:Sheet1:Sheet3!C3"],
+	["S!A1:1:2!B2", 1, 1, "S!B2:1:2!C3"],
+	["MyName:Sheet1:S!B2", 1, 1, "MyName:Sheet1:S!C3"], // a name, then a 3-D span
+];
+
+// Known edges, kept as at HEAD: these runs open with no cell, so a cell inside them does not shift,
+// though `parseFormula` and 1.0.0 read one.
+const KNOWN_EDGE_VECTORS: [string, number, number, string][] = [
+	["S!A1:A2:T!B1", 1, 1, "S!B2:A2:T!C2"], // the run opens with the range's `:`
+	["T[x]:A1:S!B2", 1, 1, "T[x]:A1:S!C3"],
+	["@A1:S!B1", 1, 1, "@A1:S!C2"],
+	["MyName:A1:S!B2", 1, 1, "MyName:A1:S!C3"],
+	["SUM(A:A:#SPILL!)", 0, 1, "SUM(A:A:#SPILL!)"], // F11.48
+];
+
+// The master's parse with every cell reference shifted, to compare with the dependent's parse.
+function shiftedParse(node: unknown, dRow: number, dCol: number): unknown {
+	if (Array.isArray(node)) return node.map((child) => shiftedParse(child, dRow, dCol));
+	if (typeof node !== "object" || node === null) return node;
+	const cell = "type" in node && node.type === "cell";
+	return Object.fromEntries(
+		Object.entries(node).map(([key, value]: [string, unknown]) => [
+			key,
+			cell && key === "ref" && typeof value === "string"
+				? shiftRef(value, dRow, dCol)
+				: shiftedParse(value, dRow, dCol),
+		]),
+	);
+}
+
+describe("translateFormula — a range whose second endpoint is sheet-qualified (F11.36)", () => {
+	it.each([...QUALIFIED_ENDPOINT_VECTORS, ...QUALIFIED_ENDPOINT_EDGES])(
+		"reads %s as a range at offset (%i, %i)",
+		(formula, dRow, dCol, expected) => {
+			expect(translateFormula(formula, dRow, dCol)).toBe(expected);
+		},
+	);
+
+	it.each(QUALIFIER_VECTORS)(
+		"keeps the qualifier of %s at offset (%i, %i)",
+		(formula, dRow, dCol, expected) => {
+			expect(translateFormula(formula, dRow, dCol)).toBe(expected);
+		},
+	);
+
+	it.each(KNOWN_EDGE_VECTORS)(
+		"keeps the known edge %s as at HEAD at offset (%i, %i)",
+		(formula, dRow, dCol, expected) => {
+			expect(translateFormula(formula, dRow, dCol)).toBe(expected);
+		},
+	);
+
+	it.each(QUALIFIED_ENDPOINT_VECTORS)(
+		"shifts exactly the cells parseFormula reads in %s",
+		(formula, dRow, dCol) => {
+			const dependent = translateFormula(formula, dRow, dCol);
+			expect(parseFormula(dependent)).toEqual(
+				shiftedParse(parseFormula(formula), dRow, dCol),
+			);
+		},
+	);
+
+	it.each(["Sheet2", "S", "b2", "Jan", "a1é", "A1B"])(
+		"shifts a range ending in %s! the same way whether the sheet is quoted or not",
+		(sheet) => {
+			expect(translateFormula(`SUM(A1:${sheet}!B2)`, 1, 1)).toBe(`SUM(B2:${sheet}!C3)`);
+			expect(translateFormula(`SUM(A1:'${sheet}'!B2)`, 1, 1)).toBe(`SUM(B2:'${sheet}'!C3)`);
+		},
+	);
+
+	// A cell-led run is tokenized once, never rescanned, and each run's search for a `:` stops at its
+	// end: the third shape's `:` lies past every run.
+	it.each([
+		["leading cells in one run", (n: number) => `${"A1:".repeat(n)}S!B2`],
+		["cell-led runs", (n: number) => "A1:S!B2+".repeat(n)],
+		["sheet runs before a final `:`", (n: number) => `${"S!A1+".repeat(n)}A1:B2`],
+	])(
+		"is linear in the number of %s",
+		(_name, shape) => {
+			const ratio = bestDoublingRatio((n) => {
+				const formula = shape(n);
+				return () => translateFormula(formula, 1, 1);
+			}, 22_000); // 66K characters or more at the smaller size
+			expect(ratio).toBeLessThan(LINEAR_RATIO_LIMIT);
+		},
+		60_000,
+	);
+});
 
 describe("translateFormula — matches openpyxl's Translator", () => {
 	it("reproduces every reference vector", () => {
