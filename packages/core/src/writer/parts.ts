@@ -90,12 +90,16 @@ export function requireWorkbookObject(workbook: unknown): void {
 }
 
 /**
- * The caller's `options.date1904`, read once, or `undefined` when there are no options or no own flag.
- * An options object whose prototype supplies the flag, such as a class getter, is rejected rather than
- * read as absent, which would lose the 1904 date system (F11.34). Shared by both writers.
+ * The date system the caller's `options.date1904` selects, read once: `true` only for the flag `true`,
+ * as in 1.0.0, `false` for any other value, and `undefined` when there are no options, no own flag, or
+ * a `null` or `undefined` one, so the workbook's own flag decides (F11.99). An options object whose
+ * prototype supplies the flag, such as a class getter, is rejected rather than read as absent, which
+ * would lose the 1904 date system (F11.34). Shared by both writers.
  *
  * @example optionsDate1904(undefined) // undefined
+ * @example optionsDate1904({ date1904: null }) // undefined
  * @example optionsDate1904({ date1904: true }) // true
+ * @example optionsDate1904({ date1904: "false" }) // false
  * @example optionsDate1904(new (class { get date1904() { return true; } })()) // throws XlsxError invalid-input: options: "date1904" comes from a prototype; set it as an own property
  */
 export function optionsDate1904(options: WriteOptions | null | undefined): boolean | undefined {
@@ -103,7 +107,10 @@ export function optionsDate1904(options: WriteOptions | null | undefined): boole
 	if (typeof options === "object" || typeof options === "function") {
 		rejectPrototypeFields(options, OPTION_FIELDS, "options");
 	}
-	return ownValue(options, "date1904");
+	// A JavaScript caller can pass any value; truthiness would read "false" or 1 as 1904.
+	const flag: unknown = ownValue(options, "date1904");
+	if (flag == null) return undefined;
+	return flag === true;
 }
 
 /**

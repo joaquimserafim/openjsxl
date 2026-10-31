@@ -279,7 +279,8 @@ export interface WriteOptions {
 	/**
 	 * Use the 1904 date epoch (legacy Mac) instead of the default 1900 system. When set (even
 	 * `false`) it overrides {@link WorkbookInput.date1904}; when absent, the input's own flag — what
-	 * the bridge carries from `Workbook.date1904` — decides, defaulting to 1900.
+	 * the bridge carries from `Workbook.date1904` — decides, defaulting to 1900. Only `true` selects
+	 * 1904, as in 1.0.0, and `null` counts as absent.
 	 */
 	readonly date1904?: boolean;
 }
