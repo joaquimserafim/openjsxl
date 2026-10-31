@@ -12,9 +12,10 @@ import { inflateRaw, inflateRawStream } from "./inflate";
 // local header's size fields), so the data-descriptor layout (general-purpose bit 3) that
 // Excel and LibreOffice emit reads correctly.
 //
-// ZIP64 metadata and multi-disk archives are rejected while opening. Encryption is not explicitly
-// detected: AES method 99 is unsupported when read, while traditional encryption may surface as
-// ciphertext (stored entries) or as an inflate/corrupt error (deflated entries).
+// ZIP64 metadata and multi-disk archives are rejected while opening, except a ZIP64 end record that
+// only repeats the classic one (F11.35). Encryption is not explicitly detected: AES method 99 is
+// unsupported when read, while traditional encryption may surface as ciphertext (stored entries) or
+// as an inflate/corrupt error (deflated entries).
 //
 // Entry policy: directory placeholders (`name/`) are skipped; duplicate part names are refused
 // (OPC forbids them, and an ambiguous package is a zip-confusion vector). No two entries may share
@@ -58,10 +59,14 @@ export interface ZipArchive {
 
 const SIG_EOCD = 0x06054b50;
 const SIG_ZIP64_LOCATOR = 0x07064b50;
+const SIG_ZIP64_EOCD = 0x06064b50;
 const SIG_CENTRAL = 0x02014b50;
 const SIG_LOCAL = 0x04034b50;
 const EOCD_MIN_SIZE = 22;
 const ZIP64_LOCATOR_SIZE = 20;
+// A ZIP64 end record with no extensible data: 56 bytes, whose own size field counts the 44 after it.
+const ZIP64_EOCD_SIZE = 56;
+const ZIP64_EOCD_REMAINING = 44;
 const MAX_COMMENT = 0xffff;
 const ZIP64_SENTINEL = 0xffffffff;
 
@@ -210,6 +215,65 @@ export function* storedSlices(payload: Uint8Array): Generator<Uint8Array> {
 	}
 }
 
+/** The classic end-of-central-directory values that a redundant ZIP64 end record repeats. */
+export interface ClassicEnd {
+	readonly entriesThisDisk: number;
+	readonly entryCount: number;
+	readonly cdSize: number;
+	readonly cdOffset: number;
+}
+
+/**
+ * A u64 field as a number when its high word is zero, else -1, which matches no count, size or
+ * offset: a value past 2^32 - 1 is real ZIP64.
+ *
+ * @example smallU64(view, at) // 44 for the bytes 2c 00 00 00 00 00 00 00
+ * @example smallU64(view, at) // -1 for the bytes 2c 00 00 00 01 00 00 00 (the high word is set)
+ */
+export function smallU64(view: DataView, at: number): number {
+	return view.getUint32(at + 4, true) === 0 ? view.getUint32(at, true) : -1;
+}
+
+/**
+ * Whether the ZIP64 end record and locator between the central directory, which ends at `cdEnd`, and
+ * the classic end record at `eocd` only repeat the classic values (F11.35). bsdtar's `zip:zip64`, JDK
+ * zipfs with `forceZIP64End` and Info-ZIP reading stdin write them. The record must fill the gap
+ * exactly, checked before any field is read; it has no extensible data, sits on disk 0 and holds
+ * `classic`'s counts, size and offset. The locator must name disk 0, the record's offset and at most
+ * one disk. Every u64 needs a zero high word. Anything else is real ZIP64 (APPNOTE 4.3.14, 4.3.15).
+ * The version fields are not checked. The caller has found the locator's signature at `eocd - 20`,
+ * with `0 <= cdEnd <= eocd` and the classic end record inside the view.
+ *
+ * @example isRedundantZip64End(view, cdEnd, cdEnd + 76, classic) // true: bsdtar's zip:zip64 trailer
+ * @example isRedundantZip64End(view, cdEnd, cdEnd + 77, classic) // false: the gap is not one record and a locator
+ * @example isRedundantZip64End(view, cdEnd, eocd, { ...classic, entryCount: classic.entryCount + 1 }) // false: the record disagrees
+ * @example isRedundantZip64End(twoDiskView, cdEnd, eocd, classic) // false: the locator counts two disks
+ */
+export function isRedundantZip64End(
+	view: DataView,
+	cdEnd: number,
+	eocd: number,
+	classic: ClassicEnd,
+): boolean {
+	const locator = eocd - ZIP64_LOCATOR_SIZE;
+	if (locator - cdEnd !== ZIP64_EOCD_SIZE) return false;
+	const recordAgrees =
+		view.getUint32(cdEnd, true) === SIG_ZIP64_EOCD &&
+		smallU64(view, cdEnd + 4) === ZIP64_EOCD_REMAINING &&
+		view.getUint32(cdEnd + 16, true) === 0 &&
+		view.getUint32(cdEnd + 20, true) === 0 &&
+		smallU64(view, cdEnd + 24) === classic.entriesThisDisk &&
+		smallU64(view, cdEnd + 32) === classic.entryCount &&
+		smallU64(view, cdEnd + 40) === classic.cdSize &&
+		smallU64(view, cdEnd + 48) === classic.cdOffset;
+	if (!recordAgrees) return false;
+	return (
+		view.getUint32(locator + 4, true) === 0 &&
+		smallU64(view, locator + 8) === cdEnd &&
+		view.getUint32(locator + 16, true) <= 1
+	);
+}
+
 // The EOCD record sits at the very end, after an optional ≤64 KB comment. Scan backwards
 // for its signature and confirm the comment length lands exactly on the end of file (so a
 // signature appearing inside compressed data can't be mistaken for it).
@@ -224,16 +288,18 @@ function findEocd(view: DataView, len: number): number {
 }
 
 /**
- * Open a classic ZIP archive (no ZIP64, one disk) and check its layout: every central-directory record,
- * duplicate names, and entries that share bytes or reach the central directory. Parts are read on
- * demand through the returned archive. The options are the zip-bomb guards of `ReadOptions`:
- * `maxPartBytes` and `maxCompressionRatio` cap each part, and `maxTotalBytes` caps every part read
- * through this archive together (F11.53); `verifyChecksums` checks each fully read part's CRC-32. A
- * read fails typed `missing-part`, `part-too-large`, `corrupt-zip` or `unsupported`.
+ * Open a classic ZIP archive (no ZIP64 beyond a redundant end record, one disk) and check its
+ * layout: every central-directory record, duplicate names, and entries that share bytes or reach
+ * the central directory. Parts are read on demand through the returned archive. The options are the
+ * zip-bomb guards of `ReadOptions`: `maxPartBytes` and `maxCompressionRatio` cap each part, and
+ * `maxTotalBytes` caps every part read through this archive together (F11.53); `verifyChecksums`
+ * checks each fully read part's CRC-32. A read fails typed `missing-part`, `part-too-large`,
+ * `corrupt-zip` or `unsupported`.
  *
  * @example openZip(await writeZip([{ name: "a.xml", data }])).has("a.xml") // true
  * @example openZip(bytes, { maxTotalBytes: Number.NaN }) // throws XlsxError "invalid-input", before any parsing
  * @example openZip(new Uint8Array(4)) // throws XlsxError "not-a-zip" (no end-of-central-directory record)
+ * @example openZip(bsdtarZip64).has("xl/workbook.xml") // true: its ZIP64 end record only repeats the classic one
  * @example openZip(zip64) // throws XlsxError "unsupported" (ZIP64, or a multi-disk archive)
  * @example openZip(truncated) // throws XlsxError "corrupt-zip" (a bad, oversized or mismatched central directory)
  * @example openZip(withDuplicateName) // throws XlsxError "corrupt-zip" (two entries with one name)
@@ -278,7 +344,10 @@ export function openZip(
 		cdSize === ZIP64_SENTINEL ||
 		cdOffset === ZIP64_SENTINEL
 	) {
-		throw new XlsxError("unsupported", "ZIP64 archives are not supported");
+		throw new XlsxError(
+			"unsupported",
+			"ZIP64 archives are not supported: the end-of-central-directory record holds a ZIP64 sentinel",
+		);
 	}
 	if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesThisDisk !== entryCount) {
 		throw new XlsxError("unsupported", "multi-disk ZIP archives are not supported");
@@ -290,13 +359,28 @@ export function openZip(
 		);
 	}
 	const cdEnd = cdOffset + cdSize;
-	if (cdEnd !== eocd) {
+	// A ZIP64 locator before the end record is checked wherever it lies, even inside the central
+	// directory: a reader that follows it would see another directory (F11.35). A ZIP64 end record
+	// that only repeats the classic values is redundant and read as classic; one that differs in any
+	// checked field is real ZIP64.
+	const zip64Locator =
+		eocd >= ZIP64_LOCATOR_SIZE &&
+		view.getUint32(eocd - ZIP64_LOCATOR_SIZE, true) === SIG_ZIP64_LOCATOR;
+	if (zip64Locator) {
 		if (
-			eocd >= ZIP64_LOCATOR_SIZE &&
-			view.getUint32(eocd - ZIP64_LOCATOR_SIZE, true) === SIG_ZIP64_LOCATOR
+			!isRedundantZip64End(view, cdEnd, eocd, {
+				entriesThisDisk,
+				entryCount,
+				cdSize,
+				cdOffset,
+			})
 		) {
-			throw new XlsxError("unsupported", "ZIP64 archives are not supported");
+			throw new XlsxError(
+				"unsupported",
+				"ZIP64 archives are not supported: the ZIP64 end record does not repeat the end-of-central-directory record",
+			);
 		}
+	} else if (cdEnd !== eocd) {
 		throw new XlsxError(
 			"corrupt-zip",
 			"corrupt zip: undeclared data between the central directory and end-of-central-directory record",
@@ -327,7 +411,10 @@ export function openZip(
 			uncompressedSize === ZIP64_SENTINEL ||
 			localHeaderOffset === ZIP64_SENTINEL
 		) {
-			throw new XlsxError("unsupported", "ZIP64 archives are not supported");
+			throw new XlsxError(
+				"unsupported",
+				`ZIP64 archives are not supported: the central directory entry at offset ${pos} holds a ZIP64 sentinel`,
+			);
 		}
 		if (diskStart !== 0) {
 			throw new XlsxError("unsupported", "multi-disk ZIP archives are not supported");

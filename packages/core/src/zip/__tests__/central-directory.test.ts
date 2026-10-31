@@ -291,6 +291,13 @@ function appendFakeEmptyEocdAsComment(bytes: Uint8Array): Uint8Array {
 	return copy;
 }
 
+// The details of two ZIP64 rejection sites (F11.35), so a pin cannot pass through another site; the
+// third, a ZIP64 end record that differs from the classic one, is pinned in zip64-end.test.ts.
+const ZIP64_AT_EOCD =
+	/^ZIP64 archives are not supported: the end-of-central-directory record holds a ZIP64 sentinel$/;
+const ZIP64_AT_CENTRAL =
+	/^ZIP64 archives are not supported: the central directory entry at offset \d+ holds a ZIP64 sentinel$/;
+
 // Assert that archive opening fails through the public typed-error contract, with no manual catch.
 async function expectOpenZipError(
 	bytes: Uint8Array,
@@ -503,7 +510,7 @@ describe("openZip — deflate and real-world layouts", () => {
 
 	it("rejects ZIP64 archives with an explicit error", async () => {
 		const zip = await buildZip({ name: "p.xml", content: "x", centralLocalOffset: 0xffffffff });
-		await expectOpenZipError(zip, "unsupported", /ZIP64/);
+		await expectOpenZipError(zip, "unsupported", ZIP64_AT_CENTRAL);
 	});
 
 	it("rejects a part whose declared size exceeds maxPartBytes", async () => {
@@ -525,7 +532,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		["total entries", 10],
 	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		await expectOpenZipError(patchEocdU16(valid, offset, 0xffff), "unsupported", /ZIP64/);
+		await expectOpenZipError(patchEocdU16(valid, offset, 0xffff), "unsupported", ZIP64_AT_EOCD);
 	});
 
 	it.each([
@@ -533,7 +540,11 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		["central-directory offset", 16],
 	])("rejects a ZIP64 sentinel in the EOCD %s field", async (_field, offset) => {
 		const valid = await buildZip({ name: "p.xml", content: "x", method: 0 });
-		await expectOpenZipError(patchEocdU32(valid, offset, 0xffffffff), "unsupported", /ZIP64/);
+		await expectOpenZipError(
+			patchEocdU32(valid, offset, 0xffffffff),
+			"unsupported",
+			ZIP64_AT_EOCD,
+		);
 	});
 
 	// Any disk metadata means the package is split across files. Returning its local subset would
@@ -636,7 +647,7 @@ describe("openZip — central-directory validation (F11.2)", () => {
 		expect(view.getUint32(zip64Eocd + 36, true)).toBe(0);
 		expect(view.getUint32(eocd - 20, true)).toBe(0x07064b50);
 		expect(view.getUint16(eocd + 10, true)).toBe(0xffff);
-		await expectOpenZipError(zip64, "unsupported", /ZIP64/);
+		await expectOpenZipError(zip64, "unsupported", ZIP64_AT_EOCD);
 	});
 });
 

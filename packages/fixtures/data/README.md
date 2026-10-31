@@ -492,6 +492,36 @@ git-ignored [`../local/`](../local) directory and are never committed.
   JS
   ```
 
+- **`bsdtar-zip64-end.xlsx`** — written by **bsdtar 3.5.3 (libarchive 3.7.4)**, as shipped with macOS,
+  with `--options zip:zip64` (F11.35). Its parts are `minimal.xlsx`'s, so it reads the same: one
+  `Sheet1` with `A1 = 1` and `B1 = TRUE`. bsdtar puts a 56-byte ZIP64 end record and a locator between
+  the central directory and the classic end record. The record only repeats the classic counts, size
+  and offset, the locator counts one disk, and no classic field holds a ZIP64 sentinel. Entries are
+  deflated with data descriptors and carry `ux` (uid 0, gid 0) and `UT` (1980-01-01) extra fields.
+  F11.2 had made `openZip` reject the file; 1.0.0 read it. `zip/__tests__/zip64-end.test.ts` reads
+  it verbatim through `openZip`, `openXlsx`, `streamSheetRows` and `detectSpreadsheetFormat`.
+
+  `bsdtar -tf`, `unzip -t`, Python's `zipfile.testzip()` and **openpyxl 3.1.5** (warnings as errors)
+  read it. Two builds were byte-identical. SHA-256:
+  `94ab20e04c8597f8a9617ede2e15c056a229b219fdb1feb46f08a9b8c599e5c1`.
+
+  Reproduce it on macOS from this directory; it overwrites the committed file. The mtree spec fixes
+  the order, owner and time:
+
+  ```sh
+  D=$(mktemp -d) && unzip -q minimal.xlsx -d "$D/src"
+  cat > "$D/spec.mtree" <<'EOF'
+  #mtree
+  [Content_Types].xml type=file mode=0644 uid=0 gid=0 time=315532800.0 contents=src/[Content_Types].xml
+  _rels/.rels type=file mode=0644 uid=0 gid=0 time=315532800.0 contents=src/_rels/.rels
+  xl/workbook.xml type=file mode=0644 uid=0 gid=0 time=315532800.0 contents=src/xl/workbook.xml
+  xl/_rels/workbook.xml.rels type=file mode=0644 uid=0 gid=0 time=315532800.0 contents=src/xl/_rels/workbook.xml.rels
+  xl/worksheets/sheet1.xml type=file mode=0644 uid=0 gid=0 time=315532800.0 contents=src/xl/worksheets/sheet1.xml
+  EOF
+  (cd "$D" && TZ=UTC bsdtar --format zip --options zip:zip64 -cf out.xlsx @spec.mtree)
+  cp "$D/out.xlsx" bsdtar-zip64-end.xlsx
+  ```
+
 ### Self-exported files — checklist when adding one:
 - [ ] Name it `<producer>-<description>.xlsx` (e.g. `excel-dates.xlsx`, `libreoffice-merged.xlsx`).
 - [ ] Note the producer + version and what the file exercises in a PR description.
