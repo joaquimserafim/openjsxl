@@ -205,7 +205,7 @@ describe("parseXlsbSheet — full and short cell records", () => {
 			full(0x04, 2, [1]),
 			record(0x7f, [...u32(99), ...u32(42)]),
 			dimension(),
-			record(0x003c, [...u32(6), ...u32(8), ...u32(2048), ...u32(0)]),
+			record(0x003c, [...u32(6), ...u32(8), ...u32(2048), ...u32(1)]), // XF 1 widens (F11.37)
 			record(0x03ee, [...u32(0), ...u32(0), ...u32(0), ...u32(0), ...wide("rId1")]),
 			short(0x0f, [0]),
 		);

@@ -133,13 +133,17 @@ export function parseXlsbSheet(
 				break;
 			}
 			case R.COL_INFO: {
-				// An explicit column default applies even at XF index 0. Require its full fields
-				// (bounds, width, XF) so a truncated record cannot invent formatting evidence.
+				// A column default counts only with a non-default XF (F11.37). XF 0 is the default
+				// format, so a width-only or hidden-only column is not formatting, and a producer that
+				// wrote an all-zero BrtWsDim did not count it. Require the full fields (bounds, width,
+				// XF) so a truncated record cannot invent formatting evidence.
 				if (rec.data.length < 16) break;
 				const d = new RecordData(rec.data);
 				const first = d.u32();
 				const last = d.u32();
-				if (first <= last) {
+				d.skip(4); // coldx, the width
+				const ixfe = d.u32();
+				if (first <= last && ixfe !== 0) {
 					firstUsedCol = Math.min(firstUsedCol, first);
 					lastUsedCol = Math.max(lastUsedCol, last);
 				}

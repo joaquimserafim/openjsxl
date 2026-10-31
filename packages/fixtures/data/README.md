@@ -492,6 +492,56 @@ git-ignored [`../local/`](../local) directory and are never committed.
   JS
   ```
 
+- **`sheetjs-width-only.xlsb` / `sheetjs-width-only.xlsx`** — authored locally on 2026-10-31 by
+  **SheetJS Community Edition 0.20.3** (the same install as the short-cells pair above) for F11.37.
+  Unmodified producer outputs of one newly authored workbook (this project's MIT content), written
+  once per format; neither embeds the producer's code. Four sheets, each with one column record
+  and no styles:
+
+  | Sheet | Cells | Column | `.xlsb` `BrtWsDim` | `.xlsx` `<dimension>` | Expected `.xlsb` dimension |
+  | --- | --- | --- | --- | --- | --- |
+  | WidthD | A1 = 1 | D, width only | `0,0,0,0` | `A1` | `A1` |
+  | Empty | none | B, width only | `0,0,0,0` | `A1` | absent |
+  | HiddenC | A1 = "x" | C, hidden only | `0,0,0,0` | `A1` | `A1` |
+  | Away | B2 = 1, C3 = 2 | F, width only | `1,2,1,2` | `B2:C3` | `B2:C3` |
+
+  Record inspection: every column is an 18-byte `BrtColInfo` at XF index 0, with `fUserSet` (width)
+  or `fHidden` set. Before F11.37 the reader counted those columns as formatting and reported
+  `A1:D1`, `B1` and `A1:C1` for the first three sheets. `reader/__tests__/xlsb-width-only.test.ts`
+  reads the committed bytes, checks the producer's records, and compares the two formats' dimensions
+  wherever both declare cells (the empty sheet's `A1` versus absent is a known spelling difference).
+  SheetJS reopened both files with `sheetStubs: true`: the same cells and `!ref` `A1`, absent, `A1`
+  and `B2:C3`. LibreOffice and openpyxl were not available for this pair.
+
+  SHA-256 (two independent generations were byte-identical):
+  - xlsb: `d0143eeeaf76648e55512e2e7e2bb0f722a77847df829b16bfedeb6b3d1bbbd3`
+  - xlsx: `6e8de7419026fce9263ae0d7aa67ced82a587e3202bbc89c7bcdcbbb592a3bf1`
+
+  Reproduce only these two files from the repository root after the normal frozen workspace install:
+
+  ```sh
+  node --input-type=module <<'JS'
+  import { writeFileSync } from 'node:fs';
+  import * as XLSX from './packages/bench/node_modules/xlsx/xlsx.mjs';
+  if (XLSX.version !== '0.20.3') throw new Error('Use the pinned producer');
+  const wb = XLSX.utils.book_new();
+  const widthD = XLSX.utils.aoa_to_sheet([[1]]);
+  widthD['!cols'] = [, , , { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, widthD, 'WidthD');
+  XLSX.utils.book_append_sheet(wb, { '!cols': [, { wch: 20 }] }, 'Empty');
+  const hiddenC = XLSX.utils.aoa_to_sheet([['x']]);
+  hiddenC['!cols'] = [, , { hidden: true }];
+  XLSX.utils.book_append_sheet(wb, hiddenC, 'HiddenC');
+  const away = XLSX.utils.aoa_to_sheet([[1], [undefined, 2]], { origin: 'B2' });
+  away['!ref'] = 'B2:C3';
+  away['!cols'] = [, , , , , { wch: 15 }];
+  XLSX.utils.book_append_sheet(wb, away, 'Away');
+  for (const bookType of ['xlsb', 'xlsx'])
+    writeFileSync(`packages/fixtures/data/sheetjs-width-only.${bookType}`,
+      XLSX.write(wb, { type: 'buffer', bookType, compression: true }));
+  JS
+  ```
+
 - **`bsdtar-zip64-end.xlsx`** — written by **bsdtar 3.5.3 (libarchive 3.7.4)**, as shipped with macOS,
   with `--options zip:zip64` (F11.35). Its parts are `minimal.xlsx`'s, so it reads the same: one
   `Sheet1` with `A1 = 1` and `B1 = TRUE`. bsdtar puts a 56-byte ZIP64 end record and a locator between

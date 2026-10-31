@@ -38,8 +38,13 @@ const dimension = (r1 = 0, r2 = 0, c1 = 0, c2 = 0): number[] =>
 const row = (index: number): number[] => record(R.ROW, u32(index));
 const formattedRow = (index: number, style = 1, flags = 0x40): number[] =>
 	record(R.ROW, [...u32(index), ...u32(style), 0x2c, 0x01, 0, flags, 0, ...u32(0)]);
-const formattedColumns = (first: number, last: number, style = 1): number[] =>
-	record(0x003c, [...u32(first), ...u32(last), ...u32(2048), ...u32(style), 0, 0]);
+const formattedColumns = (first: number, last: number, style = 1, flags = 0): number[] =>
+	record(0x003c, [...u32(first), ...u32(last), ...u32(2048), ...u32(style), flags, 0]);
+// SheetJS's width-only (fUserSet) and hidden-only (fHidden) columns, both at XF 0 (F11.37).
+const widthOnlyColumns = (first: number, last: number): number[] =>
+	formattedColumns(first, last, 0, 0x02);
+const hiddenColumns = (first: number, last: number): number[] =>
+	formattedColumns(first, last, 0, 0x01);
 const cell = (id: number, col = 0, style = 0, payload: readonly number[] = []): number[] =>
 	record(id, [...u32(col), ...u32(style), ...payload]);
 const parse = (...records: readonly number[][]) =>
@@ -347,9 +352,31 @@ describe("parseXlsbSheet — used dimensions", () => {
 		expect(sheet.cellStyles.size).toBe(0);
 	});
 
-	it.each([0, 1])("counts row and column default style %i at non-A1 coordinates", (style) => {
+	it.each([0, 1])("counts a row default with the applied-format bit at style %i", (style) => {
 		expect(parse(dimension(), formattedRow(4, style)).dimension).toBe("A5");
-		expect(parse(dimension(), formattedColumns(2, 3, style)).dimension).toBe("C1:D1");
+	});
+
+	it("counts a column default only with a non-default style (F11.37)", () => {
+		expect(parse(dimension(), formattedColumns(2, 3, 1)).dimension).toBe("C1:D1");
+		expect(parse(dimension(), formattedColumns(2, 3, 0xffffffff)).dimension).toBe("C1:D1");
+		expect(parse(dimension(), formattedColumns(2, 3, 0)).dimension).toBeUndefined();
+	});
+
+	it("does not widen an all-zero dimension for width-only or hidden-only columns (F11.37)", () => {
+		const atA1 = [row(0), cell(R.BOOL, 0, 0, [1])];
+		expect(parse(dimension(), widthOnlyColumns(3, 3), ...atA1).dimension).toBe("A1");
+		expect(parse(dimension(), ...atA1, hiddenColumns(2, 2)).dimension).toBe("A1");
+		expect(parse(dimension(), widthOnlyColumns(0, MAX_COL - 1), ...atA1).dimension).toBe("A1");
+		expect(parse(dimension(), widthOnlyColumns(1, 1)).dimension).toBeUndefined();
+		expect(parse(dimension(), hiddenColumns(1, 1)).dimension).toBeUndefined();
+		expect(parse(dimension(), formattedRow(4), widthOnlyColumns(3, 3)).dimension).toBe("A5");
+		const sheet = parse(dimension(), widthOnlyColumns(3, 3), ...atA1);
+		expect([...sheet.cells.keys()]).toEqual(["A1"]);
+	});
+
+	it("still widens an all-zero dimension for a formatted column, even across the sheet", () => {
+		expect(parse(dimension(), formattedColumns(0, MAX_COL - 1)).dimension).toBe("A1:XFD1");
+		expect(parse(dimension(), formattedColumns(3, 3, 1, 0x02)).dimension).toBe("D1");
 	});
 
 	it("combines formatted axes without expanding either to A1", () => {
@@ -412,13 +439,15 @@ describe("parseXlsbSheet — used dimensions", () => {
 	});
 
 	it("requires a complete column style field but tolerates absent trailing flags", () => {
-		const payload = [...u32(2), ...u32(3), ...u32(2048), ...u32(0), 0, 0];
+		const payload = [...u32(2), ...u32(3), ...u32(2048), ...u32(1), 0, 0];
 		for (const length of [0, 4, 8, 12, 15]) {
 			expect(
 				parse(dimension(), record(0x003c, payload.slice(0, length))).dimension,
 			).toBeUndefined();
 		}
 		expect(parse(dimension(), record(0x003c, payload.slice(0, 16))).dimension).toBe("C1:D1");
+		const styleZero = [...u32(2), ...u32(3), ...u32(2048), ...u32(0)];
+		expect(parse(dimension(), record(0x003c, styleZero)).dimension).toBeUndefined();
 	});
 
 	it("ignores reversed column defaults even when both endpoints would clamp together", () => {
