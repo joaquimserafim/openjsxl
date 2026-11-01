@@ -209,6 +209,16 @@ decodes to a value rejected by the XML writer is omitted; if no target remains, 
 omitted. openpyxl 3.1.5 does not consistently apply this rule to these schema fields, so its
 behavior can differ for this case.
 
+In a workbook that `openXlsx` or `streamSheetRows` reads (`.xlsx`, `.xlsm`, `.xltx`), two tabs can
+carry the same name ignoring case once decoded: `A` and `a`, or a raw `_x0041_` and `A` (openpyxl
+3.1.5 writes a tab titled `_x0041_` raw, and it decodes to `A`). Since 1.0.1 the reader keeps the
+first of them that loads and leaves each later one out, together with its sheet-scoped defined names;
+1.0.0 returned both. A formula or defined name that refers to a left-out tab, such as `a!A1`, then
+reads the kept tab in the formula evaluator, where sheet names match ignoring case. Names are
+compared with JavaScript's `toLowerCase`, the rule `writeXlsx` uses to refuse two sheet names that
+match ignoring case: the Kelvin sign `K` (U+212A) matches `K`, and `İ` matches `i̇` (`i` and
+U+0307), while `ß` and `SS` stay apart. Excel's comparison of non-ASCII names may differ.
+
 ### Styles & layout (0.4)
 
 A cell can also be `{ value, style }` — the style shape is exactly what `sheet.style(ref)`

@@ -537,8 +537,9 @@ export class Workbook {
 	/**
 	 * Sheets in tab order, as loaded. A declared sheet is left out when its worksheet part is missing,
 	 * external or dangling, or when this open already read that part: an earlier loaded sheet's, or a
-	 * workbook-level part such as the styles part (xlsx and xlsb). An xlsx sheet whose name repeats an
-	 * earlier loaded sheet's is left out too.
+	 * workbook-level part such as the styles part (xlsx and xlsb). An xlsx sheet whose decoded name
+	 * matches an earlier loaded sheet's ignoring case (`toLowerCase`, the writer's rule) is left out
+	 * too, with its sheet-scoped defined names.
 	 */
 	readonly sheets: readonly SheetInfo[];
 	/**
