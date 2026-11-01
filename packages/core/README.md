@@ -63,7 +63,9 @@ Reads are guarded against decompression bombs **by default** —
 a 2 GiB per-part output ceiling plus a 300× compression-ratio cap (over an 8 MiB floor); raise or
 disable either via `ReadOptions.maxPartBytes` / `maxCompressionRatio` (`Number.POSITIVE_INFINITY`
 to turn one off). Since 1.0.1, `ReadOptions.maxTotalBytes` can also bound the decompressed bytes of
-the whole archive; it is unlimited by default.
+the whole archive; it is unlimited by default. Since 1.0.1, too, each of these limits must be a
+number, at least 0, and `verifyChecksums` a boolean: `null` keeps the default, and any other value,
+such as `NaN`, fails with `XlsxError('invalid-input')` before the file is read.
 Every fully consumed ZIP entry must also match its declared uncompressed size. CRC-32 verification
 defaults off; set `ReadOptions.verifyChecksums: true` to detect accidental corruption in fully read
 entries. A cancelled stream makes no checksum claim for its partial entry. CRC-32 is not

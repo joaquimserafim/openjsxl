@@ -1,4 +1,4 @@
-import { openZip, type ZipArchive } from "../zip";
+import { openZip, type ZipArchive, zipLimits } from "../zip";
 import type { ReadOptions } from "./workbook";
 
 // F7.4 — format detection. `detectSpreadsheetFormat` sniffs a file's container so a caller can route
@@ -44,12 +44,21 @@ const MAX_SNIFF_BYTES = 1 << 20;
  * text is `'csv'` — CSV/TSV has no magic bytes, so this is a documented heuristic (any
  * delimited-or-not text reads as `'csv'`), never as certain as a container sniff. Corrupt /
  * unsupported archives and binary noise are `undefined`; the corresponding `open*` function remains
- * the authority that parses and rejects.
+ * the authority that parses and rejects. The options are checked as the readers check them, before
+ * the bytes are looked at: an invalid one fails typed `invalid-input` for any input, CSV included,
+ * rather than reading as unrecognized (F11.41(a)).
+ *
+ * @example await detectSpreadsheetFormat(await writeXlsx(input)) // "xlsx"
+ * @example await detectSpreadsheetFormat(new TextEncoder().encode("a,b\n1,2")) // "csv"
+ * @example await detectSpreadsheetFormat(csvBytes, { maxPartBytes: Number.NaN }) // throws XlsxError "invalid-input"
  */
 export async function detectSpreadsheetFormat(
 	source: Uint8Array | ArrayBuffer,
 	options?: ReadOptions,
 ): Promise<SpreadsheetFormat | undefined> {
+	// Checked first, outside the catch around openZip below, which would turn the failure into
+	// `undefined`; the checked limits, not the caller's object, reach openZip.
+	const limits = zipLimits(options);
 	const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
 	if (bytes.byteLength === 0) return undefined;
 
@@ -69,7 +78,7 @@ export async function detectSpreadsheetFormat(
 	// in the classification logic surfaces instead of being swallowed as "unclassifiable".
 	let zip: ZipArchive;
 	try {
-		zip = openZip(bytes, options);
+		zip = openZip(bytes, limits);
 	} catch {
 		return undefined; // a PK signature, but not a readable archive
 	}

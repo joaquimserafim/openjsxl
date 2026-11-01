@@ -50,7 +50,11 @@ export interface EvaluateOptions {
 	readonly now?: () => Date;
 	/** Injected RNG for volatile RAND/RANDBETWEEN. Without it, a volatile call is rejected. */
 	readonly random?: () => number;
-	/** Fuel budget: the maximum number of formula-cell evaluations before a typed abort. */
+	/**
+	 * Fuel budget: the maximum number of formula-cell evaluations before a typed abort (default
+	 * 5,000,000). It must be a number, at least 0 (`Infinity` for no limit); `null` counts as absent,
+	 * and any other value fails with `FormulaError` code `unsupported` before evaluation starts.
+	 */
 	readonly maxCellVisits?: number;
 }
 
@@ -113,6 +117,31 @@ interface Endpoint {
 }
 
 const DEFAULT_MAX_VISITS = 5_000_000;
+
+/**
+ * The cell-visit budget `EvaluateOptions.maxCellVisits` asks for (F11.41(a)): 5,000,000 when absent
+ * (`undefined` or `null`), else that many formula-cell evaluations. It must be a number, not `NaN`,
+ * at least 0, and `Infinity` is allowed. Any other value fails with `FormulaError` code
+ * `unsupported`, the code a bad `options.functions` gets, so one such as `Number(process.env.UNSET)`
+ * cannot switch the budget off.
+ *
+ * @example cellVisitBudget(undefined) // 5000000
+ * @example cellVisitBudget(null) // 5000000
+ * @example cellVisitBudget(10) // 10
+ * @example cellVisitBudget(Number.POSITIVE_INFINITY) // Infinity (no budget)
+ * @example cellVisitBudget(Number.NaN) // throws FormulaError "unsupported"
+ */
+export function cellVisitBudget(value: unknown): number {
+	if (value === undefined || value === null) return DEFAULT_MAX_VISITS;
+	if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
+		throw new FormulaError(
+			"unsupported",
+			"options.maxCellVisits must be a number of cell visits, at least 0 (Infinity for no limit)",
+		);
+	}
+	return value;
+}
+
 // Native-recursion guard. `depth` is threaded through the whole synchronous recursion — AST descent
 // within a cell (evalGen) AND cross-cell nesting through lazy-argument thunks / range iteration — so
 // a single bound covers both. Crucially it does NOT count the iterative frame stack: a simple
@@ -482,7 +511,7 @@ class Evaluator {
 		options: EvaluateOptions,
 	) {
 		this.registry = buildRegistry(options.functions);
-		this.fuel = options.maxCellVisits ?? DEFAULT_MAX_VISITS;
+		this.fuel = cellVisitBudget(options.maxCellVisits);
 		const now = options.now;
 		const random = options.random;
 		this.hasVolatileSource = now !== undefined || random !== undefined;

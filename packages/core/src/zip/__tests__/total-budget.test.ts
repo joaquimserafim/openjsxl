@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { writeZip } from "../../writer/zip";
-import { budgetMeter, localEntrySpan, openZip, totalBudget } from "../central-directory";
+import { budgetMeter, localEntrySpan, openZip, zipLimits } from "../central-directory";
 import { centralRecord } from "./entry-overlap-fixtures";
 
 // F11.53: `maxTotalBytes` bounds the decompressed bytes read through one archive. Each read is charged
 // the most it can produce before it starts, stored and inflated parts alike, and the read that would
-// pass the budget fails typed. The option is validated on its own with F11.41(a)'s rule.
+// pass the budget fails typed. zipLimits checks the option with the other read options (F11.41(a)).
 
 const typed = (code: string) => expect.objectContaining({ name: "XlsxError", code });
 
@@ -33,21 +33,24 @@ async function drain(stream: AsyncGenerator<Uint8Array>) {
 	return n;
 }
 
-describe("totalBudget", () => {
+describe("maxTotalBytes through zipLimits", () => {
+	const budget = (value: unknown) => zipLimits({ maxTotalBytes: value as never }).maxTotalBytes;
+
 	it("is unlimited when absent, undefined or null", () => {
-		expect(totalBudget(undefined)).toBe(Number.POSITIVE_INFINITY);
-		expect(totalBudget(null)).toBe(Number.POSITIVE_INFINITY);
+		expect(zipLimits({}).maxTotalBytes).toBe(Number.POSITIVE_INFINITY);
+		expect(budget(undefined)).toBe(Number.POSITIVE_INFINITY);
+		expect(budget(null)).toBe(Number.POSITIVE_INFINITY);
 	});
 
 	it("takes a number of bytes, at least 0, Infinity included", () => {
-		expect(totalBudget(0)).toBe(0);
-		expect(totalBudget(64 * 1024 * 1024)).toBe(67108864);
-		expect(totalBudget(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
+		expect(budget(0)).toBe(0);
+		expect(budget(64 * 1024 * 1024)).toBe(67108864);
+		expect(budget(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
 	});
 
 	it("refuses anything else, typed", () => {
 		for (const value of [Number.NaN, -1, Number.NEGATIVE_INFINITY, "100", true, {}, 10n]) {
-			expect(() => totalBudget(value)).toThrow(typed("invalid-input"));
+			expect(() => budget(value)).toThrow(typed("invalid-input"));
 		}
 	});
 });
@@ -203,15 +206,13 @@ describe("openZip's maxTotalBytes", () => {
 		);
 	});
 
-	it("refuses an inflated part under a finite budget when a sibling option is NaN", async () => {
-		const { bytes, sizes } = await archive();
+	it("refuses a NaN sibling option when the archive opens, with or without a budget (F11.41(a))", async () => {
+		const { bytes } = await archive();
 		for (const sibling of [{ maxPartBytes: Number.NaN }, { maxCompressionRatio: Number.NaN }]) {
-			const zip = openZip(bytes, { ...sibling, maxTotalBytes: 1_000_000 });
-			await expect(zip.read("a.xml")).rejects.toThrow(typed("part-too-large"));
-			await expect(drain(zip.readStream("c.xml"))).rejects.toThrow(typed("part-too-large"));
-			expect((await zip.read("b.bin")).byteLength).toBe(sizes[1]);
-			// Without a budget, such a read is as before.
-			expect((await openZip(bytes, sibling).read("a.xml")).byteLength).toBe(sizes[0]);
+			expect(() => openZip(bytes, { ...sibling, maxTotalBytes: 1_000_000 })).toThrow(
+				typed("invalid-input"),
+			);
+			expect(() => openZip(bytes, sibling)).toThrow(typed("invalid-input"));
 		}
 	});
 

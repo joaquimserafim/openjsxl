@@ -25,8 +25,8 @@ development branch are welcome, but unreleased code is not a supported published
 toward **1.0.1**, which is not yet released; its unchanged package version does not make these
 changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
 the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule, the
-ODS repeat budget and the CSV and XLSB cell budgets described below are unreleased 1.0.1 changes,
-absent from 1.0.0.
+ODS repeat budget, the CSV and XLSB cell budgets and the option checks described below are unreleased
+1.0.1 changes, absent from 1.0.0.
 
 ## Processing untrusted files
 
@@ -45,16 +45,23 @@ branch adds a third, off by default:
 | `maxCompressionRatio` | 300 | Inflation relative to that entry's compressed size, with an 8 MiB output floor. |
 | `maxTotalBytes` | unlimited | Uncompressed output of every ZIP entry read through one archive, together (1.0.1 only). |
 
+On this unreleased 1.0.1 branch, every option is checked once, before the file is read. Each limit
+must be a number, at least 0 (`Infinity` for no limit), and `verifyChecksums` must be `true` or
+`false`; an absent or `null` option keeps its default. Any other value, such as `NaN` from
+`Number(process.env.UNSET)`, a numeric string or a negative number, fails with `XlsxError` code
+`invalid-input`, so no option value can switch a guard off. `detectSpreadsheetFormat` checks the
+options the same way, for any input, CSV included. Published 1.0.0 accepted these values: a `NaN`
+limit there lifted every per-entry cap, the cap at an entry's declared size included. Each entry's
+inflate is now capped at its declared size whatever the limits are.
+
 The first two limits are **per entry**. `maxTotalBytes` bounds the archive: each entry read, stored
 or inflated, is charged the most it can produce before it is read, and the read that would pass the
 budget fails with `XlsxError` code `part-too-large`. Streamed reads count too, an entry read twice
-counts twice, and a stream cut short counts in full. Under a finite budget, an entry whose bound is
-not a number, because `maxPartBytes` or `maxCompressionRatio` is `NaN`, is refused. The value must
-be a number of bytes, at least 0 (`Infinity` for no limit); `null` counts as absent, and any other
-value fails with code `invalid-input`. `detectSpreadsheetFormat` throws neither error: it reports a
-ZIP file it cannot open as unrecognized (`undefined`), and treats an entry the budget refuses as
-unreadable, as it does one that `maxPartBytes` refuses, so a small budget can leave a file
-unclassified. None of these is a process-memory, CPU-time or cell-count budget. Without
+counts twice, and a stream cut short counts in full. `detectSpreadsheetFormat` does not throw
+`part-too-large`: it reports a ZIP file it cannot open as unrecognized (`undefined`), and treats an
+entry the budget refuses as unreadable, as it does one that `maxPartBytes` refuses, so a small
+budget can leave a file unclassified. None of these is a process-memory, CPU-time or cell-count
+budget. Without
 `maxTotalBytes`, many entries can each fit their limit; parsed cells, strings, styles, images and
 other
 metadata can use additional memory. The input byte buffer is already allocated before the reader
@@ -115,7 +122,10 @@ formula text as JavaScript or fetch external references; unsupported external re
 error values.
 
 `EvaluateOptions.maxCellVisits` defaults to **5,000,000 formula-cell evaluations**. Set a lower,
-finite positive integer for untrusted workloads. Parser/evaluator depth and argument guards also
+finite positive integer for untrusted workloads. It must be a number, at least 0 (`Infinity` for no
+limit), and `null` counts as absent. On this unreleased 1.0.1 branch any other value fails with
+`FormulaError` code `unsupported` before evaluation starts; published 1.0.0 ran with no budget when
+the value was `NaN` or text such as `"abc"`. Parser/evaluator depth and argument guards also
 exist, but these are not comprehensive time or memory quotas: constructing the workbook model,
 parsing text and work inside an individual function are not all charged as cell visits. Keep
 external process limits in place even with a small evaluation budget.

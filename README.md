@@ -748,7 +748,7 @@ The 1.0 fidelity types — each is the same record on the reader and the writer.
 
 - **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
 - **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
-- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (1.0.1) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification defaults to `false`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (1.0.1) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification defaults to `false`. Since 1.0.1 each limit must be a number, at least 0 (`Infinity` for none), and `verifyChecksums` a boolean; `null` keeps the default, and any other value throws `XlsxError('invalid-input')` before the file is read, from `openXlsx`, `openXlsb`, `openOds`, `streamSheetRows` and `detectSpreadsheetFormat`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
 
 ### `openjsxl/formula`
 
@@ -764,7 +764,7 @@ The opt-in evaluator — a separate import that never changes the core bundle.
 | `isErrorValue` | `(v: unknown) => v is FormulaErrorValue` | Narrowing guard. |
 | `isRangeView` | `(v: unknown) => v is RangeView` | Narrowing guard. |
 
-- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations.
+- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations. `maxCellVisits` (default 5,000,000) must be a number, at least 0 (`Infinity` for none); since 1.0.1 any other value except `null` throws `FormulaError('unsupported')`.
 - **Results** — `WorkbookEvalResult` `{ cells: readonly CellResult[]; get(sheet, ref): ScalarValue | undefined }`; `CellResult` `{ sheet, ref, value }`.
 - **Values** — `ScalarValue` = `number | string | boolean | null | FormulaErrorValue`; `EvalValue` = `ScalarValue | RangeView`; `FormulaErrorValue` `{ kind: "error", code: ErrorCode }`; `ErrorCode` (the eight `ST_CellErrorType` values + `#CYCLE!`).
 - **`RangeView`** — a lazy window over a reference's used cells: `sheet`, `startCol/startRow/endCol/endRow`, `width`/`height`/`cellCount` (getters), `entries()`, `values()`, `populatedCount()`, `single()`, `topLeft()`, `cellAt(rowOffset, colOffset)`; `RangeEntry` `{ col, row, value }`.

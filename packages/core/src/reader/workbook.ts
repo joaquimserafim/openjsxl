@@ -818,12 +818,16 @@ async function loadWorkbook(
  *   small high-ratio parts pass untouched.
  * - `maxTotalBytes`: the decompressed bytes of every part read through one archive, together (default
  *   unlimited, F11.53). Each read is charged the most it can produce before it starts, and the read
- *   that would pass the budget fails typed (`part-too-large`). It must be a number, at least 0
- *   (`Infinity` for no limit); `null` counts as absent, and anything else fails typed
- *   (`invalid-input`).
+ *   that would pass the budget fails typed (`part-too-large`).
  * - `verifyChecksums`: verify each fully consumed ZIP entry against its central-directory CRC-32
  *   (default false). CRC-32 detects accidental corruption; it is not authentication or tamper
  *   resistance. A cancelled stream makes no checksum claim for its partially consumed entry.
+ *
+ * Each limit must be a number, at least 0 (`Infinity` for no limit), and `verifyChecksums` must be
+ * `true` or `false`. An absent or `null` option keeps its default. Any other value, such as `NaN`, a
+ * string or a negative number, fails typed (`invalid-input`) before any part is read, in every
+ * reader that takes these options and in `detectSpreadsheetFormat` (F11.41(a)). Each option is read
+ * once per call.
  *
  * Both guards apply to the constant-memory streaming path (`streamSheetRows`) too, so a *single*
  * legitimately huge worksheet whose decompressed XML exceeds `maxPartBytes` (2 GiB) is rejected by

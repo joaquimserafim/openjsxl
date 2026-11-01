@@ -142,34 +142,137 @@ export function findSpanConflict(
 }
 
 /**
- * The aggregate inflate budget a caller's `maxTotalBytes` asks for (F11.53): unlimited when absent
- * (`undefined` or `null`, as `??` treats the sibling options), else that many bytes. It must be a
- * number, not `NaN`, at least 0, and `Infinity` is allowed; any other value fails typed
- * `invalid-input`, so one such as `Number(process.env.UNSET)` cannot switch the budget off. It is
- * checked on its own, with F11.41(a)'s rule, until that task's shared options helper exists.
- *
- * @example totalBudget(undefined) // Infinity (no budget)
- * @example totalBudget(null) // Infinity (no budget)
- * @example totalBudget(64 * 1024 * 1024) // 67108864
- * @example totalBudget(Number.NaN) // throws XlsxError "invalid-input"
+ * The ZIP read options `openZip` takes, as a caller passes them: the fields of `ReadOptions`, not yet
+ * checked.
  */
-export function totalBudget(value: unknown): number {
-	if (value === undefined || value === null) return Number.POSITIVE_INFINITY;
-	if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
-		throw new XlsxError(
-			"invalid-input",
+export interface ZipReadOptions {
+	readonly maxPartBytes?: number;
+	readonly maxCompressionRatio?: number;
+	readonly maxTotalBytes?: number;
+	readonly verifyChecksums?: boolean;
+}
+
+/** The ZIP read options after {@link zipLimits}: each one read once, checked and defaulted. */
+export interface ZipLimits {
+	readonly maxPartBytes: number;
+	readonly maxCompressionRatio: number;
+	readonly maxTotalBytes: number;
+	readonly verifyChecksums: boolean;
+}
+
+/**
+ * Read and check a caller's ZIP read options (F11.41(a)), each property exactly once. An absent
+ * option (`undefined` or `null`, or no options at all) keeps its default: `maxPartBytes` 2 GiB,
+ * `maxCompressionRatio` 300, `maxTotalBytes` unlimited and `verifyChecksums` false. A limit must be a
+ * number, not `NaN`, at least 0, with `Infinity` for no limit, and `verifyChecksums` must be a
+ * boolean. Any other value fails typed `invalid-input`, so one such as `Number(process.env.UNSET)`
+ * cannot switch a guard off. `openZip` calls it before anything else, so every reader that opens an
+ * archive checks its options before any container work; `detectSpreadsheetFormat` calls it itself,
+ * outside the catch that turns an unreadable archive into `undefined`.
+ *
+ * @example zipLimits(undefined) // { maxPartBytes: 2147483648, maxCompressionRatio: 300, maxTotalBytes: Infinity, verifyChecksums: false }
+ * @example zipLimits({ maxTotalBytes: 1024 }).maxTotalBytes // 1024
+ * @example zipLimits({ maxCompressionRatio: Number.POSITIVE_INFINITY }).maxCompressionRatio // Infinity (no ratio limit)
+ * @example zipLimits({ maxPartBytes: Number.NaN }) // throws XlsxError "invalid-input"
+ * @example zipLimits({ verifyChecksums: 1 }) // throws XlsxError "invalid-input"
+ */
+export function zipLimits(options: ZipReadOptions | undefined): ZipLimits {
+	// Each property is read once into a local, as `unknown`: a JS caller can pass anything, and a
+	// getter must not hand one value to the check and another to the reader.
+	const maxPartBytes: unknown = options?.maxPartBytes;
+	const maxCompressionRatio: unknown = options?.maxCompressionRatio;
+	const maxTotalBytes: unknown = options?.maxTotalBytes;
+	const verifyChecksums: unknown = options?.verifyChecksums;
+	return {
+		maxPartBytes: limitOption(
+			maxPartBytes,
+			DEFAULT_MAX_PART_BYTES,
+			"ReadOptions.maxPartBytes must be a number of bytes, at least 0 (Infinity for no limit)",
+		),
+		maxCompressionRatio: limitOption(
+			maxCompressionRatio,
+			DEFAULT_MAX_COMPRESSION_RATIO,
+			"ReadOptions.maxCompressionRatio must be a number, at least 0 (Infinity for no limit)",
+		),
+		maxTotalBytes: limitOption(
+			maxTotalBytes,
+			Number.POSITIVE_INFINITY,
 			"ReadOptions.maxTotalBytes must be a number of bytes, at least 0 (Infinity for no limit)",
-		);
+		),
+		verifyChecksums: booleanOption(
+			verifyChecksums,
+			false,
+			"ReadOptions.verifyChecksums must be true or false",
+		),
+	};
+}
+
+/**
+ * One limit option, by the rule F11.53 set for `maxTotalBytes` (F11.41(a)): `fallback` when absent
+ * (`undefined` or `null`), else the value, which must be a number, not `NaN`, at least 0, with
+ * `Infinity` allowed. Any other value throws `XlsxError("invalid-input", message)`.
+ *
+ * @example limitOption(undefined, 300, message) // 300
+ * @example limitOption(null, 300, message) // 300
+ * @example limitOption(0, 300, message) // 0
+ * @example limitOption(Number.POSITIVE_INFINITY, 300, message) // Infinity
+ * @example limitOption("100", 300, message) // throws XlsxError "invalid-input" with that message
+ */
+export function limitOption(value: unknown, fallback: number, message: string): number {
+	if (value === undefined || value === null) return fallback;
+	if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
+		throw new XlsxError("invalid-input", message);
 	}
 	return value;
+}
+
+/**
+ * One boolean option (F11.41(a)): `fallback` when absent (`undefined` or `null`), else the value,
+ * which must be `true` or `false`. Any other value, such as `"false"` or 1, throws
+ * `XlsxError("invalid-input", message)`.
+ *
+ * @example booleanOption(undefined, false, message) // false
+ * @example booleanOption(true, false, message) // true
+ * @example booleanOption("false", false, message) // throws XlsxError "invalid-input" with that message
+ */
+export function booleanOption(value: unknown, fallback: boolean, message: string): boolean {
+	if (value === undefined || value === null) return fallback;
+	if (typeof value !== "boolean") throw new XlsxError("invalid-input", message);
+	return value;
+}
+
+/**
+ * The tightest output cap for inflating an entry (F9.7): its declared uncompressed size, the
+ * `maxPartBytes` ceiling, and the ratio limit, which is the larger of the 8 MiB floor and the
+ * compressed size times `maxCompressionRatio`. A limit lowers the cap only when it is a number below
+ * it, so the declared size caps the inflate whatever the options are (F11.41(a)): a `NaN` limit, or
+ * an `Infinity` ratio over an empty payload (`0 × Infinity`), cannot lift it.
+ *
+ * @example inflateCap(100, 10, 2 ** 31, 300) // 100: the declared size
+ * @example inflateCap(100, 10, 50, 300) // 50: maxPartBytes
+ * @example inflateCap(2 ** 30, 1000, 2 ** 31, 300) // 8388608: the ratio floor
+ * @example inflateCap(2 ** 30, 2 ** 20, 2 ** 31, 300) // 314572800: the compressed size times the ratio
+ * @example inflateCap(100, 10, Number.NaN, Number.NaN) // 100: the declared size still caps
+ */
+export function inflateCap(
+	declared: number,
+	compressed: number,
+	maxPartBytes: number,
+	maxRatio: number,
+): number {
+	let cap = declared;
+	if (maxPartBytes < cap) cap = maxPartBytes;
+	const ratioLimit = Math.max(RATIO_FLOOR_BYTES, compressed * maxRatio);
+	if (ratioLimit < cap) cap = ratioLimit;
+	return cap;
 }
 
 /**
  * A meter for the aggregate inflate budget (F11.53). Its `charge(name, bytes)` counts the most that a
  * read of part `name` can produce, before the part is read, and fails typed `part-too-large` when that
  * would take the archive's total past `limit`. Without a limit it counts nothing. Under a finite limit
- * a bound that is not a number, from a `NaN` `maxPartBytes` or `maxCompressionRatio`, is refused too:
- * such a part has no cap, so the budget cannot vouch for it.
+ * a bound that is not a number is refused too: such a part has no cap, so the budget cannot vouch for
+ * it. `openZip` no longer produces one, since `zipLimits` refuses a `NaN` option (F11.41(a)).
  *
  * @example budgetMeter(Number.POSITIVE_INFINITY)("xl/a.xml", Number.NaN) // allowed: no budget
  * @example budgetMeter(100)("xl/a.xml", Number.NaN) // throws XlsxError "part-too-large" (no bound)
@@ -298,6 +401,7 @@ function findEocd(view: DataView, len: number): number {
  *
  * @example openZip(await writeZip([{ name: "a.xml", data }])).has("a.xml") // true
  * @example openZip(bytes, { maxTotalBytes: Number.NaN }) // throws XlsxError "invalid-input", before any parsing
+ * @example openZip(new Uint8Array(4), { maxPartBytes: -1 }) // throws XlsxError "invalid-input", not "not-a-zip"
  * @example openZip(new Uint8Array(4)) // throws XlsxError "not-a-zip" (no end-of-central-directory record)
  * @example openZip(bsdtarZip64).has("xl/workbook.xml") // true: its ZIP64 end record only repeats the classic one
  * @example openZip(zip64) // throws XlsxError "unsupported" (ZIP64, or a multi-disk archive)
@@ -305,24 +409,15 @@ function findEocd(view: DataView, len: number): number {
  * @example openZip(withDuplicateName) // throws XlsxError "corrupt-zip" (two entries with one name)
  * @example openZip(withSharedBytes) // throws XlsxError "corrupt-zip" (two entries share bytes, or one reaches the central directory)
  */
-export function openZip(
-	bytes: Uint8Array,
-	options?: {
-		maxPartBytes?: number;
-		maxCompressionRatio?: number;
-		maxTotalBytes?: number;
-		verifyChecksums?: boolean;
-	},
-): ZipArchive {
-	// The aggregate budget (F11.53) is checked first, so a bad value fails before any parsing.
-	const charge = budgetMeter(totalBudget(options?.maxTotalBytes));
+export function openZip(bytes: Uint8Array, options?: ZipReadOptions): ZipArchive {
+	// The options are read and checked first (F11.41(a)), so a bad value fails before any parsing.
+	const limits = zipLimits(options);
+	const charge = budgetMeter(limits.maxTotalBytes);
 	const len = bytes.byteLength;
 	const view = new DataView(bytes.buffer, bytes.byteOffset, len);
 	// Zip-bomb guards (F9.7), applied by DEFAULT so a hostile archive is safe without opt-in.
 	// Pass a larger number to raise, or Number.POSITIVE_INFINITY to disable either guard.
-	const maxPartBytes = options?.maxPartBytes ?? DEFAULT_MAX_PART_BYTES;
-	const maxRatio = options?.maxCompressionRatio ?? DEFAULT_MAX_COMPRESSION_RATIO;
-	const verifyChecksums = options?.verifyChecksums ?? false;
+	const { maxPartBytes, maxCompressionRatio: maxRatio, verifyChecksums } = limits;
 
 	const eocd = findEocd(view, len);
 	if (eocd === -1) {
@@ -495,19 +590,17 @@ export function openZip(
 		return { entry, payload: bytes.subarray(span.dataStart, span.end) };
 	}
 
-	// The tightest output cap for inflating `entry`: the declared size, the absolute ceiling, and
-	// the ratio limit (max of the floor and compressedSize × ratio). The inflate aborts typed as
-	// soon as the ACTUAL output would exceed it, so a bomb that lies about its size can't expand.
-	function inflateCap(entry: ZipEntry): number {
-		const ratioLimit = Math.max(RATIO_FLOOR_BYTES, entry.compressedSize * maxRatio);
-		return Math.min(entry.uncompressedSize, maxPartBytes, ratioLimit);
+	// The tightest output cap for inflating `entry` (inflateCap). The inflate aborts typed as soon as
+	// the ACTUAL output would exceed it, so a bomb that lies about its size can't expand.
+	function outputCap(entry: ZipEntry): number {
+		return inflateCap(entry.uncompressedSize, entry.compressedSize, maxPartBytes, maxRatio);
 	}
 
 	// The most a read of `entry` can produce, charged to the aggregate budget before it is read: a
 	// stored part's own bytes, or a deflated part's inflate cap, past which the inflate aborts.
 	function outputBound(entry: ZipEntry, payload: Uint8Array): number {
 		if (entry.method === 0) return payload.byteLength;
-		return entry.compressedSize === 0 ? 0 : inflateCap(entry);
+		return entry.compressedSize === 0 ? 0 : outputCap(entry);
 	}
 
 	async function read(name: string): Promise<Uint8Array> {
@@ -522,7 +615,7 @@ export function openZip(
 			const output =
 				entry.compressedSize === 0
 					? new Uint8Array(0)
-					: await inflateRaw(payload, inflateCap(entry), name);
+					: await inflateRaw(payload, outputCap(entry), name);
 			verifyEntryOutput(entry, output, verifyChecksums);
 			return output;
 		}
@@ -551,7 +644,7 @@ export function openZip(
 		if (entry.method === 8) {
 			charge(name, outputBound(entry, payload));
 			if (entry.compressedSize > 0) {
-				for await (const chunk of inflateRawStream(payload, inflateCap(entry), name)) {
+				for await (const chunk of inflateRawStream(payload, outputCap(entry), name)) {
 					integrity.update(chunk);
 					yield chunk;
 				}
