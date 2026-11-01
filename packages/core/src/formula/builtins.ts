@@ -1626,7 +1626,22 @@ function indexFn(args: readonly EvalValue[]): EvalValue {
 	return arr.cellAt(ro, co);
 }
 
-function conditionalAggregate(
+/**
+ * SUMIF, AVERAGEIF or COUNTIF (`mode`) of one criteria range and criterion, with an optional value range
+ * aligned to it. A criterion error is the result. Given a value range, SUMIF and AVERAGEIF walk it as
+ * SUMIFS does (F11.39, D20, {@link valueRangeAggregate}). Otherwise each populated criteria cell is
+ * tested in turn: COUNTIF counts the matches, plus every blank position when a blank matches, and
+ * SUMIF/AVERAGEIF aggregate the matched numbers themselves. AVERAGEIF with no number matched is
+ * `#DIV/0!`.
+ *
+ * @example conditionalAggregate(A1:A2, errorValue("#N/A"), B1:B2, "sum") // #N/A
+ * @example conditionalAggregate(A1:A2, "", B1:B2, "sum") // #N/A, with A2 blank and B2 #N/A
+ * @example conditionalAggregate(A1:A3, "", undefined, "count") // 2, with only A1 populated, holding "x"
+ * @example conditionalAggregate(A1:A2, ">5", undefined, "avg") // #DIV/0!, with A1:A2 1 and 2
+ * @example conditionalAggregate(A1:A2, ">0", undefined, "avg") // 1.5, with A1:A2 1 and 2
+ * @example conditionalAggregate(A1:A3, "<>x", undefined, "sum") // 6, with A1 2, A2 blank and A3 4
+ */
+export function conditionalAggregate(
 	critRange: EvalValue | undefined,
 	criterion: EvalValue | undefined,
 	valueRange: EvalValue | undefined,
@@ -1635,50 +1650,67 @@ function conditionalAggregate(
 	const crit = parseCriteria(criterion ?? null);
 	if (isErrorValue(crit)) return crit;
 	const cr = critRange ?? null;
-	// When a blank cell satisfies the criterion (e.g. "<>x" or ""), the range's UNPOPULATED cells must
-	// also be counted — RangeView iteration never yields them. We add them in a bounded second pass.
-	const blankPass = isRangeView(cr) && matchesBlank(crit);
-	const seen = blankPass && isRangeView(valueRange) ? new Set<string>() : null;
+	if (mode !== "count" && valueRange !== undefined) {
+		return valueRangeAggregate(cr, crit, valueRange, mode);
+	}
 	let sum = 0;
 	let count = 0;
-	// 1) Populated criteria cells.
-	for (const { value, ro, co } of critCells(cr)) {
-		if (seen !== null) seen.add(`${ro},${co}`);
+	// 1) Populated criteria cells. A matched criteria cell is never an error.
+	for (const { value } of critCells(cr)) {
 		if (!matchesCriteria(value, crit)) continue;
 		if (mode === "count") {
 			count++;
 			continue;
 		}
-		const sv = alignedValue(valueRange, value, ro, co);
+		if (typeof value === "number") {
+			sum += value;
+			count++;
+		}
+	}
+	// 2) Blank criteria cells, when a blank satisfies the criterion (e.g. "<>x" or ""): RangeView
+	// iteration never yields them, so COUNTIF counts every blank position by extent arithmetic. With no
+	// separate value range, a blank criteria cell contributes no number to SUMIF/AVERAGEIF.
+	if (mode === "count") {
+		if (matchesBlank(crit) && isRangeView(cr)) count += cr.cellCount - cr.populatedCount();
+		return count;
+	}
+	if (mode === "avg") return count === 0 ? errorValue("#DIV/0!") : sum / count;
+	return sum;
+}
+
+/**
+ * SUMIF or AVERAGEIF (`mode`) with a value range, walked as SUMIFS walks one (F11.39, D20): the value
+ * range's populated cells row by row (a scalar is one cell at the top-left), each tested against the
+ * criteria cell at its offset, where a blank reads `null`. The first matched error is the result, and a
+ * criteria cell is read only beside a populated value, and a value only once its criterion matches, so
+ * SUMIF and SUMIFS agree on every value and error and resolve the same cells. Excel reshapes the value
+ * range to the criteria range's size, anchored top-left, so a value cell outside the criteria rectangle
+ * does not count. AVERAGEIF with no number matched is `#DIV/0!`.
+ *
+ * @example valueRangeAggregate(A1:A2, parseCriteria(""), B1:B2, "sum") // #N/A, with A2 blank and B2 #N/A
+ * @example valueRangeAggregate(A1:A2, parseCriteria("x"), B1:B2, "avg") // #DIV/0!, with no "x" in A1:A2
+ * @example valueRangeAggregate(A1:A2, parseCriteria("<>x"), B1:B2, "avg") // 4, with B1:B2 3 and 5
+ * @example valueRangeAggregate(A1:A2, parseCriteria("<>x"), B1:B3, "sum") // 5, with A1 "x" and B1 NOW() never resolved, B2 5 and B3 7 outside A1:A2
+ */
+export function valueRangeAggregate(
+	cr: EvalValue,
+	crit: Criteria,
+	valueRange: EvalValue,
+	mode: "sum" | "avg",
+): EvalValue {
+	const shape = rangeShape(cr);
+	let sum = 0;
+	let count = 0;
+	for (const { ro, co } of populatedOffsets(valueRange)) {
+		if (ro >= shape.height || co >= shape.width) continue;
+		if (!matchesCriteria(alignedValue(cr, null, ro, co), crit)) continue;
+		const sv = alignedValue(valueRange, null, ro, co);
 		if (isErrorValue(sv)) return sv;
 		if (typeof sv === "number") {
 			sum += sv;
 			count++;
 		}
 	}
-	// 2) Blank criteria cells (only when a blank satisfies the criterion).
-	if (blankPass && isRangeView(cr)) {
-		if (mode === "count") {
-			count += cr.cellCount - cr.populatedCount(); // every blank position matches
-		} else if (isRangeView(valueRange) && seen !== null) {
-			// A blank criteria cell has no value of its own; only a POPULATED companion cell at a blank
-			// position contributes. Bounded by the value range's used cells, not the rectangle.
-			for (const e of valueRange.entries()) {
-				const ro = e.row - valueRange.startRow;
-				const co = e.col - valueRange.startCol;
-				// Excel reshapes the value range to the criteria range's size (anchored top-left), so a
-				// value cell OUTSIDE the criteria rectangle has no criteria position and must not count.
-				if (ro >= cr.height || co >= cr.width) continue;
-				if (seen.has(`${ro},${co}`)) continue; // criteria cell there is populated → already handled
-				if (typeof e.value === "number") {
-					sum += e.value;
-					count++;
-				}
-			}
-		}
-		// SUMIF/AVERAGEIF with no separate value range: a blank criteria cell contributes no number.
-	}
-	if (mode === "count") return count;
 	if (mode === "avg") return count === 0 ? errorValue("#DIV/0!") : sum / count;
 	return sum;
 }
