@@ -457,9 +457,11 @@ unsupported reference a typed error value): `ROW`/`COLUMN`, `XLOOKUP`, `DATEVALU
 `SEARCH` (matched literally), array arithmetic inside an aggregator (`SUM(A1:A3*B1:B3)` → a typed
 `#VALUE!`, not an element-wise array), 3-D references (`Sheet1:Sheet3!A1` → `#REF!`),
 `OFFSET`/`INDIRECT`, R1C1, cross-workbook references, and iterative-calculation mode. Semantics
-follow documented Excel; a single-cell reference passed to an aggregate is treated as a literal (so
-text/booleans in one referenced cell coerce rather than being ignored — multi-cell ranges are
-Excel-exact).
+follow documented Excel. A single-cell reference passed to a built-in function reads as a reference,
+as the same cell written `A1:A1` does: `SUM(A1)` ignores text or a boolean in A1, and a cell holding a
+range passes that range on. `INDEX`, `VLOOKUP`, `HLOOKUP` and `SUMPRODUCT`, the conditional `IF`,
+`IFERROR`, `IFNA`, `IFS`, `SWITCH` and `CHOOSE`, and user-defined functions still receive the cell's
+value.
 
 Since 1.0.1 an array constant passed to a function that takes a range or an array is a full array
 (`SUM({1,2,3})` is 6, `MATCH("b",{"a","b","c"},0)` is 2), and a cell whose formula is an array

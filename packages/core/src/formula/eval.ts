@@ -3,7 +3,7 @@ import { dateToSerial } from "../ooxml/dates";
 import type { DefinedName } from "../ooxml/workbook";
 import type { Workbook } from "../reader/workbook";
 import type { Cell, Worksheet } from "../types";
-import type { ArrayElement, ArrayLiteral, FormulaAst } from "./ast";
+import type { ArrayElement, ArrayLiteral, CellRefNode, FormulaAst, NameRef } from "./ast";
 import { applyBinary, applyPostfix, applyUnary, scalarize } from "./coerce";
 import { FormulaError } from "./errors";
 import {
@@ -98,7 +98,7 @@ const COL_ONLY = /^\$?([A-Za-z]{1,3})$/;
 const ROW_ONLY = /^\$?(\d{1,7})$/;
 
 // A single-cell dependency the generator asks the driver to resolve.
-interface CellRequest {
+export interface CellRequest {
 	readonly sheet: string;
 	readonly col: number;
 	readonly row: number;
@@ -414,6 +414,46 @@ export function arrayArgument(node: FormulaAst): ArrayView | undefined {
 	const view = new ArrayView(cur.rows.map((row) => row.map(arrayElementValue)));
 	arrayViews.set(cur, view);
 	return view;
+}
+
+/**
+ * The cell or name node a single-cell reference argument is written as: `A1`, `Sheet!A1` or a defined
+ * name, with any parentheses around it looked through (F11.86(a)). Any other argument is `undefined`.
+ * Whether a name refers to one cell is the evaluator's to resolve.
+ *
+ * @example singleCellReference(parseFormula("Sheet2!B3")) // the Sheet2!B3 cell node
+ * @example singleCellReference(parseFormula("((Rate))")) // the Rate name node
+ * @example singleCellReference(parseFormula("A1:A1")) // undefined (a range)
+ */
+export function singleCellReference(node: FormulaAst): CellRefNode | NameRef | undefined {
+	let cur = node;
+	while (cur.type === "group") cur = cur.expr;
+	return cur.type === "cell" || cur.type === "name" ? cur : undefined;
+}
+
+/**
+ * A 1×1 view over one cell whose value the driver already resolved (F11.86(a)). Reading it returns
+ * `value`, so the cell is never evaluated twice, and it lists the cell as populated only when
+ * `populated()` says the sheet holds a value or a formula there.
+ *
+ * @example oneCellView({ sheet: "S", col: 4, row: 1 }, "n/a", () => true) // D1 = "n/a", populated
+ * @example oneCellView({ sheet: "S", col: 1, row: 1 }, null, () => false) // an empty A1, populated nowhere
+ */
+export function oneCellView(
+	cell: CellRequest,
+	value: EvalValue,
+	populated: () => boolean,
+): RangeView {
+	const { sheet, col, row } = cell;
+	return new RangeView(
+		sheet,
+		col,
+		row,
+		col,
+		row,
+		() => (populated() ? [[col, row]] : []),
+		() => value,
+	);
 }
 
 class Evaluator {
@@ -756,14 +796,9 @@ class Evaluator {
 				return applyBinary(node.op, left, right);
 			}
 			case "cell": {
-				// A 3-D reference (`Sheet1:Sheet3!A1`) is parse-only in v0.8 (decision 5): evaluation
-				// yields a TYPED error rather than silently collapsing to the first sheet's value.
-				if (node.sheet?.toName !== undefined) return errorValue("#REF!");
-				const target = this.resolveSheet(node.sheet?.name, sheet);
-				if (target === undefined) return errorValue("#REF!");
-				const at = parseA1(node.ref);
+				const at = this.cellTarget(node, sheet);
 				if (at === undefined) return errorValue("#REF!");
-				return yield { sheet: target, col: at.col, row: at.row };
+				return yield at;
 			}
 			case "range":
 				return this.resolveRange(node.left, node.right, sheet, d);
@@ -833,9 +868,56 @@ class Evaluator {
 		const values: EvalValue[] = [];
 		for (const arg of args) {
 			const array = arrayArgument(arg);
-			values.push(array === undefined ? yield* this.evalGen(arg, sheet, depth) : array);
+			if (array !== undefined) {
+				values.push(array);
+				continue;
+			}
+			// The driver resolves the argument first, so a long reference chain stays iterative. A
+			// built-in then gets a single-cell reference as a 1×1 view over that value (F11.86(a)); a
+			// cell holding a range passes its range on.
+			const value = yield* this.evalGen(arg, sheet, depth);
+			const cell =
+				spec.oneCellRanges === true && !isRangeView(value)
+					? this.referencedCell(arg, sheet)
+					: undefined;
+			values.push(
+				cell === undefined
+					? value
+					: oneCellView(
+							cell,
+							value,
+							() => this.modelCell(cell.sheet, cell.col, cell.row) !== undefined,
+						),
+			);
 		}
 		return spec.invoke(values, this.ctx);
+	}
+
+	// The cell a cell node names, or undefined when it names none: a 3-D reference (`Sheet1:Sheet3!A1`,
+	// parse-only in v0.8, decision 5), a missing sheet, or an off-grid ref. Evaluating such a node is a
+	// TYPED #REF! rather than a silent collapse to the first sheet's value.
+	private cellTarget(node: CellRefNode, home: string): CellRequest | undefined {
+		if (node.sheet?.toName !== undefined) return undefined;
+		const target = this.resolveSheet(node.sheet?.name, home);
+		const at = parseA1(node.ref);
+		return target === undefined || at === undefined
+			? undefined
+			: { sheet: target, col: at.col, row: at.row };
+	}
+
+	// The cell a single-cell reference argument names (F11.86(a)): `A1`, `Sheet!A1`, either in
+	// parentheses, or a defined name that refers to one cell. An argument that names no cell, or does
+	// not resolve to one, is undefined, and the function gets its value as before.
+	private referencedCell(arg: FormulaAst, sheet: string): CellRequest | undefined {
+		const node = singleCellReference(arg);
+		if (node === undefined) return undefined;
+		if (node.type === "cell") return this.cellTarget(node, sheet);
+		if (node.sheet?.toName !== undefined) return undefined;
+		const target = this.resolveSheet(node.sheet?.name, sheet);
+		if (target === undefined) return undefined;
+		const resolved = this.lookupName(node.name, this.models.get(target)?.index ?? 0);
+		if (resolved?.kind !== "ref" || resolved.ast.type !== "cell") return undefined;
+		return this.cellTarget(resolved.ast, resolved.sheet);
 	}
 
 	// ── References ────────────────────────────────────────────────────────────────────────────

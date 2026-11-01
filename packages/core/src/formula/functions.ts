@@ -63,6 +63,12 @@ interface RegisteredBase {
 /** An eager registered function: the dispatcher hands it already-evaluated argument values. */
 export interface EagerRegistered extends RegisteredBase {
 	readonly lazyArgs: false;
+	/**
+	 * Built-ins only (F11.86(a)): a single-cell reference argument arrives as a 1×1 `RangeView`,
+	 * as Excel reads a reference. `normalizeSpec` never sets it, so a caller function keeps receiving
+	 * the cell's value.
+	 */
+	readonly oneCellRanges?: boolean;
 	invoke(args: readonly EvalValue[], ctx: EvalContext): EvalValue;
 }
 

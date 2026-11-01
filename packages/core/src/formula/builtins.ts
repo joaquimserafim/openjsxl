@@ -35,22 +35,44 @@ import {
 // AVERAGE (it coerces numeric text inside a reference; Excel ignores it) and TRIM (it keeps internal
 // space runs; Excel collapses them). Where they differ, we match Excel and note it.
 //
-// One narrow, documented degradation flows from the F8.2 arg contract (locked by its tests): a
-// SINGLE-CELL reference collapses to a scalar before a function sees it, so an aggregate treats it as a
-// literal. `SUM(A1)` with A1 holding text/boolean therefore coerces it (Excel ignores non-numbers in a
-// reference). Multi-cell ranges arrive as {@link RangeView}s and follow Excel's range rules exactly.
+// A single-cell reference argument reaches an eager built-in as a 1×1 {@link RangeView}, as Excel reads
+// a reference (F11.86(a)): `SUM(A1)` with A1 holding text or a boolean ignores it, as `SUM(A1:A1)` does.
+// A cell holding a range passes that range on. INDEX, VLOOKUP, HLOOKUP and SUMPRODUCT still receive the
+// cell's value, as in 1.0.0; so do the lazy built-ins (IF, IFERROR, IFNA, IFS, SWITCH, CHOOSE) and every
+// caller function (the F8.2 arg contract, locked by its tests).
 
 const POS_INF = Number.POSITIVE_INFINITY;
 
 // ── helper constructors ─────────────────────────────────────────────────────────────────────────
 
-function eager(
+/**
+ * An eager built-in: its arguments arrive evaluated, and a single-cell reference arrives as a 1×1 range
+ * (F11.86(a)).
+ *
+ * @example eager(1, 2, sum) // { minArgs: 1, maxArgs: 2, volatile: false, lazyArgs: false, oneCellRanges: true, invoke: sum }
+ */
+export function eager(
 	minArgs: number,
 	maxArgs: number,
 	invoke: (args: readonly EvalValue[], ctx: EvalContext) => EvalValue,
 	volatile = false,
 ): EagerRegistered {
-	return { minArgs, maxArgs, volatile, lazyArgs: false, invoke };
+	return { minArgs, maxArgs, volatile, lazyArgs: false, oneCellRanges: true, invoke };
+}
+
+/**
+ * An eager built-in that receives a single-cell reference as the cell's value, not a 1×1 range, as
+ * 1.0.0 read it: INDEX, VLOOKUP and HLOOKUP (F11.86(a)), and SUMPRODUCT, whose shape check would
+ * otherwise turn `SUMPRODUCT(A1,{1,2,3})` into `#VALUE!` (owner ruling, 2026-11-01).
+ *
+ * @example eagerByValue(2, 3, indexFn) // { minArgs: 2, maxArgs: 3, volatile: false, lazyArgs: false, oneCellRanges: false, invoke: indexFn }
+ */
+export function eagerByValue(
+	minArgs: number,
+	maxArgs: number,
+	invoke: (args: readonly EvalValue[], ctx: EvalContext) => EvalValue,
+): EagerRegistered {
+	return { ...eager(minArgs, maxArgs, invoke), oneCellRanges: false };
 }
 
 function lazy(
@@ -90,9 +112,9 @@ function numericOrZero(v: EvalValue): number | FormulaErrorValue {
 	return typeof s === "number" ? s : 0;
 }
 
-// Excel aggregate rule: from a RANGE, only numbers participate (text/boolean/blank ignored); a SCALAR
-// argument is coerced as a literal, except a blank scalar (incl. a single-cell ref to a blank cell) is
-// ignored rather than counted as 0. Errors propagate.
+// Excel aggregate rule: from a RANGE, only numbers participate (text/boolean/blank ignored), and a
+// single-cell reference arrives as one (F11.86(a)); a SCALAR argument is coerced as a literal, except a
+// blank scalar is ignored rather than counted as 0. Errors propagate.
 function collectNumbers(args: readonly EvalValue[]): number[] | FormulaErrorValue {
 	const out: number[] = [];
 	for (const arg of args) {
@@ -787,7 +809,7 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	PI: eager(0, 0, () => Math.PI),
 	CEILING: eager(2, 2, (args) => stepRound(args, "ceil")),
 	FLOOR: eager(2, 2, (args) => stepRound(args, "floor")),
-	SUMPRODUCT: eager(1, POS_INF, sumproduct),
+	SUMPRODUCT: eagerByValue(1, POS_INF, sumproduct),
 
 	// ── logical ───────────────────────────────────────────────────────────────────────────────────
 	IF: lazy(2, 3, (thunks) => {
@@ -881,10 +903,10 @@ const ENTRIES: Record<string, RegisteredFunction> = {
 	}),
 
 	// ── lookup / reference ──────────────────────────────────────────────────────────────────────
-	VLOOKUP: eager(3, 4, (args) => tableLookup(args, "col")),
-	HLOOKUP: eager(3, 4, (args) => tableLookup(args, "row")),
+	VLOOKUP: eagerByValue(3, 4, (args) => tableLookup(args, "col")),
+	HLOOKUP: eagerByValue(3, 4, (args) => tableLookup(args, "row")),
 	MATCH: eager(2, 3, matchFn),
-	INDEX: eager(2, 3, indexFn),
+	INDEX: eagerByValue(2, 3, indexFn),
 	CHOOSE: lazy(2, POS_INF, (thunks) => {
 		const idxThunk = thunks[0];
 		if (idxThunk === undefined) return errorValue("#VALUE!");

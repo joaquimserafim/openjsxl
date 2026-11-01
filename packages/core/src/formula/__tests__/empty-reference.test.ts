@@ -320,9 +320,11 @@ describe("recorded behavior, pending an owner ruling", () => {
 			),
 		).toEqual(["", "", 0, 0]);
 	});
+});
 
-	it("SUM over a single-cell reference to such an empty string gives #VALUE!, as over any text", async () => {
-		// A single-cell reference argument acts like a literal (F11.86(a)); Excel ignores the text.
+describe("a single-cell reference to an empty result (ruled by D21)", () => {
+	it("SUM over a single-cell reference to IFERROR's empty string ignores it, as over a range", async () => {
+		// A single-cell reference argument reads as a reference (F11.86(a)), so the text is ignored.
 		const book = await openXlsx(
 			await writeXlsx({
 				sheets: [
@@ -334,10 +336,6 @@ describe("recorded behavior, pending an owner ruling", () => {
 			}),
 		);
 		const result = await evaluateWorkbook(book);
-		expect(["B1", "C1", "D1"].map((ref) => result.get("S", ref))).toEqual([
-			"",
-			errorValue("#VALUE!"),
-			1,
-		]);
+		expect(["B1", "C1", "D1"].map((ref) => result.get("S", ref))).toEqual(["", 1, 1]);
 	});
 });
