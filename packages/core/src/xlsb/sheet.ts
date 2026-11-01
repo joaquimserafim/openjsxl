@@ -10,7 +10,8 @@ import * as R from "./records";
 // while short cells use the previous column + 1. Both carry a style index and a typed value.
 // Rows/columns convert to the 1-based public A1 model and clamp to the shared grid bounds
 // (a corrupt record can't place a cell off-grid). Style 0, the default, is not stored, and the cells
-// and stored styles of one sheet are capped below V8's Map limit (F11.59).
+// and stored styles of one sheet are capped below V8's Map limit (F11.59). A record cut before the end
+// of its value yields no value (F11.100).
 
 /**
  * The most cells, and the most cells with a non-default style, one xlsb sheet keeps. It sits below
@@ -90,6 +91,52 @@ export function setWithinBudget<V>(
 		);
 	}
 	map.set(ref, value);
+}
+
+/**
+ * The bytes a cell record's value takes after its `header` (4 bytes for a short form, 8 for a full one),
+ * as `decodeCell` reads them: 4 for an RK number or a shared-string index, 8 for a real, 1 for a Boolean
+ * or an error, and none for a blank. A wide string takes its 4-byte count plus its UTF-16 code units;
+ * the `0xFFFFFFFF` null sentinel, or a count the record cuts, takes 4 (F11.100).
+ *
+ * @example valueLength(R.BLANK, data, 8) // 0
+ * @example valueLength(R.SHORT_NUM, data, 4) // 4
+ * @example valueLength(R.FLOAT, data, 8) // 8
+ * @example valueLength(R.BOOL, data, 8) // 1
+ * @example valueLength(R.SHORT_INLINE_STRING, Uint8Array.of(0, 0, 0, 0, 3, 0, 0, 0), 4) // 10
+ * @example valueLength(R.SHORT_INLINE_STRING, Uint8Array.of(0, 0, 0, 0, 255, 255, 255, 255), 4) // 4
+ * @example valueLength(R.INLINE_STRING, Uint8Array.of(0, 0, 0, 0), 8) // 4: the count is cut
+ */
+export function valueLength(id: number, data: Uint8Array, header: number): number {
+	switch (id) {
+		case R.NUM:
+		case R.SHORT_NUM:
+		case R.STRING:
+		case R.SHORT_STRING:
+			return 4;
+		case R.FLOAT:
+		case R.SHORT_FLOAT:
+		case R.FORMULA_FLOAT:
+			return 8;
+		case R.BOOL:
+		case R.SHORT_BOOL:
+		case R.FORMULA_BOOL:
+		case R.BOOLERR:
+		case R.SHORT_BOOLERR:
+		case R.FORMULA_BOOLERR:
+			return 1;
+		case R.INLINE_STRING:
+		case R.SHORT_INLINE_STRING:
+		case R.FORMULA_STRING: {
+			if (data.length < header + 4) return 4; // the record cuts the count
+			// The little-endian u32 count, read in place: this runs for every string record.
+			let count = 0;
+			for (let i = 3; i >= 0; i--) count = count * 256 + (data[header + i] as number);
+			return count === 0xffffffff ? 4 : 4 + count * 2;
+		}
+		default:
+			return 0; // Full/short BLANK: no value
+	}
 }
 
 /**
@@ -201,7 +248,8 @@ export function parseXlsbSheet(
 				const d = new RecordData(rec.data);
 				// Short cells omit only the column field. Every cell, even a blank or truncated
 				// record, establishes the position for the next short cell in this row.
-				col = rec.id >= R.SHORT_BLANK && rec.id <= R.SHORT_STRING ? col + 1 : d.u32();
+				const short = rec.id >= R.SHORT_BLANK && rec.id <= R.SHORT_STRING;
+				col = short ? col + 1 : d.u32();
 				// All cell records count as used, including styled blanks.
 				firstUsedRow = Math.min(firstUsedRow, row);
 				firstUsedCol = Math.min(firstUsedCol, col);
@@ -229,6 +277,11 @@ export function parseXlsbSheet(
 						maxCells,
 						"cells with a non-default style",
 					);
+				// A record cut before the end of its value reads like a blank of its form: its style, no
+				// value, and an earlier value at the ref survives. Past the end, RecordData would read
+				// 0, `false` or a partial string instead (F11.100).
+				const header = short ? 4 : 8;
+				if (rec.data.length < header + valueLength(rec.id, rec.data, header)) break;
 				const cell = decodeCell(rec.id, ref, d, styleRef, sharedStrings, styles, date1904);
 				if (cell !== undefined) setWithinBudget(cells, ref, cell, maxCells, "cells");
 				break;

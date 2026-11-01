@@ -318,10 +318,11 @@ describe("parseXlsbSheet — used dimensions", () => {
 		).toBe("XFD1048576:A1048576");
 	});
 
-	it("recognizes truncated cell payloads using existing zero-default decoding", () => {
+	it("counts truncated cell payloads in the dimension without inventing a value", () => {
+		// A record cut before the end of its value has no value (F11.100); HEAD read 0.
 		const numeric = parse(dimension(), row(5), record(R.NUM, []));
 		expect(numeric.dimension).toBe("A6");
-		expect(numeric.cells.get("A6")).toEqual({ ref: "A6", type: "number", value: 0 });
+		expect(numeric.cells.size).toBe(0);
 		const blank = parse(dimension(), row(3), record(R.BLANK, [1, 0, 0]));
 		expect(blank.dimension).toBe("A4");
 		expect(blank.cells.size).toBe(0);

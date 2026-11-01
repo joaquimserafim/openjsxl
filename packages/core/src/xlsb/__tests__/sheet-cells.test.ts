@@ -332,9 +332,10 @@ describe("parseXlsbSheet — full and short cell records", () => {
 		},
 	);
 
-	it("bounds declared inline lengths to the actual record and keeps following records intact", () => {
+	it("drops an inline string shorter than its declared length and keeps following records intact", () => {
+		// A record cut before the end of its value has no value (F11.100); HEAD read "A�".
 		const sheet = parse(short(0x11, [...u32(0xfffffffe), 65, 0, 66]), short(0x0f, [1]));
-		expect(sheet.cells.get("A1")?.value).toBe("A�");
+		expect(sheet.cells.has("A1")).toBe(false);
 		expect(sheet.cells.get("B1")?.value).toBe(true);
 		const overrun = parseXlsbSheet(
 			Uint8Array.from([0x11, 127, ...u32(0), ...wide("end")]),
