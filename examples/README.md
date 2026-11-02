@@ -14,6 +14,7 @@ From the repo root, once:
 
 ```sh
 pnpm install   # links the workspace `openjsxl` into ./examples/node_modules
+pnpm build     # builds the packages the examples import (their dist/ is not committed)
 ```
 
 Then any example:

@@ -4,8 +4,6 @@ import { openCsv, openOds, openXlsb, openXlsx, streamXlsx, writeXlsx } from "ope
 // parse); buffered write returns the bytes; the streamed write drains a ReadableStream fed a LAZY
 // row source, retaining no chunk, so its memory column reflects true constant-memory streaming.
 
-export const capabilities = { read: true, write: true, writeStyled: true, stream: true };
-
 // One explicit opener per container — the whole point of the multi-format read lanes is that each
 // format has its own typed entry point (no auto-dispatch cost in the shipped core).
 const OPENERS = { xlsx: openXlsx, xlsb: openXlsb, ods: openOds, csv: openCsv };

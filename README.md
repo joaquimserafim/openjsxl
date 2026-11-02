@@ -30,7 +30,7 @@ runtimes — Node, Deno, Bun, the browser, and edge.
 
 **Security:** use the [security policy](./SECURITY.md) for private vulnerability reporting,
 supported releases and untrusted-workbook limits. Per-part read guards are not a total CPU or
-memory budget; the policy also distinguishes published 1.0.0 from unreleased 1.0.1 protections.
+memory budget; the policy also notes which protections are new in 1.1.0.
 
 ## Quick start
 
@@ -80,6 +80,10 @@ for await (const row of streamSheetRows(bytes /*, 'Sheet1' */)) {
 }
 ```
 
+Rows arrive as they decode, so a damaged sheet can throw after some or all of its rows were yielded:
+a sheet entry that ends short, or one whose CRC-32 is wrong when `verifyChecksums` is on, fails only
+after the last row. Treat streamed rows as provisional until the loop completes.
+
 ### Styles, metadata & typed errors
 
 Beyond values, a worksheet exposes each cell's resolved style and the metadata Excel writers
@@ -89,10 +93,11 @@ row defaults, so a date column reads as dates even when its cells carry no style
 Malformed input throws a typed `XlsxError` with a discriminating `code`, never a bare
 `TypeError` from a corrupt file.
 
-Every fully read ZIP part must produce exactly its declared uncompressed size. CRC-32 verification
-is opt-in in 1.0.1: pass `{ verifyChecksums: true }` to detect accidental payload corruption in
-fully consumed entries. A cancelled stream makes no checksum claim for its partial entry, and
-CRC-32 is an integrity check—not authentication or tamper resistance.
+Every fully read ZIP part must produce exactly its declared uncompressed size: one that ends short
+fails with `corrupt-zip`, and one that runs past it fails with `part-too-large`, even when you set
+no limit. CRC-32 verification is opt-in (since 1.1.0): pass `{ verifyChecksums: true }` to detect
+accidental payload corruption in fully consumed entries. A cancelled stream makes no checksum claim
+for its partial entry, and CRC-32 is an integrity check—not authentication or tamper resistance.
 
 ```ts
 import { openXlsx, XlsxError } from 'openjsxl';
@@ -131,7 +136,7 @@ sheet.state; // "visible" | "hidden" | "veryHidden" (sheet.visible is the boolea
 
 await sheet.images(); // [{ anchor, bytes, mime, name? }, …] — anchored pictures; `bytes` is the
 // raw image payload, `anchor` the raw cell + EMU geometry. Async & lazy: media is only
-// decompressed on first call (once per drawing part — sheets sharing a logo each read it once)
+// decompressed on first call, each image part once per workbook (sheets sharing a logo share it)
 
 wb.resolveColor({ theme: 4, tint: 0.4 }); // "FF96B4D8" — a style color as 8-digit ARGB,
 // resolved against the workbook's own theme (colors stay raw {theme, tint} in the style model)
@@ -166,7 +171,10 @@ await writeFile('report.xlsx', bytes); // opens cleanly in Excel and LibreOffice
 The output is deterministic (identical input → identical bytes), strings are written inline (no
 shared-strings table), and input the format can't represent — no sheets, a bad or duplicate sheet
 name, a non-finite number, an invalid `Date` — throws a typed `XlsxError` with
-`code: 'invalid-input'` rather than producing a file Excel must repair. Cell and legacy Note text
+`code: 'invalid-input'` rather than producing a file Excel must repair. Since 1.1.0 the writer reads
+only an input object's own properties: a class instance or `Object.create` record whose prototype
+supplies a model field fails with `invalid-input` naming the field, and a key added to
+`Object.prototype` is ignored. Cell and legacy Note text
 do not fail solely because XML cannot carry a character: controls and lone surrogates are stored
 with Excel's `_xHHHH_` escape, so they round-trip instead of corrupting or rejecting.
 An optional second argument `writeXlsx(input, { date1904: true })` selects the 1904 date epoch
@@ -187,10 +195,10 @@ never existed: serial 1 reads as 1899-12-31 where Excel shows 1900-01-01, and 19
 as serial 2. The formula evaluator uses the same calendar (`YEAR(1)` is 1899). Dates from
 1900-03-01 through 9999-12-31 match Excel, as do dates from 1904-01-01 in the 1904 system. The
 writer accepts dates outside those ranges without an error, as serials Excel cannot show as those
-dates; 1.1 plans to reject them. A time or duration formatted like `h:mm` or `[h]:mm` reads back
-from `.xlsx` and `.xlsb` as a `Date` counted from the epoch: 1899-12-30, or 1904-01-01 in the 1904
-system. `dateToSerial(cell.value, workbook.date1904)` gives its length in days, so 36 hours reads
-as 1.5. `.ods` returns durations as numbers.
+dates; a later release plans to reject them. A time or duration formatted like `h:mm` or `[h]:mm`
+reads back from `.xlsx` and `.xlsb` as a `Date` counted from the epoch: 1899-12-30, or 1904-01-01 in
+the 1904 system. `dateToSerial(cell.value, workbook.date1904)` gives its length in days, so 36 hours
+reads as 1.5. `.ods` returns durations as numbers.
 
 Worksheet tab names, legacy Note authors, `Hyperlink.location` values, and **every formula field** —
 cell formulas, `DefinedName.refersTo`, data-validation `formula1`/`formula2`, conditional-formatting
@@ -204,14 +212,29 @@ a fragment within that external destination.
 Compatibility note: openjsxl 1.0.0 wrote these fields raw, so an escape-shaped value in a
 1.0.0-produced file is ambiguous and Microsoft Excel interprets it as an escape (`_x0041_` → `A`).
 There is no reliable way to infer the original intent; openjsxl follows OOXML/Excel rather than
-double-decoding or guessing. Separately, since 1.0.1 a carriage return inside any formula field travels as the `ST_Xstring` escape `_x000D_` (not `&#13;`): the 1.0.1 reader reads both spellings, but an openjsxl reader older than 1.0.1 shows the seven literal characters `_x000D_` for a CR written by 1.0.1. Direct writer locations must be XML-safe. On read, a location that
-decodes to a value rejected by the XML writer is omitted; if no target remains, the hyperlink is
-omitted. openpyxl 3.1.5 does not consistently apply this rule to these schema fields, so its
-behavior can differ for this case.
+double-decoding or guessing.
+
+Separately, since 1.1.0 a carriage return in a formula field, a hyperlink location or a Note author
+is written as the `ST_Xstring` escape `_x000D_`, not the character reference `&#13;`. Readers differ
+on it. openjsxl since 1.1.0 reads both spellings as a CR. openjsxl 1.0.0 and openpyxl 3.1.5 show the
+seven characters `_x000D_` literally in all three: formula fields, hyperlink locations and Note
+authors. SheetJS decodes it in formulas and defined names, but shows it literally in Note authors
+and in a hyperlink's `location`.
+
+Direct writer locations must be XML-safe. On read, a location that decodes to a value rejected by the
+XML writer is omitted. Since 1.1.0 the `.xlsx` reader leaves out every hyperlink left with no
+destination: no external target it can resolve and no usable location, such as a tooltip-only link
+or one whose `r:id` names no relationship. 1.0.0 returned such a record. openpyxl 3.1.5 does not
+consistently apply this rule to these schema fields, so its behavior can differ for this case.
+
+A defined name is left out when its decoded `refersTo` is one the writer could not emit: empty,
+longer than 8,192 characters, starting with `=`, or holding a control character other than tab, line
+feed or carriage return, U+FFFE, U+FFFF or a lone surrogate. Since 1.1.0 this covers an `_xHHHH_`
+escape that decodes to such a character, which 1.0.0 returned as the escape's text.
 
 In a workbook that `openXlsx` or `streamSheetRows` reads (`.xlsx`, `.xlsm`, `.xltx`), two tabs can
 carry the same name ignoring case once decoded: `A` and `a`, or a raw `_x0041_` and `A` (openpyxl
-3.1.5 writes a tab titled `_x0041_` raw, and it decodes to `A`). Since 1.0.1 the reader keeps the
+3.1.5 writes a tab titled `_x0041_` raw, and it decodes to `A`). Since 1.1.0 the reader keeps the
 first of them that loads and leaves each later one out, together with its sheet-scoped defined names;
 1.0.0 returned both. A formula or defined name that refers to a left-out tab, such as `a!A1`, then
 reads the kept tab in the formula evaluator, where sheet names match ignoring case. Names are
@@ -396,9 +419,9 @@ Each reader returns the shared model; features a format can't express **degrade*
 | Format | Reads | Not carried (degrades) |
 | --- | --- | --- |
 | **`.xlsx` / `.xlsm` / `.xltx`** | everything in the round-trip table above | — |
-| **`.xlsb`** | values & types, dates (style-driven, on the epoch `BrtWbProp`'s 1904 flag selects), number formats, hyperlinks, dimension, sheet visibility | merges, formula text (cached values kept), styles, comments, geometry, images |
-| **`.ods`** | values & types, dates, merges, in-cell hyperlinks, sheet names/order | styles & number formats, formula text (cached values kept), visibility, comments, geometry, images |
-| **`.csv` / `.tsv`** | values with conservative type inference (numbers & booleans; **never dates**), one sheet, auto-detected delimiter | everything structural — CSV carries none |
+| **`.xlsb`** | values & types, dates (style-driven, on the epoch `BrtWbProp`'s 1904 flag selects), number formats, external hyperlink targets, dimension (none for an empty sheet, where `.xlsx` declares `A1`), sheet visibility | merges, formula text (cached values kept), styles, comments, geometry, images, a hyperlink's in-workbook location, tooltip and display text |
+| **`.ods`** | values & types, dates, merges, in-cell hyperlinks (an in-document `#Sheet.A1` link reads as an external `target`), sheet names/order | styles & number formats, formula text (cached values kept), visibility, comments, geometry, images |
+| **`.csv` / `.tsv`** | values with type inference (numbers & booleans; **never dates**), one sheet, auto-detected delimiter. Inference drops a leading `+` (`+123` reads as 123) and rounds a decimal with more digits than a double holds; an integer beyond `Number.MAX_SAFE_INTEGER` or with leading zeros stays text | everything structural — CSV carries none |
 
 The XLSB reader supports full and compact cell records emitted by SheetJS 0.20.3, including
 plain inline strings and shared strings. Compact records retain their positions across blanks
@@ -431,9 +454,11 @@ parseFormula('SUM(A1:A9)*2');                // …or just the typed AST, no eva
 ```
 
 Evaluation is **read-only** — the workbook and its stored `<v>` caches are never mutated, so a
-recomputed value can (correctly) supersede a stale cache. Deep dependency chains don't grow the JS
-stack, and **circular references resolve to a dedicated `#CYCLE!` value** rather than hanging — the
-cycle's cells become `#CYCLE!` while every unrelated cell still evaluates.
+recomputed value can (correctly) supersede a stale cache. Chains of direct references, such as
+`=A2+1` copied down 20,000 rows, don't grow the JS stack, and **circular references resolve to a
+dedicated `#CYCLE!` value** rather than hanging — the cycle's cells become `#CYCLE!` while unrelated
+cells still evaluate. An `IFERROR` around a cycle can return its fallback instead, and a formula
+past the depth cap (below) can abort the whole evaluation.
 
 **Bring your own functions.** `options.functions` registers user-defined functions with the same
 shape the 90+ built-ins use (case-insensitive, eager or lazy):
@@ -445,7 +470,7 @@ await evaluateWorkbook(wb, {
 ```
 
 Excel stores functions added after Excel 2007 with a prefix: `_xlfn.IFNA`, and `_xlfn._xlws.SORT`
-for FILTER and SORT. Since 1.0.1 such a call reaches the built-in, or the function you registered,
+for FILTER and SORT. Since 1.1.0 such a call reaches the built-in, or the function you registered,
 under the bare name, so register `XLOOKUP`, not `_xlfn.XLOOKUP`. A function registered under the
 exact prefixed name still wins.
 
@@ -462,45 +487,52 @@ so the same inputs always produce the same output.
 information (`IS*` `N` `T` `NA` `ERROR.TYPE`), and date/time (`DATE` `YEAR` `MONTH` `DAY` `HOUR`
 `MINUTE` `SECOND` `WEEKDAY` `TIME` `DAYS` `EDATE` `EOMONTH`).
 
-**Not evaluated in 0.8** (documented, never silently wrong — an unknown function is `#NAME?`, an
-unsupported reference a typed error value): `ROW`/`COLUMN`, `XLOOKUP`, `DATEVALUE`, `TEXT`, wildcard
-`SEARCH` (matched literally), array arithmetic inside an aggregator (`SUM(A1:A3*B1:B3)` → a typed
-`#VALUE!`, not an element-wise array), 3-D references (`Sheet1:Sheet3!A1` → `#REF!`),
-`OFFSET`/`INDIRECT`, R1C1, cross-workbook references, and iterative-calculation mode. Semantics
-follow documented Excel. A single-cell reference passed to a built-in function reads as a reference,
-as the same cell written `A1:A1` does: `SUM(A1)` ignores text or a boolean in A1, and a cell holding a
-range passes that range on. `INDEX`, `VLOOKUP`, `HLOOKUP` and `SUMPRODUCT`, the conditional `IF`,
-`IFERROR`, `IFNA`, `IFS`, `SWITCH` and `CHOOSE`, and user-defined functions still receive the cell's
-value.
+**Not evaluated** (an unknown function is `#NAME?`, and most unsupported references give a typed
+error value): `ROW`/`COLUMN`, `XLOOKUP`, `DATEVALUE`, `TEXT`, wildcard `SEARCH` (matched literally),
+array arithmetic inside an aggregator (`SUM(A1:A3*B1:B3)` → a typed `#VALUE!`, not an element-wise
+array), 3-D references (`Sheet1:Sheet3!A1` → `#REF!`), structured references (`Table1[Qty]` →
+`#REF!`), the intersection and union operators (`A1:B2 B1:C2`, `(A1,B1)` → `#VALUE!`),
+`OFFSET`/`INDIRECT`, R1C1, cross-workbook references, and iterative-calculation mode. An off-grid
+reference such as `A0` or `ZZZ1` reads as an empty cell rather than an error. Nesting is capped. A
+formula with parentheses nested more than 256 deep, or function calls nested more than 64 deep,
+reads as `#VALUE!`. Evaluation that nests more than 256 levels throws `FormulaError` code
+`depth-exceeded`, which aborts `evaluateWorkbook`: an operator chain such as a 300-term `1+1+…` sum
+does, and so does a chain of references through `IF` or `IFERROR`, such as `=IFERROR(A2,0)+1` copied
+down about 130 rows or more. Semantics follow documented Excel. A single-cell reference passed to a
+built-in function reads as a reference, as the same cell written `A1:A1` does: `SUM(A1)` ignores
+text or a boolean in A1, and a cell holding a range passes that range on. `INDEX`, `VLOOKUP`,
+`HLOOKUP` and `SUMPRODUCT`, the conditional `IF`, `IFERROR`, `IFNA`, `IFS`, `SWITCH` and `CHOOSE`,
+and user-defined functions still receive the cell's value.
 
-Since 1.0.1 an array constant passed to a function that takes a range or an array is a full array
+Since 1.1.0 an array constant passed to a function that takes a range or an array is a full array
 (`SUM({1,2,3})` is 6, `MATCH("b",{"a","b","c"},0)` is 2), and a cell whose formula is an array
 shows its first element. A parameter that takes one value, and an operator, use only the first
 element: Excel applies them element by element, so `SUM(COUNTIF(A:A,{"a","b"}))` and
 `SUM({1,2}*2)` count or add only the first element here, where Excel adds both. A defined name
 whose value is an array constant is not evaluated (`#NAME?`).
 
-Since 1.0.1 a sheet name in a formula matches ignoring case, as in Excel, so `=data!A1` reads sheet
+Since 1.1.0 a sheet name in a formula matches ignoring case, as in Excel, so `=data!A1` reads sheet
 Data; so does the sheet you pass to `evaluateCell`. A sheet-qualified name such as `Data!Rate` uses
 the `Rate` scoped to Data, then the workbook-wide one, and a qualifier that names no sheet gives
 `#REF!`.
 
 Text a formula builds is capped at 32,767 characters, Excel's cell limit: a longer result is
-`#VALUE!`. `CONCAT`, `CONCATENATE`, `TEXTJOIN` and `REPT` always did this. Since 1.0.1 so do `&`,
+`#VALUE!`. `CONCAT`, `CONCATENATE`, `TEXTJOIN` and `REPT` always did this. Since 1.1.0 so do `&`,
 `SUBSTITUTE`, `REPLACE`, `UPPER` and `LOWER` (`REPT("a",32767)&"b"` is `#VALUE!`), and a result too
 long for JavaScript gives `#VALUE!` instead of throwing. A longer text that a file stored is still
 returned as it is by a formula that passes it through unchanged, such as `=A1`, `LEFT`, `MID`, or a
 `SUBSTITUTE` that replaces nothing.
 
-Since 1.0.1 `TEXTJOIN` with ignore_empty FALSE gives an empty item for every empty cell in a range, as
-in Excel: with "a" in A1, A2 empty and "c" in A3, `TEXTJOIN(",",FALSE,A1:A3)` is `"a,,c"`. Over a large
-range, such as a whole column, those empty items can pass the 32,767-character limit. The result is
-then `#VALUE!`, and no cell of a range past that point is read, so an error there does not show.
+Since 1.1.0 `TEXTJOIN` with ignore_empty FALSE gives an empty item for every empty cell in a range,
+as in Excel: with "a" in A1, A2 empty and "c" in A3, `TEXTJOIN(",",FALSE,A1:A3)` is `"a,,c"`. Over a
+large range, such as a whole column, those empty items can pass the 32,767-character limit. The
+result is then `#VALUE!`, and no cell of a range past that point is read, so an error there does not
+show.
 
-Since 1.0.1 a criterion longer than 255 characters, operator included, gives `#VALUE!` in `COUNTIF`,
-`SUMIF`, `AVERAGEIF` and their `IFS` forms, and so does a text lookup value of that length in `VLOOKUP`,
-`HLOOKUP` and `MATCH`, in every match mode, as Excel documents for VLOOKUP, COUNTIF(S) and SUMIF(S). Within
-that limit, wildcard matching takes time in proportion to the text it reads.
+Since 1.1.0 a criterion longer than 255 characters, operator included, gives `#VALUE!` in `COUNTIF`,
+`SUMIF`, `AVERAGEIF` and their `IFS` forms, and so does a text lookup value of that length in
+`VLOOKUP`, `HLOOKUP` and `MATCH`, in every match mode, as Excel documents for VLOOKUP, COUNTIF(S)
+and SUMIF(S). Within that limit, wildcard matching takes time in proportion to the text it reads.
 
 ## Tables, data validation & conditional formatting (0.9)
 
@@ -644,7 +676,7 @@ Returned by every reader. ([01](./examples/01-read-cells.mjs),
 | `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
 | `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
 | `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
-| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
+| `date1904` | `boolean` | Since 1.1.0. The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
 | `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
 | `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
 | `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |
@@ -660,7 +692,7 @@ A sheet's cells, style/format accessors, and metadata.
 | `visible` / `state` | `boolean` / `SheetState` | Visibility (`state` is the source; `visible === (state === "visible")`). |
 | `mergedCells` | `readonly string[]` | Merged ranges in A1, document order. |
 | `hyperlinks` | `readonly Hyperlink[]` | Hyperlinks in document order; location is in-workbook without target, or a fragment within target when both are present. |
-| `dimension` | `string \| undefined` | Declared used range in A1. |
+| `dimension` | `string \| undefined` | Declared used range in A1. An empty `.xlsb` sheet has none, where `.xlsx` declares `A1`. |
 | `comments` | `readonly Comment[]` | Cell comments. |
 | `tables` | `readonly TableInfo[]` | Defined tables. |
 | `dataValidations` | `readonly DataValidation[]` | Validation rules. |
@@ -676,12 +708,13 @@ A sheet's cells, style/format accessors, and metadata.
 | `formula(ref)` | `(ref: string) => string \| undefined` | Formula text at a cell — logical stored form (`ST_Xstring`-decoded once). |
 | `images()` | `() => Promise<readonly SheetImage[]>` | Anchored pictures (lazy). |
 | `cell(ref)` | `(ref: string) => Cell` | Cell at A1; absent cells read as `empty`. |
-| `rows()` | `() => AsyncGenerator<Row>` | Stream populated rows (sparse). |
+| `rows()` | `() => AsyncGenerator<Row>` | Stream rows (sparse; in `.xlsx`, a property-only row and a styled blank cell are included). |
 
 ### `Cell` & `Row`
 
 `Cell` is a discriminated union — narrow on `type` to type `value`. `Row` is `{ index: number;
-cells: readonly Cell[] }` (sparse — absent rows/cells are omitted).
+cells: readonly Cell[] }` (sparse — absent rows/cells are omitted; in `.xlsx`, a row with only a
+height or hidden flag, and a styled blank cell, are present).
 
 | `cell.type` | `cell.value` | | `cell.type` | `cell.value` |
 | --- | --- | --- | --- | --- |
@@ -720,11 +753,11 @@ The style model `style(ref)` returns and `{ value, style }` accepts. ([07](./exa
 What `writeXlsx` / `streamXlsx` accept — mirrors of the reader's model, so read → modify → write
 is a pass-through. ([06](./examples/06-write.mjs), [08](./examples/08-streaming-write.mjs))
 
-- **`WorkbookInput`** `{ sheets: SheetInput[], themeXml?, definedNames?: DefinedName[], protection?: WorkbookProtection }`.
+- **`WorkbookInput`** `{ sheets: SheetInput[], themeXml?, definedNames?: DefinedName[], protection?: WorkbookProtection, date1904? }` (`date1904?` since 1.1.0; a set `WriteOptions.date1904` overrides it).
 - **`SheetInput`** `{ name, rows: (CellInput[] | undefined)[], columns?, rowProperties?, freeze?, merges?, hyperlinks?, state?, comments?, images?, tables?, dataValidations?, conditionalFormatting?, autoFilter?, protection?, pageMargins?, pageSetup?, printOptions?, headerFooter? }`.
 - **`CellInput`** = `CellValue | StyledCell`. **`CellValue`** = `string | number | boolean | Date | null | undefined`. **`StyledCell`** `{ value?, style?: CellStyle, formula? }`.
 - **`WriteOptions`** `{ date1904? }`.
-- **Streaming** — **`StreamWorkbookInput`** `{ sheets: StreamSheetInput[], themeXml?, definedNames?, protection? }`; **`StreamSheetInput`** (as `SheetInput` but `rows: StreamRows`); **`StreamRows`** = `Iterable | AsyncIterable` of `CellInput[] | undefined`.
+- **Streaming** — **`StreamWorkbookInput`** `{ sheets: StreamSheetInput[], themeXml?, definedNames?, protection?, date1904? }` (`date1904?` since 1.1.0); **`StreamSheetInput`** (as `SheetInput` but `rows: StreamRows`); **`StreamRows`** = `Iterable | AsyncIterable` of `CellInput[] | undefined`.
 
 ### Names, protection & print setup types
 
@@ -748,7 +781,7 @@ The 1.0 fidelity types — each is the same record on the reader and the writer.
 
 - **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
 - **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
-- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (1.0.1) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification defaults to `false`. Since 1.0.1 each limit must be a number, at least 0 (`Infinity` for none), and `verifyChecksums` a boolean; `null` keeps the default, and any other value throws `XlsxError('invalid-input')` before the file is read, from `openXlsx`, `openXlsb`, `openOds`, `streamSheetRows` and `detectSpreadsheetFormat`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (since 1.1.0) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification (`verifyChecksums`, since 1.1.0) defaults to `false`. Since 1.1.0 each limit must be a number, at least 0 (`Infinity` for none), and `verifyChecksums` a boolean; `null` keeps the default, and any other value throws `XlsxError('invalid-input')` before the file is read, from `openXlsx`, `openXlsb`, `openOds`, `streamSheetRows` and `detectSpreadsheetFormat`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
 
 ### `openjsxl/formula`
 
@@ -764,11 +797,11 @@ The opt-in evaluator — a separate import that never changes the core bundle.
 | `isErrorValue` | `(v: unknown) => v is FormulaErrorValue` | Narrowing guard. |
 | `isRangeView` | `(v: unknown) => v is RangeView` | Narrowing guard. |
 
-- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations. `maxCellVisits` (default 5,000,000) must be a number, at least 0 (`Infinity` for none); since 1.0.1 any other value except `null` throws `FormulaError('unsupported')`.
+- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations. `maxCellVisits` (default 5,000,000) must be a number, at least 0 (`Infinity` for none); since 1.1.0 any other value except `null` throws `FormulaError('unsupported')`.
 - **Results** — `WorkbookEvalResult` `{ cells: readonly CellResult[]; get(sheet, ref): ScalarValue | undefined }`; `CellResult` `{ sheet, ref, value }`.
 - **Values** — `ScalarValue` = `number | string | boolean | null | FormulaErrorValue`; `EvalValue` = `ScalarValue | RangeView`; `FormulaErrorValue` `{ kind: "error", code: ErrorCode }`; `ErrorCode` (the eight `ST_CellErrorType` values + `#CYCLE!`).
 - **`RangeView`** — a lazy window over a reference's used cells: `sheet`, `startCol/startRow/endCol/endRow`, `width`/`height`/`cellCount` (getters), `entries()`, `values()`, `populatedCount()`, `single()`, `topLeft()`, `cellAt(rowOffset, colOffset)`; `RangeEntry` `{ col, row, value }`.
-- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both extending `FunctionSpecBase` `{ minArgs, maxArgs, volatile? }`; `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number; date1904?: boolean }` and (lazy) `ArgThunk` = `() => EvalValue`.
+- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both with `{ minArgs, maxArgs, volatile? }` (their shared base, `FunctionSpecBase`, is not exported); `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number; date1904?: boolean }` (`date1904?` since 1.1.0; the evaluator always sets it, and a hand-built context without it uses the 1900 system) and (lazy) `ArgThunk` = `() => EvalValue`.
 - **AST** — `FormulaAst` is the union of `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `ErrorLiteral`, `ArrayLiteral` (`ArrayElement`), `CellRefNode`, `NameRef`, `RangeRef`, `UnionRef`, `FunctionCall`, `EmptyArg`, `UnaryOp`, `PostfixOp`, `BinaryOp`, `Group`, `StructuredRef`, `ExternalRef`; a qualifying sheet is `SheetSpec`. The single-cell node is **`CellRefNode`** (named so it never collides with `openjsxl`'s `CellRef`, letting you import both entry points at once).
 - **Errors** — `FormulaError extends Error` `{ code: FormulaErrorCode, position? }`; `FormulaErrorCode` = `"parse-error"` | `"depth-exceeded"` | `"too-many-args"` | `"budget-exceeded"` | `"volatile-unconfigured"` | `"unsupported"`.
 

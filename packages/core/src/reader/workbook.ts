@@ -514,7 +514,10 @@ export class XlsxWorksheet implements Worksheet {
 		return this.#index().get(ref) ?? { ref, type: "empty", value: null };
 	}
 
-	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
+	/**
+	 * Stream the rows in document order. Sparse: absent rows and cells are omitted, while a
+	 * property-only row and a styled blank cell are yielded.
+	 */
 	async *rows(): AsyncGenerator<Row> {
 		for (const row of readRows(this.#xml, this.#context)) {
 			yield row;
@@ -833,6 +836,10 @@ async function loadWorkbook(
  * legitimately huge worksheet whose decompressed XML exceeds `maxPartBytes` (2 GiB) is rejected by
  * default even when streamed — pass `maxPartBytes: Number.POSITIVE_INFINITY` to stream it (the ratio
  * guard still protects against a bomb).
+ *
+ * `streamSheetRows` yields each row as it decodes, so a damaged sheet can throw after some or all of
+ * its rows: an entry that ends short, or one whose CRC-32 is wrong when `verifyChecksums` is on, fails
+ * only after the last row. Treat streamed rows as provisional until the iteration completes.
  */
 export interface ReadOptions {
 	readonly maxPartBytes?: number;

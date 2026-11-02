@@ -5,8 +5,19 @@
 // code unit in hex — and a LITERAL substring that happens to look like an escape is protected by
 // escaping its own leading underscore: the data `_x0041_` is stored as `_x005F_x0041_`. Excel and
 // conforming consumers apply this on load/save, so a writer that emits the pattern verbatim silently
-// corrupts such data for those consumers (F9.6). Some third-party libraries apply the convention
-// only to selected schema fields; interoperability follows the OOXML field type, not their coverage.
+// corrupts such data for those consumers (F9.6).
+//
+// openjsxl applies it, decoding on read and encoding on write, to these fields: cell strings
+// (inline, shared and cached formula strings), comment text and legacy Note authors, sheet names,
+// defined-name names and `refersTo` formulas, cell formulas, data-validation `formula1`/`formula2`,
+// conditional-formatting formulas, hyperlink locations, header and footer text, and table names,
+// column names, totals-row labels and totals-row and calculated-column formulas (F11.4, F11.20).
+// Other `ST_Xstring` attributes are carried verbatim, without the escape: hyperlink `tooltip` and
+// `display`, data-validation prompt and error text, and conditional-formatting `text` (F9.6). The
+// escape is matched with a lowercase `x`, as Excel writes it, and hex digits of either case. That
+// spelling rule is syntax compatibility only; which fields a third-party library decodes is a
+// separate matter, and some apply the convention only to selected fields. Interoperability follows
+// the OOXML field type, not their coverage.
 //
 // The pair is single-sourced here for codec identity: `decodeXstring(encodeXstring(s)) === s` for
 // EVERY string, and `encodeXstring` is the IDENTITY on strings with nothing to escape, which keeps

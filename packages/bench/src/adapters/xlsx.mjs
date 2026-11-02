@@ -2,10 +2,8 @@ import * as XLSX from "xlsx";
 
 // SheetJS adapter (the reviewed official 0.20.3 distribution pinned in package.json). Reading
 // materializes every row via sheet_to_json; writing deflates (compression:true) so its output size
-// is comparable. Cell styling is a SheetJS Pro feature absent from this build, so styled write is
-// declared unsupported rather than measured doing less work than the others.
-
-export const capabilities = { read: true, write: true, writeStyled: false, stream: false };
+// is comparable. Cell styling is a SheetJS Pro feature absent from this build, so styled write
+// throws "unsupported" rather than being measured doing less work than the others.
 
 // SheetJS sniffs the container (xlsx / xlsb / ods / csv) from the bytes, so ONE read path serves
 // every format lane — the `format` argument is accepted for a uniform adapter signature but unused.

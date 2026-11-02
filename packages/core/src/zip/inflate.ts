@@ -1,8 +1,10 @@
 import { XlsxError } from "../errors";
 
-// Raw DEFLATE decompression using the platform Compression Streams API — available on
-// Node >= 18, Deno, Bun, modern browsers, and Cloudflare Workers. This is why openjsxl
-// needs no zip/inflate dependency: the runtime already ships one.
+// Raw DEFLATE decompression using the platform Compression Streams API — available on Deno, Bun,
+// modern browsers, Cloudflare Workers, and Node with `'deflate-raw'` support: 20.12 on the 20 line,
+// and every release from 22. This is why openjsxl needs no zip/inflate dependency: the runtime
+// already ships one. The supported Node floor is the `engines` field's >= 24, a deliberate support
+// choice.
 //
 // `maxBytes` bounds the output: decompression is aborted and a typed `part-too-large` error
 // thrown once the inflated size would exceed it — the abort happens DURING streaming, so a

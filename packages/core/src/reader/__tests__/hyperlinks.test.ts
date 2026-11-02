@@ -124,6 +124,19 @@ describe("parseHyperlinks — units", () => {
 		]);
 	});
 
+	it("reads a CR written as the character reference &#13; like its _x000D_ spelling (E20, D10)", () => {
+		// The pre-E20 wire form: a CR in a location travelled as &#13;. It keeps reading as the CR.
+		const xml =
+			"<hyperlinks>" +
+			'<hyperlink ref="A1" location="a&#13;b"/>' +
+			'<hyperlink ref="A2" location="a_x000D_b"/>' +
+			"</hyperlinks>";
+		expect(parseHyperlinks(xml)).toEqual([
+			{ ref: "A1", location: "a\rb" },
+			{ ref: "A2", location: "a\rb" },
+		]);
+	});
+
 	it("degrades unsafe decoded locations and keeps reader output inside writer bounds", async () => {
 		const xml =
 			"<hyperlinks>" +

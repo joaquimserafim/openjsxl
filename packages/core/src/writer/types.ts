@@ -180,8 +180,9 @@ export interface WorkbookInput {
 	 * date1904="1"/>`), so every date the writer serializes uses it and raw serials the caller passes
 	 * (formula cached values, validation operands) keep their meaning. This is what
 	 * `workbookToInput` carries from `Workbook.date1904`, so a 1904 workbook rewrites as a 1904
-	 * workbook. An explicit `WriteOptions.date1904` overrides it. Absent (or `false`) = 1900 system,
-	 * byte-identical to a workbook that never set it.
+	 * workbook. A set `WriteOptions.date1904` overrides it: `true` selects 1904 and any other value
+	 * 1900, while a `null` or absent option leaves this flag to decide. Absent (or `false`) = 1900
+	 * system, byte-identical to a workbook that never set it.
 	 */
 	readonly date1904?: boolean;
 	/**
@@ -223,9 +224,9 @@ export type StreamRows =
  * One sheet for {@link streamXlsx} — the same shape as {@link SheetInput} except `rows` is a
  * {@link StreamRows} iterable rather than a materialized array, so a large sheet never lives in
  * memory all at once. Geometry and metadata (columns, rowProperties, freeze, merges, hyperlinks,
- * state, comments) stay upfront values, validated and emitted around the row stream. One caveat:
- * a row's height/hidden property applies to the row at that 1-based stream position, and a
- * rowProperties entry past the last streamed row is dropped (there is no row to attach it to).
+ * state, comments) stay upfront values, validated and emitted around the row stream. A row's
+ * height/hidden property applies to the row at that 1-based stream position, and a rowProperties
+ * entry past the last streamed row is kept, written as a property-only row, as `writeXlsx` does.
  */
 export interface StreamSheetInput {
 	readonly name: string;

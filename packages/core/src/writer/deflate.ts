@@ -1,7 +1,9 @@
 // Raw DEFLATE compression via the platform Compression Streams API — the mirror image of
-// zip/inflate.ts. Leaning on the runtime's CompressionStream (Node >= 18, Deno, Bun, modern
-// browsers, Cloudflare Workers) is what keeps the writer dependency-free, exactly as
-// DecompressionStream does for the reader.
+// zip/inflate.ts. Leaning on the runtime's CompressionStream (Deno, Bun, modern browsers,
+// Cloudflare Workers, and Node with `'deflate-raw'` support: 20.12 on the 20 line, and every release
+// from 22) is what keeps the writer dependency-free, exactly as DecompressionStream does for the
+// reader. The supported Node floor is the `engines` field's >= 24, a deliberate support choice, not a
+// platform limit.
 //
 // `'deflate-raw'` emits a bare DEFLATE stream (RFC 1951) with no zlib header or Adler-32 trailer —
 // which is precisely what a ZIP entry with compression method 8 stores. (`'deflate'`, by contrast,

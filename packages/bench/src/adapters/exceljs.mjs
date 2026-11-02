@@ -3,8 +3,6 @@ import ExcelJS from "exceljs";
 // ExcelJS adapter (v4.4.0). The standard in-memory Workbook API — what most ExcelJS users write —
 // so the comparison reflects real usage, not its lower-level streaming writer.
 
-export const capabilities = { read: true, write: true, writeStyled: true, stream: false };
-
 // ExcelJS reads xlsx and csv only — it has no xlsb/ods parser, so those lanes decline (thrown →
 // reported as n/a, never measured doing less work).
 export async function read(bytes, format = "xlsx") {

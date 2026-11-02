@@ -212,6 +212,8 @@ pnpm bench --render-only                 # preserve the JS measurement date and 
   SheetJS writes with `compression: true` so its output is deflated like the
   others'.
 - **SheetJS styled write** is shown as —: emitting cell styles is a SheetJS Pro feature, absent from this community build, so measuring it would compare unequal work.
+- **ExcelJS streaming.** ExcelJS also ships a streaming API (`stream.xlsx`); it is not benchmarked
+  here. The ExcelJS columns use its standard in-memory Workbook API.
 - **Not measured here.** CI-run benchmarks (too noisy) and internal micro-benchmarks. Python numbers
   are gathered out-of-band with a companion script and clearly marked as reference.
 

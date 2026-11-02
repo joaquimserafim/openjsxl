@@ -18,15 +18,14 @@ commitment. Please coordinate disclosure timing through the private report.
 ## Supported versions
 
 Security fixes target the latest published release of `openjsxl` and `@openjsxl/core`. Upgrade to
-the latest patch release; backports to older versions are not guaranteed. Reports against the
-development branch are welcome, but unreleased code is not a supported published release.
+the latest release; for a 1.0.x user that is 1.1.0, a minor release. Backports to older versions are
+not guaranteed. Reports against the development branch are welcome; fixes ship in published
+releases.
 
-**Version note, 2026-10-22:** the latest published version is **1.0.0**. This branch contains work
-toward **1.0.1**, which is not yet released; its unchanged package version does not make these
-changes available in the published 1.0.0 artifacts. In particular, `ReadOptions.verifyChecksums`,
-the exact ZIP-entry size checks, the ZIP entry-overlap check, the read-each-part-once rule, the
-ODS repeat budget, the CSV and XLSB cell budgets and the option checks described below are unreleased
-1.0.1 changes, absent from 1.0.0.
+**Version note:** `ReadOptions.verifyChecksums`, `ReadOptions.maxTotalBytes`, the check that each
+fully read ZIP entry reaches its declared size, the ZIP entry-overlap check, the read-each-part-once
+rule, the ODS repeat budget, the CSV and XLSB cell budgets and the option checks described below are
+new in 1.1.0. They are absent from 1.0.0.
 
 ## Processing untrusted files
 
@@ -36,16 +35,15 @@ Tolerant parsing and typed errors help applications handle failures; they do not
 sandbox or make every accepted workbook safe for every use.
 
 For ZIP-based readers (`openXlsx`, `openXlsb`, `openOds`) and the XLSX `streamSheetRows` path,
-`ReadOptions` provides two guards in both published 1.0.0 and this branch, and this unreleased 1.0.1
-branch adds a third, off by default:
+`ReadOptions` provides two guards, and since 1.1.0 a third, off by default:
 
 | Option | Default | What it limits |
 | --- | --- | --- |
 | `maxPartBytes` | 2 GiB | Uncompressed output of one accessed ZIP entry. |
 | `maxCompressionRatio` | 300 | Inflation relative to that entry's compressed size, with an 8 MiB output floor. |
-| `maxTotalBytes` | unlimited | Uncompressed output of every ZIP entry read through one archive, together (1.0.1 only). |
+| `maxTotalBytes` | unlimited | Uncompressed output of every ZIP entry read through one archive, together (since 1.1.0). |
 
-On this unreleased 1.0.1 branch, every option is checked once, before the file is read. Each limit
+Since 1.1.0, every option is checked once, before the file is read. Each limit
 must be a number, at least 0 (`Infinity` for no limit), and `verifyChecksums` must be `true` or
 `false`; an absent or `null` option keeps its default. Any other value, such as `NaN` from
 `Number(process.env.UNSET)`, a numeric string or a negative number, fails with `XlsxError` code
@@ -67,7 +65,7 @@ other
 metadata can use additional memory. The input byte buffer is already allocated before the reader
 receives it. Streaming rows does not remove the input/archive and shared-metadata costs, and
 retaining streamed rows defeats its memory benefit. CSV/TSV has no ZIP container: `openCsv` does
-not use these guards and parses its input synchronously. On this unreleased 1.0.1 branch, `openCsv`
+not use these guards and parses its input synchronously. Since 1.1.0, `openCsv`
 fails with `XlsxError` code `part-too-large` when its input holds more than 16,000,000 non-empty
 cells within Excel's grid, or when its bytes decode to more text than the runtime's longest string.
 Fields past the grid are dropped, as in the other readers. The cell limit bounds the count of cells,
@@ -75,7 +73,7 @@ not memory. `openXlsb` has the same limit per sheet: more than 16,000,000 cells,
 16,000,000 cells with a non-default style, fail with `part-too-large`, as do more than 16,000,000
 sheets, shared strings or cell formats in one workbook.
 
-On this unreleased 1.0.1 branch, `openOds` also limits the cells that ODS repeats create. A cell or
+Since 1.1.0, `openOds` also limits the cells that ODS repeats create. A cell or
 row marked as repeated (`table:number-columns-repeated`, `table:number-rows-repeated`) may create
 at most 2,000,000 cells beyond the marked elements themselves, across the whole document. Past that,
 `openOds` fails with `XlsxError` code `part-too-large` before placing them. Empty repeats, such as
@@ -84,7 +82,7 @@ written out one by one never count against the limit, although cells past Excel'
 as in the other readers. A run of spaces that a cell's markup expands (`text:s`) is capped at
 32,768 extra characters per cell.
 
-On this unreleased 1.0.1 branch, these readers also require every ZIP entry to occupy its own bytes.
+Since 1.1.0, these readers also require every ZIP entry to occupy its own bytes.
 Before any part is read, an archive is rejected with `XlsxError` code `corrupt-zip` when two
 entries share bytes, or when an entry's data reaches the central directory. This stops many ZIP
 entries from naming one small compressed stream so that it inflates once per entry. Above the ZIP
@@ -114,6 +112,11 @@ or resolve network resources while parsing. Formula text and producer-cached res
 data. Rewriting a workbook is not a general sanitization step: supported formula text, hyperlinks
 and images can survive, and another spreadsheet application may act on them when opened.
 
+Rewriting also has a cost of its own. The writer, and so `workbookToInput` followed by `writeXlsx`,
+takes time that grows with a font name's length times the number of conditional-format rules or
+styled cells that use the font, and font names have no length bound. A 59 KB file with one
+500,000-character font name and 20,000 rules takes about 28 seconds to rewrite.
+
 ## Formula evaluation is explicit
 
 Reading or writing a workbook does not recalculate its formulas. Evaluation is an explicit call
@@ -123,8 +126,8 @@ error values.
 
 `EvaluateOptions.maxCellVisits` defaults to **5,000,000 formula-cell evaluations**. Set a lower,
 finite positive integer for untrusted workloads. It must be a number, at least 0 (`Infinity` for no
-limit), and `null` counts as absent. On this unreleased 1.0.1 branch any other value fails with
-`FormulaError` code `unsupported` before evaluation starts; published 1.0.0 ran with no budget when
+limit), and `null` counts as absent. Since 1.1.0 any other value fails with `FormulaError` code
+`unsupported` before evaluation starts; published 1.0.0 ran with no budget when
 the value was `NaN` or text such as `"abc"`. Parser/evaluator depth and argument guards also
 exist, but these are not comprehensive time or memory quotas: constructing the workbook model,
 parsing text and work inside an individual function are not all charged as cell visits. Keep
@@ -137,8 +140,10 @@ code supplied by an untrusted workbook or user; the function registry is not a s
 
 ## Corruption detection and authenticity
 
-On this unreleased 1.0.1 branch, each fully consumed ZIP entry must match its declared uncompressed
-size. Setting `ReadOptions.verifyChecksums: true` additionally checks its central-directory
+Each fully consumed ZIP entry must match its declared uncompressed size. Since 1.1.0, an entry that
+ends short fails with `XlsxError` code `corrupt-zip`. One that inflates past its declared size fails
+with `part-too-large`, as in 1.0.0, even when no limit was set, because the declared size caps every
+inflate. Setting `ReadOptions.verifyChecksums: true` additionally checks its central-directory
 **CRC-32**; this option defaults to **false**. Cancelled streams make no whole-entry size/checksum
 claim for partially consumed entries, and unopened parts have not been validated by reading
 other parts. Published 1.0.0 does not provide this option or the exact-size reconciliation.

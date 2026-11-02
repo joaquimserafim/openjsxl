@@ -5,10 +5,11 @@
 //
 // A sheet takes `images`: each is `{ anchor, bytes, mime, name? }` — the SAME record the reader's
 // `Worksheet.images()` hands back (one shared model). `bytes` is the raw image payload (opaque to
-// the writer — never decoded); `mime` is image/png, image/jpeg, or image/gif. The anchor is kept
-// RAW: 1-based `from` cell plus EMU offsets/extents, exactly as OOXML stores it (914 400 EMU/inch;
-// ≈9 525 EMU/px @96 dpi). A one-cell anchor pins the picture at `from` with a fixed `ext` size; a
-// two-cell anchor spans `from`→`to` and resizes with the cells.
+// the writer — never decoded); `mime` is one of image/png, image/jpeg, image/gif, image/bmp,
+// image/tiff, image/webp, image/x-emf or image/x-wmf. The anchor is kept RAW: 1-based `from` cell
+// plus EMU offsets/extents, exactly as OOXML stores it (914 400 EMU/inch; ≈9 525 EMU/px @96 dpi). A
+// one-cell anchor pins the picture at `from` with a fixed `ext` size; a two-cell anchor spans
+// `from`→`to` and resizes with the cells.
 
 import { openXlsx, workbookToInput, writeXlsx } from "openjsxl";
 

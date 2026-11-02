@@ -19,16 +19,20 @@ See the [full measurements and limitations](https://github.com/joaquimserafim/op
 npm install openjsxl
 ```
 
-**Security:** see the [security policy](https://github.com/joaquimserafim/openjsxl/blob/main/SECURITY.md)
-for private vulnerability reporting, supported releases and limits when processing untrusted files.
-It distinguishes published 1.0.0 behavior from protections on the unreleased 1.0.1 branch.
+**Security:** see the [security
+policy](https://github.com/joaquimserafim/openjsxl/blob/main/SECURITY.md) for private vulnerability
+reporting, supported releases and limits when processing untrusted files. It notes which protections
+are new in 1.1.0.
 
 ### Requirements
 
-**ESM-only** (there is no CommonJS build) and, on Node, **Node ≥ 24** — openjsxl relies only on
-platform Web APIs (`DecompressionStream`/`CompressionStream`, `TextEncoder`/`TextDecoder`) that Node
-ships unflagged from 24 on. `import` is the entry point; `require('openjsxl')` also resolves on
-Node ≥ 24 via `require(esm)`. Deno, Bun, browsers, and edge runtimes need no special setup.
+**ESM-only** (there is no CommonJS build) and, on Node, **Node ≥ 24** — a deliberate support choice,
+so there is one Node line to test against. The platform Web APIs openjsxl uses
+(`DecompressionStream`/`CompressionStream` with `'deflate-raw'`, `TextEncoder`/`TextDecoder`) exist
+well before Node 24 (from 20.12 on the 20 line), but only Node ≥ 24 is tested and supported. The
+`engines` field is advisory: npm warns on an older Node and installs anyway. `import` is the entry
+point; `require('openjsxl')` also resolves on Node ≥ 24 via `require(esm)`. Deno, Bun, browsers, and
+edge runtimes need no special setup.
 
 ```ts
 import { openXlsx } from 'openjsxl';
@@ -49,28 +53,30 @@ for await (const row of wb.sheet(wb.sheets[0].name).rows()) {
 }
 ```
 
-For very large sheets use `streamSheetRows` (constant memory); a worksheet also exposes
-`style(ref)`, `numberFormat`, `formula(ref)`, `dimension`, `mergedCells`, `hyperlinks`,
-`comments`, `columns`, `rowProperties`, `freeze`, `state`/`visible`, async `images()`
-(anchored pictures — raw bytes, media type, and cell + EMU anchor), and `tables`,
-`dataValidations`, `conditionalFormatting` (0.9); the workbook resolves theme colors to ARGB
-with `resolveColor`; and the reader throws a typed `XlsxError` (with a discriminating `code`)
-on malformed input — including hostile input: every read is guarded against decompression bombs
-by default (a 2 GiB per-part ceiling + a 300× compression-ratio cap, tunable via `ReadOptions`).
-Every fully consumed ZIP entry must match its declared size. Set
-`ReadOptions.verifyChecksums: true` to opt into CRC-32 verification (off by default); cancelled
-streams make no claim for partially read entries. CRC-32 detects accidental corruption, not
-intentional tampering.
+For very large sheets use `streamSheetRows` (constant memory). It yields rows as they decode, so a
+damaged sheet can throw after some or all of its rows: a sheet entry that ends short, or one whose
+CRC-32 is wrong when `verifyChecksums` is on, fails only after the last row. Treat streamed rows as
+provisional until the loop completes. A worksheet also exposes `style(ref)`, `numberFormat`,
+`formula(ref)`, `dimension`, `mergedCells`, `hyperlinks`, `comments`, `columns`, `rowProperties`,
+`freeze`, `state`/`visible`, async `images()` (anchored pictures — raw bytes, media type, and cell +
+EMU anchor), and `tables`, `dataValidations`, `conditionalFormatting` (0.9); the workbook resolves
+theme colors to ARGB with `resolveColor`; and the reader throws a typed `XlsxError` (with a
+discriminating `code`) on malformed input — including hostile input: every read is guarded against
+decompression bombs by default (a 2 GiB per-part ceiling + a 300× compression-ratio cap, tunable via
+`ReadOptions`). Every fully consumed ZIP entry must match its declared size: one that ends short
+fails with `corrupt-zip`, and one that runs past it fails with `part-too-large`, even when you set
+no limit. Set `ReadOptions.verifyChecksums: true` (since 1.1.0) to opt into CRC-32 verification (off
+by default); cancelled streams make no claim for partially read entries. CRC-32 detects accidental
+corruption, not intentional tampering.
 
-**Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are
-inferred from the JS values. Cells can carry styles (`{ value, style }` — the same shape
-`style(ref)` returns) or formulas (`{ formula, value? }`), and sheets take column widths, row
-heights, frozen panes, merged ranges, hyperlinks, comments (Excel-visible), a visibility
-state, `images` (the same records `images()` returns — png, jpeg, gif, bmp, tiff, webp,
-emf, wmf), and `tables` / `dataValidations` / `conditionalFormatting` (0.9). For exports too big
-to buffer, `streamXlsx` streams the same input shape from lazy
-(sync or async) row sources with roughly constant memory — constant in *rows*; embedded image
-bytes are held until the media parts flush at stream end:
+**Writing:** describe a workbook as plain data and get back `.xlsx` bytes — cell types are inferred
+from the JS values. Cells can carry styles (`{ value, style }` — the same shape `style(ref)`
+returns) or formulas (`{ formula, value? }`), and sheets take column widths, row heights, frozen
+panes, merged ranges, hyperlinks, comments (Excel-visible), a visibility state, `images` (the same
+records `images()` returns — png, jpeg, gif, bmp, tiff, webp, emf, wmf), and `tables` /
+`dataValidations` / `conditionalFormatting` (0.9). For exports too big to buffer, `streamXlsx`
+streams the same input shape from lazy (sync or async) row sources with roughly constant memory —
+constant in *rows*; embedded image bytes are held until the media parts flush at stream end:
 
 ```ts
 import { writeXlsx } from 'openjsxl';
@@ -90,15 +96,25 @@ const bytes = await writeXlsx({
 });
 ```
 
+Since 1.1.0 the writer reads only an input object's own properties: a class instance or
+`Object.create` record whose prototype supplies a model field fails with `invalid-input` naming the
+field, and a key added to `Object.prototype` is ignored.
+
+Dates are UTC wall-clock values, read and written alike: build a `Date` with `Date.UTC(…)` or an
+ISO string that is a bare date or ends in `Z`, and read a date cell with the `getUTC*` methods. In
+the 1900 system, serials below 61 are one day off from Excel, which counts a 1900-02-29 that never
+existed.
+
 `workbookToInput` turns an open `Workbook` back into writer input for read → modify → write —
-values, types, styles, formulas, comments, pictures, custom themes, geometry, merges,
-hyperlinks, sheet visibility, defined names, tables, data validations, conditional formatting,
-autofilter ranges, the 1904 date system, protection (sheet/workbook locks + per-cell locked/hidden), and print setup
-(margins, orientation, scale, header/footer) all round-trip. Documented drops (never silent):
+values, types, styles, formulas, comments, pictures, custom themes, geometry, merges, hyperlinks,
+sheet visibility, defined names, tables, data validations, conditional formatting, autofilter
+ranges, the 1904 date system, protection (sheet/workbook locks + per-cell locked/hidden), and print
+setup (margins, orientation, scale, header/footer) all round-trip. Documented drops (never silent):
 in-cell rich text flattens to plain text; autofilter criteria/sort, outline grouping, tab colors,
 document properties, pivot tables, external links, and gradient fills are not carried; and **VBA
-macros** — an `.xlsm` reads but rewrites without them (`Workbook.macroEnabled` flags it). Full
-list: the project README's fidelity table.
+macros** — an `.xlsm` reads but rewrites without them (`Workbook.macroEnabled` flags it). An Excel
+4.0 (XLM) macro sheet is carried as a regular worksheet with its cells and cached values; its macro
+semantics are dropped, as for VBA. Full list: the project README's fidelity table.
 
 Worksheet tab names, legacy Note authors, `Hyperlink.location` values, and **every formula field** —
 cell formulas, `DefinedName.refersTo`, data-validation `formula1`/`formula2`, conditional-formatting
@@ -112,31 +128,65 @@ a fragment within that external destination.
 Compatibility note: openjsxl 1.0.0 wrote these fields raw, so an escape-shaped value in a
 1.0.0-produced file is ambiguous and Microsoft Excel interprets it as an escape (`_x0041_` → `A`).
 There is no reliable way to infer the original intent; openjsxl follows OOXML/Excel rather than
-double-decoding or guessing. Separately, since 1.0.1 a carriage return inside any formula field travels as the `ST_Xstring` escape `_x000D_` (not `&#13;`): the 1.0.1 reader reads both spellings, but an openjsxl reader older than 1.0.1 shows the seven literal characters `_x000D_` for a CR written by 1.0.1. Direct writer locations must be XML-safe. On read, a location that
-decodes to a value rejected by the XML writer is omitted; if no target remains, the hyperlink is
-omitted. openpyxl 3.1.5 does not consistently apply this rule to these schema fields, so its
-behavior can differ for this case.
+double-decoding or guessing.
 
-**Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel
-Binary Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME
-`Workbook`, and `detectSpreadsheetFormat(bytes)` routes by content (`'xlsx' | 'xlsb' | 'ods' |
-'csv' | undefined`; `.xlsm`/`.xltx` read as `'xlsx'`). Accessors a format can't express degrade,
-never throw — `.xlsb`/`.ods` carry values, dates (an `.xlsb` on the epoch its `BrtWbProp` 1904
-flag selects), merges (ods) and hyperlinks; `.csv` infers
-numbers & booleans only (never dates). So "a user uploaded a spreadsheet" is one code path, and any
-reader converts to `.xlsx` through the bridge.
-The XLSB reader supports full and compact cell records emitted by SheetJS 0.20.3, including
-plain inline strings and shared strings, with positions preserved across blanks and gaps.
-Rich inline `BrtCellRString` values remain unsupported; their coordinates still position
-following compact cells correctly.
+Separately, since 1.1.0 a carriage return in a formula field, a hyperlink location or a Note author
+is written as the `ST_Xstring` escape `_x000D_`, not the character reference `&#13;`. Readers differ
+on it. openjsxl since 1.1.0 reads both spellings as a CR. openjsxl 1.0.0 and openpyxl 3.1.5 show the
+seven characters `_x000D_` literally in all three: formula fields, hyperlink locations and Note
+authors. SheetJS decodes it in formulas and defined names, but shows it literally in Note authors
+and in a hyperlink's `location`.
+
+Direct writer locations must be XML-safe. On read, a location that decodes to a value rejected by the
+XML writer is omitted. Since 1.1.0 the `.xlsx` reader leaves out every hyperlink left with no
+destination: no external target it can resolve and no usable location, such as a tooltip-only link
+or one whose `r:id` names no relationship. 1.0.0 returned such a record. openpyxl 3.1.5 does not
+consistently apply this rule to these schema fields, so its behavior can differ for this case.
+
+A defined name is left out when its decoded `refersTo` is one the writer could not emit: empty,
+longer than 8,192 characters, starting with `=`, or holding a control character other than tab, line
+feed or carriage return, U+FFFE, U+FFFF or a lone surrogate. Since 1.1.0 this covers an `_xHHHH_`
+escape that decodes to such a character, which 1.0.0 returned as the escape's text.
+
+In a workbook that `openXlsx` or `streamSheetRows` reads (`.xlsx`, `.xlsm`, `.xltx`), two tabs can
+carry the same name ignoring case once decoded: `A` and `a`, or a raw `_x0041_` and `A` (openpyxl
+3.1.5 writes a tab titled `_x0041_` raw, and it decodes to `A`). Since 1.1.0 the reader keeps the
+first of them that loads and leaves each later one out, together with its sheet-scoped defined names;
+1.0.0 returned both. A formula or defined name that refers to a left-out tab, such as `a!A1`, then
+reads the kept tab in the formula evaluator, where sheet names match ignoring case. Names are
+compared with JavaScript's `toLowerCase`, the rule `writeXlsx` uses to refuse two sheet names that
+match ignoring case: the Kelvin sign `K` (U+212A) matches `K`, and `İ` matches `i̇` (`i` and
+U+0307), while `ß` and `SS` stay apart. Excel's comparison of non-ASCII names may differ.
+
+**Reading other formats (0.7):** openjsxl writes `.xlsx` but reads more — `openXlsb` (Excel Binary
+Workbook), `openOds` (OpenDocument), and `openCsv` (delimited text) all return the SAME `Workbook`,
+and `detectSpreadsheetFormat(bytes)` routes by content (`'xlsx' | 'xlsb' | 'ods' | 'csv' |
+undefined`; `.xlsm`/`.xltx` read as `'xlsx'`). Accessors a format can't express degrade, never
+throw. `.xlsb` carries values, dates (on the epoch its `BrtWbProp` 1904 flag selects) and external
+hyperlink targets, but not a link's in-workbook location, tooltip or display text; an empty `.xlsb`
+sheet has no `dimension`, where `.xlsx` declares `A1`. `.ods` carries values, dates, merges and
+in-cell hyperlinks (an in-document `#Sheet.A1` link reads as an external `target`). `.csv` infers
+numbers & booleans only (never dates): it drops a leading `+` (`+123` reads as 123) and rounds a
+decimal with more digits than a double holds, while an integer beyond `Number.MAX_SAFE_INTEGER` or
+with leading zeros stays text. So "a user uploaded a spreadsheet" is one code path, and any reader
+converts to `.xlsx` through the bridge. The XLSB reader supports full and compact cell records
+emitted by SheetJS 0.20.3, including plain inline strings and shared strings, with positions
+preserved across blanks and gaps. Rich inline `BrtCellRString` values remain unsupported; their
+coordinates still position following compact cells correctly.
 
 **Formulas (0.8):** the reader keeps a formula's text and cached value; the opt-in
-`openjsxl/formula` entry adds a zero-dependency engine that recomputes them —
-`evaluateWorkbook(wb)` / `evaluateCell(wb, sheet, ref)` over 90+ built-in functions, plus your own
-via `options.functions`. It's a separate import (the core bundle is unchanged whether or not you
-use it); evaluation is read-only (it can supersede a stale cache), circular references resolve to a
-`#CYCLE!` value instead of hanging, and volatile functions (`TODAY`/`RAND`) require an injected
-clock/RNG so results stay deterministic.
+`openjsxl/formula` entry adds a zero-dependency engine that recomputes them — `evaluateWorkbook(wb)`
+/ `evaluateCell(wb, sheet, ref)` over 90+ built-in functions, plus your own via `options.functions`.
+It's a separate import (the core bundle is unchanged whether or not you use it); evaluation is
+read-only (it can supersede a stale cache), a circular reference gives a `#CYCLE!` value instead of
+hanging (an `IFERROR` around it can return its fallback, and a formula past the depth cap can abort
+the evaluation), and volatile functions (`TODAY`/`RAND`) require an injected clock/RNG so results
+stay deterministic. Since 1.1.0, a call Excel stores as `_xlfn.NAME` reaches `NAME`, a sheet name in
+a formula matches ignoring case, a single-cell reference reads as a reference in most built-ins
+(`SUM(A1)` ignores text in A1), an array constant is a full array where a function takes a range,
+`&`, `SUBSTITUTE`, `REPLACE`, `UPPER` and `LOWER` cap the text they build at 32,767 characters, and
+a criterion or text lookup value over 255 characters gives `#VALUE!`. The project README's Formulas
+section has the details, and lists what is not evaluated.
 
 **Tables, data validation & conditional formatting (0.9):** three structural features that read
 AND write, each as the same record on both sides. `tables` (name, range, columns, header/totals
@@ -146,8 +196,8 @@ inline differential style, color scales, data bars, icon sets). They round-trip 
 `workbookToInput`, and the tolerant reader normalizes a foreign producer's out-of-spec table into
 something the strict writer accepts, so a table file from another tool re-saves instead of aborting.
 
-See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide,
-design notes, and roadmap.
+See the [project README](https://github.com/joaquimserafim/openjsxl#readme) for the full guide and
+design notes.
 
 ## API reference
 
@@ -193,8 +243,8 @@ a malformed reference (a uniform contract, since 1.0).
 | `indexToColumn` | `(index: number) => string` | `1` → `"A"`. Throws on a non-integer or `< 1`. |
 | `parseRef` | `(ref: string) => CellRef` | `"B3"` → `{ col: 2, row: 3 }`. Throws on a non-A1 string. |
 | `formatRef` | `(ref: CellRef) => string` | `{ col: 2, row: 3 }` → `"B3"`. Throws on a non-integer/`< 1` row. |
-| `serialToDate` | `(serial: number, date1904?: boolean) => Date` | Excel serial → `Date`. |
-| `dateToSerial` | `(date: Date, date1904?: boolean) => number` | `Date` → Excel serial. |
+| `serialToDate` | `(serial: number, date1904?: boolean) => Date` | Excel serial → UTC `Date`. |
+| `dateToSerial` | `(date: Date, date1904?: boolean) => number` | UTC `Date` → Excel serial. |
 
 ### `Workbook`
 
@@ -208,7 +258,7 @@ Returned by every reader. ([01](https://github.com/joaquimserafim/openjsxl/blob/
 | `definedNames` | `readonly DefinedName[]` | Workbook defined (named) ranges/constants; `[]` for ods/xlsb/csv. |
 | `protection` | `WorkbookProtection \| undefined` | Workbook-level `<workbookProtection>`. |
 | `macroEnabled` | `boolean` | `true` for a read `.xlsm`/`.xltm`. Rewriting drops the VBA project. |
-| `date1904` | `boolean` | The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
+| `date1904` | `boolean` | Since 1.1.0. The workbook's date system: `true` for the legacy 1904 epoch (`<workbookPr date1904>`), else `false` (`.xlsb` reads its `BrtWbProp` flag; always `false` for ods/csv). The formula engine uses it for every serial ↔ date conversion, and the bridge carries it. |
 | `themeXml` (getter) | `string \| undefined` | Raw `theme1.xml`, or `undefined` when absent. |
 | `sheet(name)` | `(name: string) => Worksheet` | The worksheet with this tab name. Throws if none. |
 | `resolveColor(color)` | `(color: Color) => string \| undefined` | Resolve a raw `Color` to 8-digit ARGB (`undefined` for auto/indexed/unresolved theme). |
@@ -224,7 +274,7 @@ A sheet's cells, style/format accessors, and metadata.
 | `visible` / `state` | `boolean` / `SheetState` | Visibility (`state` is the source; `visible === (state === "visible")`). |
 | `mergedCells` | `readonly string[]` | Merged ranges in A1, document order. |
 | `hyperlinks` | `readonly Hyperlink[]` | Hyperlinks in document order; location is in-workbook without target, or a fragment within target when both are present. |
-| `dimension` | `string \| undefined` | Declared used range in A1. |
+| `dimension` | `string \| undefined` | Declared used range in A1. An empty `.xlsb` sheet has none, where `.xlsx` declares `A1`. |
 | `comments` | `readonly Comment[]` | Cell comments. |
 | `tables` | `readonly TableInfo[]` | Defined tables. |
 | `dataValidations` | `readonly DataValidation[]` | Validation rules. |
@@ -240,18 +290,21 @@ A sheet's cells, style/format accessors, and metadata.
 | `formula(ref)` | `(ref: string) => string \| undefined` | Formula text at a cell — logical stored form (`ST_Xstring`-decoded once). |
 | `images()` | `() => Promise<readonly SheetImage[]>` | Anchored pictures (lazy). |
 | `cell(ref)` | `(ref: string) => Cell` | Cell at A1; absent cells read as `empty`. |
-| `rows()` | `() => AsyncGenerator<Row>` | Stream populated rows (sparse). |
+| `rows()` | `() => AsyncGenerator<Row>` | Stream rows (sparse; in `.xlsx`, a property-only row and a styled blank cell are included). |
 
 ### `Cell` & `Row`
 
 `Cell` is a discriminated union — narrow on `type` to type `value`. `Row` is `{ index: number;
-cells: readonly Cell[] }` (sparse — absent rows/cells are omitted).
+cells: readonly Cell[] }` (sparse — absent rows/cells are omitted; in `.xlsx`, a row with only a
+height or hidden flag, and a styled blank cell, are present).
 
 | `cell.type` | `cell.value` | | `cell.type` | `cell.value` |
 | --- | --- | --- | --- | --- |
 | `"empty"` | `null` | | `"boolean"` | `boolean` |
 | `"string"` | `string` | | `"date"` | `Date` |
 | `"number"` | `number` | | `"error"` | `string` |
+
+A `"date"` value is a UTC wall-clock `Date`: read it with `getUTC*`.
 
 ### Style & geometry types
 
@@ -281,11 +334,11 @@ The style model `style(ref)` returns and `{ value, style }` accepts. ([07](https
 What `writeXlsx` / `streamXlsx` accept — mirrors of the reader's model, so read → modify → write
 is a pass-through. ([06](https://github.com/joaquimserafim/openjsxl/blob/main/examples/06-write.mjs), [08](https://github.com/joaquimserafim/openjsxl/blob/main/examples/08-streaming-write.mjs))
 
-- **`WorkbookInput`** `{ sheets: SheetInput[], themeXml?, definedNames?: DefinedName[], protection?: WorkbookProtection }`.
+- **`WorkbookInput`** `{ sheets: SheetInput[], themeXml?, definedNames?: DefinedName[], protection?: WorkbookProtection, date1904? }` (`date1904?` since 1.1.0; a set `WriteOptions.date1904` overrides it).
 - **`SheetInput`** `{ name, rows: (CellInput[] | undefined)[], columns?, rowProperties?, freeze?, merges?, hyperlinks?, state?, comments?, images?, tables?, dataValidations?, conditionalFormatting?, autoFilter?, protection?, pageMargins?, pageSetup?, printOptions?, headerFooter? }`.
 - **`CellInput`** = `CellValue | StyledCell`. **`CellValue`** = `string | number | boolean | Date | null | undefined`. **`StyledCell`** `{ value?, style?: CellStyle, formula? }`.
 - **`WriteOptions`** `{ date1904? }`.
-- **Streaming** — **`StreamWorkbookInput`** `{ sheets: StreamSheetInput[], themeXml?, definedNames?, protection? }`; **`StreamSheetInput`** (as `SheetInput` but `rows: StreamRows`); **`StreamRows`** = `Iterable | AsyncIterable` of `CellInput[] | undefined`.
+- **Streaming** — **`StreamWorkbookInput`** `{ sheets: StreamSheetInput[], themeXml?, definedNames?, protection?, date1904? }` (`date1904?` since 1.1.0); **`StreamSheetInput`** (as `SheetInput` but `rows: StreamRows`); **`StreamRows`** = `Iterable | AsyncIterable` of `CellInput[] | undefined`.
 
 ### Names, protection & print setup types
 
@@ -309,7 +362,7 @@ The 1.0 fidelity types — each is the same record on the reader and the writer.
 
 - **`XlsxError extends Error`** — `{ code: XlsxErrorCode, message, cause? }`. The single error type every public function throws.
 - **`XlsxErrorCode`** = `"not-a-zip"` | `"not-xlsx"` | `"missing-part"` | `"corrupt-zip"` | `"unsupported"` | `"no-such-sheet"` | `"part-too-large"` | `"invalid-input"`.
-- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (1.0.1) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification defaults to `false`. Since 1.0.1 each limit must be a number, at least 0 (`Infinity` for none), and `verifyChecksums` a boolean; `null` keeps the default, and any other value throws `XlsxError('invalid-input')` before the file is read, from `openXlsx`, `openXlsb`, `openOds`, `streamSheetRows` and `detectSpreadsheetFormat`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
+- **`ReadOptions`** `{ maxPartBytes?, maxCompressionRatio?, maxTotalBytes?, verifyChecksums? }` — zip-bomb guards are on by default (2 GiB per-part ceiling; 300× ratio cap); `maxTotalBytes` (since 1.1.0) optionally bounds the decompressed bytes of the whole archive and is unlimited by default; CRC-32 verification (`verifyChecksums`, since 1.1.0) defaults to `false`. Since 1.1.0 each limit must be a number, at least 0 (`Infinity` for none), and `verifyChecksums` a boolean; `null` keeps the default, and any other value throws `XlsxError('invalid-input')` before the file is read, from `openXlsx`, `openXlsb`, `openOds`, `streamSheetRows` and `detectSpreadsheetFormat`. `CsvReadOptions` `{ delimiter?, sheetName?, inferTypes? }`; `SpreadsheetFormat`.
 
 ### `openjsxl/formula`
 
@@ -325,11 +378,11 @@ The opt-in evaluator — a separate import that never changes the core bundle.
 | `isErrorValue` | `(v: unknown) => v is FormulaErrorValue` | Narrowing guard. |
 | `isRangeView` | `(v: unknown) => v is RangeView` | Narrowing guard. |
 
-- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations. `maxCellVisits` (default 5,000,000) must be a number, at least 0 (`Infinity` for none); since 1.0.1 any other value except `null` throws `FormulaError('unsupported')`.
+- **`EvaluateOptions`** `{ functions?: Record<string, unknown>, now?: () => Date, random?: () => number, maxCellVisits? }` — inject a clock/RNG for volatile functions (else they throw), register UDFs (each value a `FunctionSpec`, validated at runtime), cap evaluations. `maxCellVisits` (default 5,000,000) must be a number, at least 0 (`Infinity` for none); since 1.1.0 any other value except `null` throws `FormulaError('unsupported')`.
 - **Results** — `WorkbookEvalResult` `{ cells: readonly CellResult[]; get(sheet, ref): ScalarValue | undefined }`; `CellResult` `{ sheet, ref, value }`.
 - **Values** — `ScalarValue` = `number | string | boolean | null | FormulaErrorValue`; `EvalValue` = `ScalarValue | RangeView`; `FormulaErrorValue` `{ kind: "error", code: ErrorCode }`; `ErrorCode` (the eight `ST_CellErrorType` values + `#CYCLE!`).
 - **`RangeView`** — a lazy window over a reference's used cells: `sheet`, `startCol/startRow/endCol/endRow`, `width`/`height`/`cellCount` (getters), `entries()`, `values()`, `populatedCount()`, `single()`, `topLeft()`, `cellAt(rowOffset, colOffset)`; `RangeEntry` `{ col, row, value }`.
-- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both extending `FunctionSpecBase` `{ minArgs, maxArgs, volatile? }`; `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number; date1904?: boolean }` and (lazy) `ArgThunk` = `() => EvalValue`.
+- **User functions** — `FunctionSpec` = `EagerFunctionSpec | LazyFunctionSpec`, both with `{ minArgs, maxArgs, volatile? }` (their shared base, `FunctionSpecBase`, is not exported); `evaluate(args, ctx: EvalContext)` where `EvalContext` `{ now(): number; random(): number; date1904?: boolean }` (`date1904?` since 1.1.0; the evaluator always sets it, and a hand-built context without it uses the 1900 system) and (lazy) `ArgThunk` = `() => EvalValue`.
 - **AST** — `FormulaAst` is the union of `NumberLiteral`, `StringLiteral`, `BooleanLiteral`, `ErrorLiteral`, `ArrayLiteral` (`ArrayElement`), `CellRefNode`, `NameRef`, `RangeRef`, `UnionRef`, `FunctionCall`, `EmptyArg`, `UnaryOp`, `PostfixOp`, `BinaryOp`, `Group`, `StructuredRef`, `ExternalRef`; a qualifying sheet is `SheetSpec`. The single-cell node is **`CellRefNode`** (named so it never collides with `openjsxl`'s `CellRef`, letting you import both entry points at once).
 - **Errors** — `FormulaError extends Error` `{ code: FormulaErrorCode, position? }`; `FormulaErrorCode` = `"parse-error"` | `"depth-exceeded"` | `"too-many-args"` | `"budget-exceeded"` | `"volatile-unconfigured"` | `"unsupported"`.
 

@@ -16,11 +16,17 @@ export type Cell =
 	| (CellBase & { readonly type: "date"; readonly value: Date })
 	| (CellBase & { readonly type: "error"; readonly value: string });
 
-/** A populated row from {@link Worksheet.rows}. Sparse: absent rows/cells are simply omitted. */
+/**
+ * A row from {@link Worksheet.rows}. Sparse: absent rows and cells are omitted. In `.xlsx`, a row
+ * that carries only properties (a height or hidden flag) and a styled blank cell are present too.
+ */
 export interface Row {
 	/** 1-based row index — from `<row r>`, or positional when the attribute is absent. */
 	readonly index: number;
-	/** Cells present in the row, in document order. Gaps are simply absent (sparse). */
+	/**
+	 * Cells present in the row, in document order; in `.xlsx`, a styled blank is included (as
+	 * `empty`). Gaps are absent; a property-only row has none.
+	 */
 	readonly cells: readonly Cell[];
 }
 
@@ -750,6 +756,9 @@ export interface Worksheet {
 	images(): Promise<readonly SheetImage[]>;
 	/** The cell at an A1 reference. Absent cells read as `empty`. */
 	cell(ref: string): Cell;
-	/** Stream the populated rows in document order. Sparse: empty rows/cells are absent. */
+	/**
+	 * Stream the rows in document order. Sparse: absent rows and cells are omitted. In `.xlsx`, a
+	 * property-only row and a styled blank cell are yielded too.
+	 */
 	rows(): AsyncGenerator<Row>;
 }

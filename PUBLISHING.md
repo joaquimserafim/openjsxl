@@ -10,6 +10,7 @@ How to cut a release of openjsxl to npm. The repo is a pnpm workspace; releases 
 | `openjsxl` | ✅ public | The facade users install. Re-exports `@openjsxl/core`. |
 | `@openjsxl/core` | ✅ public | The engine. Required — the facade's types re-export it. |
 | `@openjsxl/fixtures` | ❌ never | `private: true`. Test corpus; also holds git-ignored Apache-2.0 files under `local/`. |
+| `@openjsxl/bench`, `@openjsxl/fuzz`, `openjsxl-examples` | ❌ never | `private: true`. Benchmarks, the fuzz harness and the runnable examples. |
 
 Both public packages carry `publishConfig.access: "public"` (scoped packages default to private
 otherwise), `files: ["dist"]`, a `README.md`, a `LICENSE`, and a `prepack` hook that rebuilds
@@ -26,26 +27,32 @@ otherwise), `files: ["dist"]`, a `README.md`, a `LICENSE`, and a `prepack` hook 
 
 Run everything from the repo root.
 
-### 1. Preflight — clean build and green gate
+### 1. Preflight — frozen install and green gates
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm -r build
+pnpm check                              # Biome lint + format check
 pnpm typecheck
 pnpm test
+pnpm --filter openjsxl-examples all     # every example, against the built packages
+pnpm audit --prod
 ```
 
 ### 2. Set the version
 
-For the current release the version is `1.0.0` (already set) — skip this step. For a later
-release, set the **same** version in both public packages by editing the `"version"` field in:
+Set the **same** version in the workspace root and both public packages by editing the `"version"`
+field in:
 
+- `package.json` (the workspace root, which never publishes)
 - `packages/core/package.json`
 - `packages/openjsxl/package.json`
 
-(Leave `@openjsxl/fixtures` as-is; it never publishes.) Keep the two in lock-step — the facade
-depends on `@openjsxl/core` via `workspace:*`, which is rewritten to that exact version on
-publish, so a mismatch would ship a broken dependency range.
+(Leave the private packages — `@openjsxl/fixtures`, `@openjsxl/bench`, `@openjsxl/fuzz` and the
+examples — as they are; they never publish.) Keep the three in lock-step. Only core and the facade
+publish, but the root version names the release the repository is at, and the facade depends on
+`@openjsxl/core` via `workspace:*`, which is rewritten to that exact version on publish, so a
+mismatch would ship a broken dependency range.
 
 ### 3. Dry-run — inspect the tarballs
 
@@ -56,8 +63,9 @@ pnpm -C packages/openjsxl pack
 tar -tzf packages/core/openjsxl-core-*.tgz
 tar -tzf packages/openjsxl/openjsxl-*.tgz
 
-# Facade's core dep must be rewritten (prints "@openjsxl/core": "<version>", not workspace:*):
-tar -xzOf packages/openjsxl/openjsxl-*.tgz package/package.json | grep -A2 '"dependencies"'
+# The facade's core dependency must be the exact version you set — not workspace:* or a range.
+# This must print one line; if it prints nothing, stop.
+tar -xzOf packages/openjsxl/openjsxl-*.tgz package/package.json | grep '"@openjsxl/core": "<version>"'
 
 rm -f packages/*/*.tgz   # clean up
 ```
@@ -65,27 +73,40 @@ rm -f packages/*/*.tgz   # clean up
 Each tarball should contain **only** `package.json`, `README.md`, `LICENSE`, and `dist/*` — no
 `src/`, `node_modules/`, `tsconfig`, `.tgz`, or `local/`.
 
-### 4. Publish
+### 4. Push `main` and wait for CI
 
-Commit everything first — `pnpm publish` refuses an unclean tree (by design).
+Commit everything first — `pnpm publish` refuses an unclean tree (by design). Push `main`, then wait
+until hosted CI and CodeQL pass on that exact commit. The release is published from that commit
+only.
 
 ```sh
 git status                        # must be clean
+git push origin main
+```
+
+### 5. Publish from that commit
+
+```sh
+git rev-parse HEAD                # must be the commit CI and CodeQL passed
 pnpm -r publish --access public   # add --otp=<code> if 2FA is on
 ```
 
 `pnpm -r publish` publishes `@openjsxl/core` first, then `openjsxl` (topological order), rewrites
-`workspace:*` → the version, and skips the private `@openjsxl/fixtures`.
+`workspace:*` → the version, and skips the private packages.
 
-### 5. Verify and tag
+### 6. Verify and tag
 
 ```sh
 npm view openjsxl version
 npm view @openjsxl/core version
 
-git tag -f v<version>             # -f only needed to re-point a tag never published under before
-git push -f origin v<version>
+git tag v<version>                # never -f
+git push origin v<version>        # never -f
 ```
+
+If `v<version>` already exists, locally or on the remote, stop: a release tag names one commit for
+good, so never move, re-point or force-push it. `git tag` refuses an existing name without `-f`; do
+not add it.
 
 ## Versioning
 
@@ -174,19 +195,21 @@ git push -f origin v<version>
   README becomes the **canonical documentation** — a full API reference for both entry points, verified
   against the built `.d.ts`. `.xlsx` output for existing input stays byte-identical (the freeze is
   additive / hygiene only). Follow semver from here.
-- **`1.0.1` (in progress; not published)** — patch-release correctness work. F11.4 applies the
-  existing internal `ST_Xstring` codec in both directions to worksheet names, legacy Note authors,
-  and complete logical workbook-defined-name formulas (`DefinedName.refersTo`): literal `_x0041_`
-  now survives Microsoft Excel instead of becoming `A` or an externalized reference; ordinary field
-  bytes and the public API remain unchanged. A raw escape-shaped value written in these fields by
-  1.0.0 is inherently ambiguous and is read according to OOXML/Excel, with no heuristic legacy mode.
-  A Microsoft Excel Online 16.0300 save-back fixture pins the corrected local reference. Extend this
-  entry with the remaining owner-approved 1.0.1 corrections before release.
+- **`1.1.0` (in progress; not published)** — a minor release: correctness and hardening work on the
+  1.0 line, plus these new public members: `ReadOptions.verifyChecksums` and
+  `ReadOptions.maxTotalBytes`; `Workbook.date1904`, with an optional `date1904` argument on the
+  `Workbook` constructor; `WorkbookInput.date1904` and `StreamWorkbookInput.date1904`; and
+  `EvalContext.date1904`. F11.4 applies the existing internal `ST_Xstring` codec in both directions
+  to worksheet names, legacy Note authors, and complete logical workbook-defined-name formulas
+  (`DefinedName.refersTo`): literal `_x0041_` now survives Microsoft Excel instead of becoming `A`
+  or an externalized reference, and ordinary field bytes are unchanged. A raw escape-shaped value
+  written in these fields by 1.0.0 is inherently ambiguous and is read according to OOXML/Excel,
+  with no heuristic legacy mode. A Microsoft Excel Online 16.0300 save-back fixture pins the
+  corrected local reference. Extend this entry with the remaining 1.1.0 corrections before release
+  (F11.8).
 
 ## Notes
 
-- **Private repo links.** While the GitHub repo is private, the `repository`/`homepage`/`bugs`
-  URLs in npm metadata will 404 for others. They resolve automatically once the repo is public.
 - **Provenance.** To publish with npm provenance from CI later, run `npm publish --provenance`
   from a trusted GitHub Actions workflow; not required for a manual release.
 - **Deprecating a bad release.** npm forbids re-publishing a version. If a release is broken,
