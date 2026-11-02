@@ -27,14 +27,16 @@ A seeded [xorshift](src/prng.ts) engine ([`src/mutate.ts`](src/mutate.ts)) corru
 fixture — generic byte flips/zero-runs/truncation/duplication, **zip-structure** pokes (EOCD /
 central-directory / local-header counts, offsets, sizes, CRCs, name lengths), and **XML-ish**
 blow-ups where markers sit in the clear — then replays each mutant against all four openers plus
-format detection ([`src/replay.ts`](src/replay.ts)). The invariant every reader must uphold on **any**
+format detection ([`src/replay.ts`](src/replay.ts)). The ZIP openers run again with
+`verifyChecksums: true`, and `streamSheetRows` streams each sheet, plain and checked, and must give
+the buffered rows. The invariant every reader must uphold on **any**
 bytes: **resolve, or throw a typed `XlsxError`** — never a `TypeError`/`RangeError`/bare throw. A
 crasher is reproducible from `{fixture, integer seed}`.
 
 ## Run
 
 ```sh
-pnpm vitest run packages/fuzz                    # the CI smoke suites (fixed seed, <1s)
+pnpm vitest run packages/fuzz                    # the CI smoke suites (fixed seed, about 1 s)
 pnpm --filter @openjsxl/fuzz fuzz                # the long local run (gated, budgeted)
 ```
 

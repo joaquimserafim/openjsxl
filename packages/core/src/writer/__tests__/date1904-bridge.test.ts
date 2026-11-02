@@ -71,6 +71,15 @@ describe("WorkbookInput.date1904 — the date system on the writer side (F11.10)
 		await expect(writeXlsx(bad)).rejects.toMatchObject({ code: "invalid-input" });
 	});
 
+	it("rejects a non-boolean flag on the stream of streamXlsx too (F11.47)", async () => {
+		const bad = { sheets: [{ name: "S", rows }], date1904: "yes" } as never;
+		await expect(drain(streamXlsx(bad))).rejects.toThrow(XlsxError);
+		await expect(drain(streamXlsx(bad))).rejects.toMatchObject({
+			code: "invalid-input",
+			message: "workbook.date1904 must be a boolean when present",
+		});
+	});
+
 	it("the bridge carries it: a 1904 workbook rewrites BYTE-IDENTICAL, cached serials intact", async () => {
 		const source = await writeXlsx({ sheets: [{ name: "S", rows }] }, { date1904: true });
 		const book = await openXlsx(source);

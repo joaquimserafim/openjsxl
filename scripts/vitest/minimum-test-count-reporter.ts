@@ -1,10 +1,11 @@
 import type { Reporter } from "vitest/reporters";
 
 /**
- * Full-suite floor. On 2026-10-23 the gate executed 2,087 tests in a clone without local fixtures
- * (as in CI) and 2,088 with the local comments fixture.
+ * Full-suite floor: the hundred below the executed count. On 2026-11-01 (F11.47) the gate executed
+ * 3,284 tests in a clone without local fixtures (as in CI) and 3,285 with the local comments fixture.
+ * On 2026-10-23 it executed 2,087 and 2,088, under a floor of 2,000.
  */
-export const MINIMUM_EXECUTED_TESTS = 2000;
+export const MINIMUM_EXECUTED_TESTS = 3200;
 
 export interface AllowedSkip {
 	/** Test module path relative to the project root. */

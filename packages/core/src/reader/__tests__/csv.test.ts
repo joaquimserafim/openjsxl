@@ -144,6 +144,20 @@ describe("openCsv — end to end", () => {
 		expect(s.cell("B1")).toEqual({ ref: "B1", type: "string", value: "42" }); // inference off
 	});
 
+	it("leaves an empty field empty with inference off (F11.47)", () => {
+		const s = openCsv("a,,b\n,c,", { inferTypes: false }).sheet("Sheet1");
+		expect(["A1", "B1", "C1", "A2", "B2", "C2"].map((ref) => s.cell(ref).value)).toEqual([
+			"a",
+			null,
+			"b",
+			null,
+			"c",
+			null,
+		]);
+		expect(s.cell("B1").type).toBe("empty");
+		expect(s.dimension).toBe("A1:C2");
+	});
+
 	it("accepts raw bytes and strips a BOM", () => {
 		const bytes = new TextEncoder().encode("﻿hello,world");
 		const s = openCsv(bytes).sheet("Sheet1");

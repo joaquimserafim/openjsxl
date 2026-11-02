@@ -452,6 +452,20 @@ describe("writeXlsx — tables: carried column name fallback (F9.5)", () => {
 		expect(ws.tables[0]?.columns.map((c) => c.name)).toEqual(["2020", "2021"]);
 	});
 
+	it("reads a header row past the end of rows as no header cells, and fails typed without names (F11.47)", async () => {
+		const sheet: SheetInput = {
+			name: "S",
+			rows: [["above"]], // the table's header row, row 3, is not in rows
+			tables: [
+				{ name: "Late", ref: "A3:B4", columns: [], headerRow: true, totalsRow: false },
+			],
+		};
+		await expect(writeXlsx({ sheets: [sheet] })).rejects.toMatchObject({
+			code: "invalid-input",
+			message: expect.stringMatching(/header cell for column 1 must be non-empty text/),
+		});
+	});
+
 	it("still requires a name when the header cell is non-text AND no column name is carried", async () => {
 		await rejects({
 			name: "S",

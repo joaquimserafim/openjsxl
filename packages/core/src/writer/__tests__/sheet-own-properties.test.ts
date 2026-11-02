@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { XlsxError } from "../../errors";
 import { createMediaRegistry } from "../images";
 import { createTableContext, worksheetXml } from "../sheet";
 import { createStyleRegistry } from "../styles";
 import type { SheetInput } from "../types";
+
+// Every rejection here is a typed XlsxError with code invalid-input (F11.47); a check of the class
+// alone would also pass an XlsxError with another code.
+const INVALID = expect.objectContaining({ name: "XlsxError", code: "invalid-input" });
 
 function inherited<T>(key: string, value: unknown, run: () => T): T {
 	const previous = Object.getOwnPropertyDescriptor(Object.prototype, key);
@@ -255,15 +258,13 @@ describe("worksheet own model properties", () => {
 				},
 			});
 			Object.defineProperty(raw, "unexpected", { enumerable: true, value: true });
-			expect(() => render(wrap(raw))).toThrow(XlsxError);
+			expect(() => render(wrap(raw))).toThrow(INVALID);
 			expect(reads).toBeLessThanOrEqual(1);
 		},
 	);
 	it("requires an own value or formula on object cells", () => {
-		expect(() => inherited("value", 7, () => render(feature("rows", [[{}]])))).toThrow(
-			XlsxError,
-		);
-		expect(() => render(feature("rows", [[Object.create({ value: 7 })]]))).toThrow(XlsxError);
+		expect(() => inherited("value", 7, () => render(feature("rows", [[{}]])))).toThrow(INVALID);
+		expect(() => render(feature("rows", [[Object.create({ value: 7 })]]))).toThrow(INVALID);
 		// Presence, rather than the resolved value, selects the object-cell shape.
 		expect(() => render(feature("rows", [[{ value: undefined }]]))).not.toThrow();
 	});
@@ -450,7 +451,7 @@ describe("required own worksheet fields", () => {
 	it.each(requiredCases)(
 		"rejects inherited $label",
 		({ key, inherited: value, record, wrap }) => {
-			expect(() => inherited(key, value, () => render(wrap(record())))).toThrow(XlsxError);
+			expect(() => inherited(key, value, () => render(wrap(record())))).toThrow(INVALID);
 		},
 	);
 	it.each(requiredCases)(
@@ -480,7 +481,7 @@ describe("required own worksheet fields", () => {
 				return undefined;
 			},
 		});
-		expect(() => render(wrap(raw))).toThrow(XlsxError);
+		expect(() => render(wrap(raw))).toThrow(INVALID);
 		expect(reads).toBe(1);
 	});
 });

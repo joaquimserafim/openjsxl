@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { XlsxError } from "../../errors";
 import { openXlsx } from "../../reader/workbook";
-import type { ConditionalFormatting } from "../../types";
+import type { ConditionalFormatting, DxfStyle } from "../../types";
 import { openZip } from "../../zip";
 import { streamXlsx } from "../stream";
 import type { SheetInput } from "../types";
@@ -84,6 +84,29 @@ describe("writeXlsx — conditional formatting round-trip", () => {
 			},
 		];
 		expect(await roundTrip(cf)).toEqual(cf);
+	});
+
+	it("round-trips a dxf alignment, and writes none for an empty one (F11.47)", async () => {
+		const rule = (dxf: DxfStyle): ConditionalFormatting => ({
+			sqref: ["A1:A3"],
+			rules: [{ type: "cellIs", priority: 1, operator: "greaterThan", formulas: ["1"], dxf }],
+		});
+		const aligned = [rule({ alignment: { horizontal: "center", wrapText: true } })];
+		expect(await roundTrip(aligned)).toEqual(aligned);
+		const bytes = await writeXlsx({
+			sheets: [{ name: "S", rows: [[1]], conditionalFormatting: aligned }],
+		});
+		expect(await partText(bytes, "xl/styles.xml")).toContain(
+			'<dxfs count="1"><dxf><alignment horizontal="center" wrapText="1"/></dxf></dxfs>',
+		);
+		const empty = [rule({ font: { bold: true }, alignment: {} })];
+		expect(await roundTrip(empty)).toEqual([rule({ font: { bold: true } })]);
+		const emptyBytes = await writeXlsx({
+			sheets: [{ name: "S", rows: [[1]], conditionalFormatting: empty }],
+		});
+		expect(await partText(emptyBytes, "xl/styles.xml")).toContain(
+			'<dxfs count="1"><dxf><font><b/></font></dxf></dxfs>',
+		);
 	});
 
 	it("preserves CR, CRLF, and lone LF in formula element text", async () => {

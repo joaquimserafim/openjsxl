@@ -75,6 +75,25 @@ describe("parseOdsContent — ignored containers", () => {
 		expect(sheet?.cells.get("A1")?.value).toBe("v");
 	});
 
+	it("drops a stray close inside a comment and keeps skipping the comment (F11.47)", () => {
+		const [sheet] = parseOdsContent(
+			OPEN +
+				'<table:table-cell office:value-type="string"><office:annotation><text:p>x</text:span></text:p><text:p>LEAK</text:p></office:annotation><text:p>v</text:p></table:table-cell>' +
+				CLOSE,
+		);
+		expect(sheet?.cells.get("A1")?.value).toBe("v");
+	});
+
+	it("ends an unclosed comment at the row's close, so the next row reads (F11.47)", () => {
+		const [sheet] = parseOdsContent(
+			OPEN +
+				'<table:table-cell office:value-type="string"><office:annotation><text:p>x</text:p></table:table-row>' +
+				'<table:table-row><table:table-cell office:value-type="string"><text:p>ok</text:p></table:table-cell>' +
+				CLOSE,
+		);
+		expect(sheet?.cells.get("A2")?.value).toBe("ok");
+	});
+
 	it("does not carry an unclosed comment into the next cell", () => {
 		const [sheet] = parseOdsContent(
 			OPEN +

@@ -130,8 +130,8 @@ describe("summarizeTests", () => {
 
 describe("testCountFailure", () => {
 	it("accepts the floor and anything above it with no unexpected skips", () => {
-		expect(testCountFailure(testSummary({ collected: 2071, executed: 2000 }))).toBeUndefined();
-		expect(testCountFailure(testSummary({ collected: 2071, executed: 2069 }))).toBeUndefined();
+		expect(testCountFailure(testSummary({ collected: 3271, executed: 3200 }))).toBeUndefined();
+		expect(testCountFailure(testSummary({ collected: 3271, executed: 3269 }))).toBeUndefined();
 	});
 
 	it("reports an executed count below the floor with the collected count", () => {
@@ -171,9 +171,9 @@ describe("testCountFailure", () => {
 	});
 
 	it("defaults to the full-suite floor", () => {
-		expect(MINIMUM_EXECUTED_TESTS).toBe(2000);
+		expect(MINIMUM_EXECUTED_TESTS).toBe(3200);
 		expect(testCountFailure(testSummary({ executed: MINIMUM_EXECUTED_TESTS - 1 }))).toContain(
-			"expected at least 2000",
+			"expected at least 3200",
 		);
 	});
 });
