@@ -160,17 +160,15 @@ export function fixtureIdentity(provenance, producer, dataset) {
 
 export async function ensureCachedFixture(path, identity, generate) {
 	const sidecar = `${path}.json`;
-	if (existsSync(path) && existsSync(sidecar)) {
-		try {
-			const cached = JSON.parse(readFileSync(sidecar, "utf8"));
-			if (
-				JSON.stringify(cached.identity) === JSON.stringify(identity) &&
-				cached.sha256 === sha256(readFileSync(path))
-			)
-				return path;
-		} catch {
-			// A legacy, partial, or damaged cache is regenerated from the controlled recipe.
-		}
+	try {
+		const cached = JSON.parse(readFileSync(sidecar, "utf8"));
+		if (
+			JSON.stringify(cached.identity) === JSON.stringify(identity) &&
+			cached.sha256 === sha256(readFileSync(path))
+		)
+			return path;
+	} catch {
+		// A missing, legacy, partial, or damaged cache is regenerated from the controlled recipe.
 	}
 	const bytes = await generate();
 	writeFileSync(path, bytes);

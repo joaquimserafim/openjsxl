@@ -7,7 +7,7 @@
 // date-formatted serial), and null/undefined for an empty cell. `workbookToInput` turns a workbook
 // you just read back into that same plain-data shape, so you can read, tweak, and write it out.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openXlsx, workbookToInput, writeXlsx } from "openjsxl";
@@ -25,7 +25,7 @@ const bytes = await writeXlsx({
 		},
 	],
 });
-const out = join(tmpdir(), "openjsxl-report.xlsx");
+const out = join(await mkdtemp(join(tmpdir(), "openjsxl-")), "report.xlsx");
 await writeFile(out, bytes);
 console.log(`wrote ${bytes.length} bytes → ${out}`);
 

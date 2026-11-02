@@ -146,6 +146,25 @@ describe("benchmark provenance", () => {
 		expect(text).not.toContain("777 MB");
 	});
 
+	it("escapes backslashes before pipes in a failed cell's reason", () => {
+		const text = renderReport(
+			[
+				{
+					ok: false,
+					op: "write",
+					workload: "styled",
+					label: "SheetJS",
+					sizeKey: "10k",
+					reason: "path C:\\tmp\\ | ends with \\",
+				},
+			],
+			meta,
+		);
+		// Each backslash doubles first, so a trailing one cannot turn the next escaped pipe back into a
+		// column break.
+		expect(text).toContain("| path C:\\\\tmp\\\\ \\| ends with \\\\ |");
+	});
+
 	it("regenerates legacy caches, reuses matching bytes, and invalidates changed producers", async () => {
 		const path = join(scratch(), "fixture.xlsx");
 		writeFileSync(path, "old cache without metadata");

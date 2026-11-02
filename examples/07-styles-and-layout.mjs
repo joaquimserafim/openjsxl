@@ -7,7 +7,7 @@
 // styles pass through read → modify → write untouched. Sheets take column widths, row heights,
 // frozen panes, merged ranges, hyperlinks, and a visibility state; all of it round-trips.
 
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openXlsx, writeXlsx } from "openjsxl";
@@ -43,7 +43,7 @@ const bytes = await writeXlsx({
 	],
 });
 
-const out = join(tmpdir(), "openjsxl-styled.xlsx");
+const out = join(await mkdtemp(join(tmpdir(), "openjsxl-")), "styled.xlsx");
 await writeFile(out, bytes);
 console.log(`wrote ${bytes.length} bytes -> ${out}`);
 

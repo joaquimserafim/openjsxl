@@ -40,6 +40,7 @@ function failureSection(results) {
 	if (failed.length === 0) return "";
 	const text = (value) =>
 		String(value ?? "unknown")
+			.replace(/\\/g, "\\\\")
 			.replace(/\|/g, "\\|")
 			.replace(/[\r\n]+/g, " ");
 	const rows = failed.map((result) =>
