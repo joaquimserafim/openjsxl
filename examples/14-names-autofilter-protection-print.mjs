@@ -25,7 +25,9 @@ const bytes = await writeXlsx({
 			// editable under protection, give it a style with `protection: { locked: false }`. (A real
 			// password sets the hash attributes, which are carried verbatim — never computed.)
 			protection: { sheet: true, formatCells: false },
-			// Print setup (F10.4): landscape, fit to one page wide, with a header and footer.
+			// Print setup (F10.4): landscape, fitToWidth 1 and fitToHeight 0, with a header and footer.
+			// openjsxl does not write the switch that turns fit-to-page on, so the file keeps both values
+			// but has fit-to-page off.
 			pageSetup: { orientation: "landscape", fitToWidth: 1, fitToHeight: 0 },
 			pageMargins: {
 				left: 0.5,

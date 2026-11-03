@@ -373,7 +373,7 @@ formatting, autofilters, protection, print setup, and the 1904 date system**:
 | conditional formatting (highlights, scales, bars, icon sets) | |
 | autofilter range (filter dropdowns; the paired `_xlnm._FilterDatabase` is managed automatically) | |
 | protection — sheet & workbook locks, per-cell locked/hidden, password hashes carried verbatim | |
-| print setup — margins, orientation, scale, fit-to-page, paper size, print options, header/footer | |
+| print setup — margins, orientation, scale, `fitToWidth`/`fitToHeight`, paper size, print options, header/footer | the **fit-to-page switch** (`pageSetUpPr`'s `fitToPage`, in `sheetPr`) — not written, so a written or bridged sheet keeps `fitToWidth`/`fitToHeight` but has fit-to-page off |
 
 Documented flattenings (values stay exact; internal spelling normalizes): row/column *default*
 styles resolve into per-cell styles (each cell keeps its effective format); shared and array
@@ -593,8 +593,10 @@ same record on both sides:
   editable under protection. Any password hash is carried **verbatim** — openjsxl never computes, verifies,
   or strips one.
 - **Print setup** (`Worksheet.pageMargins`/`pageSetup`/`printOptions`/`headerFooter` ↔ the same
-  `SheetInput` keys) — margins (inches), orientation / scale / fit-to-page / paper size, gridline &
-  heading printing, and `&`-code headers/footers.
+  `SheetInput` keys) — margins (inches), orientation / scale / `fitToWidth` and `fitToHeight` / paper
+  size, gridline & heading printing, and `&`-code headers/footers. openjsxl does not write the switch
+  that turns fit-to-page on, so a written or bridged sheet keeps `fitToWidth` and `fitToHeight` but has
+  fit-to-page off.
 
 ```ts
 const bytes = await writeXlsx({

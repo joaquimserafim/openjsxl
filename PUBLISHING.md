@@ -465,6 +465,8 @@ not add it.
   - 1900-system serials below 61 are one day off from Excel, and dates outside Excel's range are
     written without an error.
   - A rewrite drops the theme part when only table styles use it, which can change table colors.
+  - The writer does not write the switch that turns fit-to-page on, so a written or bridged sheet keeps
+    `fitToWidth` and `fitToHeight` but has fit-to-page off.
   - `.xlsb` hyperlinks keep only external targets, an unresolved one breaks the bridge, a damaged
     row header or an off-grid cell record can overwrite valid cells, and an out-of-range
     shared-string index reads as `""`, where `.xlsx` reads empty.

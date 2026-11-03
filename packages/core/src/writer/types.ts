@@ -164,7 +164,11 @@ export interface SheetInput {
 	readonly protection?: SheetProtection;
 	/** The sheet's page margins (F10.4) — see {@link Worksheet.pageMargins}. All six values required. */
 	readonly pageMargins?: PageMargins;
-	/** The sheet's page setup (F10.4) — orientation, scale, fit-to-page, paper size. Absent emits nothing. */
+	/**
+	 * The sheet's page setup (F10.4) — orientation, scale, `fitToWidth`/`fitToHeight`, paper size. Absent
+	 * emits nothing. The writer does not write the switch that turns fit-to-page on, so the sheet keeps
+	 * `fitToWidth` and `fitToHeight` but has fit-to-page off.
+	 */
 	readonly pageSetup?: PageSetup;
 	/** The sheet's print options (F10.4) — gridlines/headings/centering booleans. Absent emits nothing. */
 	readonly printOptions?: PrintOptions;
