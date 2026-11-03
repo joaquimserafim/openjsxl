@@ -837,19 +837,19 @@ The million-cell XLSB read measured **748 ms · 461.4 MB**.
 
 A clean production install (lifecycle scripts disabled) gives these footprints:
 
-| | openjsxl `1.0.0` | ExcelJS `4.4.0` | SheetJS `0.20.3` |
+| | openjsxl `1.1.0` | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
 | runtime deps | **0 third-party** (1 package — its own core) | 192 packages | 0 packages |
-| installed | **0.52 MB** | 50.5 MB | 7.8 MB |
+| installed | **0.60 MB** | 50.5 MB | 7.8 MB |
 
-Timing uses the workspace build; openjsxl's footprint uses published 1.0.0. ExcelJS uses the
+Timing uses the workspace build; openjsxl's footprint uses published 1.1.0. ExcelJS uses the
 reviewed uuid 11.1.1 override, and SheetJS uses its official integrity-pinned distribution.
 Other install-size transitives resolve during the dated clean install.
 
 The full matrix (10k / 100k / 1M cells; numbers / strings / styled; read + write), format lanes,
 source hashes, failed checks and methodology are in [`docs/benchmarks.md`](./docs/benchmarks.md).
 Run `pnpm bench` to reproduce it. Python reference results are omitted until remeasured against
-these fixtures. _(Timings measured 2026-11-03; install sizes 2026-10-22.)_
+these fixtures. _(Measured 2026-11-03.)_
 
 ## Approach
 

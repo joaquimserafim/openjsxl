@@ -19,12 +19,27 @@ integrities and fixture hashes.
 
 ## Library size
 
-No matching size measurements. Legacy or differently sourced results are omitted. Populate with:
+A clean production install (`npm install --omit=dev --ignore-scripts`) of each exact artifact — measured 2026-11-03 on
+Node 24.22.1. **Deps** counts the runtime packages the library pulls in
+(transitive, excluding the library itself); **Own size** is the package's own unpacked tarball;
+**Installed** is the library plus every runtime dependency on disk.
+Comparator tarball bytes and npm metadata must match the artifact integrity in the recorded lockfile.
 
-```sh
-node packages/bench/src/sizes.mjs   # writes packages/bench/.cache/sizes.json
-pnpm bench --render-only            # re-render with the size table filled in
-```
+| Library | Version | Deps | Own size | Installed |
+| --- | --- | --- | --- | --- |
+| **openjsxl** | `1.1.0` | 1 | 33 KB | 0.60 MB |
+| **ExcelJS** | `4.4.0` | 192 | 20.8 MB | 50.5 MB |
+| **SheetJS** | `0.20.3` | 0 | 7.7 MB | 7.8 MB |
+
+_openjsxl: Footprint of the exact published version; timing uses the workspace bundle identified above. Its sole runtime dependency is its own @openjsxl/core._
+
+_ExcelJS: Measured with the benchmark's uuid 11.1.1 override; other transitives resolve during this dated clean install._
+
+_SheetJS: Official distribution: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz._
+
+openjsxl ships **zero third-party runtime dependencies** (both its packages are pure TypeScript over
+platform Web APIs). The dependency counts above describe the measured distributions; SheetJS
+0.20.3 also declares no runtime dependencies. *Installed* includes the library itself.
 
 
 ## Read
