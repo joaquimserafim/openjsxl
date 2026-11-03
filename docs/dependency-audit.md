@@ -215,3 +215,53 @@ benchmark data reaches it. It stays open until after publish: changing the lockf
 the F11.19 freeze, as the open Dependabot updates would. The 1.1.0 benchmark matrix recorded
 **93 cells: 90 valid measurements and 3 unsupported SheetJS styled writes**, and all 57 read
 checksums match.
+
+**F11.102 follow-up (2026-11-03):** after the 1.1.0 publish, two scoped overrides in
+`pnpm-workspace.yaml` move both copies to `minimatch` 11.0.1, the advisory's first patched
+release: `glob@7.2.3>minimatch` and `readdir-glob@1.1.3>minimatch`. The 3.x and 5.x lines have no
+patched release, so both overrides sit outside their parents' declared ranges (`^3.1.1` and
+`^5.1.0`); they are reviewed overrides, not upstream-supported combinations. Only ExcelJS's
+dependencies use `glob` 7 or `readdir-glob`. The lockfile change stays inside that graph:
+`minimatch` 3.1.5 and 5.1.9, `brace-expansion` 1.1.21 and 2.1.7, `balanced-match` 1.0.2 and
+`concat-map` 0.0.1 leave it; `minimatch` 11.0.1, `brace-expansion` 5.0.12, `balanced-match` 4.0.4
+and `@isaacs/nonrecursive-glob-match` 1.0.3 enter. Each new archive matches its lockfile SHA-512,
+was published by its registry maintainer, carries a license file, and has no installation hooks,
+symlinks or path escapes. `minimatch` 11 and the new `@isaacs/nonrecursive-glob-match`, first
+published on 2026-10-26 and without a repository link, are BlueOak-1.0.0; `minimatch` 3.1.5 and
+5.1.9 were ISC, and `brace-expansion` and `balanced-match` stay MIT. None of the new versions
+carries npm provenance attestations, and none of the versions they replace did.
+
+Version 11 changes the API that `glob` 7 builds on. `glob` 7's own matching then throws a
+`TypeError` for any pattern with glob characters: `glob.sync` directly, and async `glob` as an
+uncaught exception. `glob.hasMagic` does not throw, but classifies some paths differently:
+`x[1].txt` is no longer a pattern, and `esc\*` now is. Two callers sit on that matching, and the
+benchmark reaches neither:
+- `archiver-utils`' `file.expand` (2.1.0 and 3.0.4): `archiver` 5.3.2 globs through
+  `readdir-glob`, and `zip-stream` 4.1.1 does not call it;
+- `rimraf` 2.7.1, which still deletes a plain path and uses the matching only for a path with
+  glob characters that does not exist. It is reached only through `fstream`'s Writer, which
+  `unzipper` uses to extract to disk and which calls it only on a path it has just found. ExcelJS
+  reads through `unzipper.Parse`.
+
+`readdir-glob` runs with 11.0.1, though some patterns match differently, such as `..` segments and
+POSIX character classes. The same probe on the previous and the overridden graph gives the same
+results for ExcelJS's buffered, file and streaming write/read round trips, its CSV read, and
+`unzipper` extraction, both fresh and over an existing directory. Of the probed calls, only
+`glob.sync` with a pattern, `file.expand` and a `rimraf` glob pattern change, from working to
+throwing.
+
+`pnpm audit --prod` and `pnpm audit` both exit 0 with zero advisories at every severity (18
+production and 337 total dependencies), so CI's nonblocking workspace audit passes again. No
+advisory is suppressed. The published packages do not change: core and facade packed from the new
+tree reproduce the published 1.1.0 tarballs byte for byte. The benchmark was not run again (owner
+call, 2026-11-03): only this `minimatch` graph changes, ExcelJS and SheetJS keep their locked
+artifacts, and the benchmark uses only ExcelJS's in-memory workbook APIs (`xlsx.load`,
+`xlsx.writeBuffer`, `csv.read`). [The report](benchmarks.md) stays the dated 1.1.0 record measured
+on lockfile `d55cf0f9…`, and the next release's benchmark measures on the new one. [The refresh
+record](dependency-refresh.md#f11102-dependency-inputs-2026-11-03) lists the validation and the
+new input hashes.
+
+Remove the `glob` override when ExcelJS's `archiver` and `unzipper` dependencies no longer use
+`glob` 7, and the `readdir-glob` override when a reviewed `readdir-glob` release declares a
+patched `minimatch` range. Remove both if the benchmark drops ExcelJS. Later 11.0.x patches
+(11.0.4 is current) were not evaluated; the pin stays on the probed release.

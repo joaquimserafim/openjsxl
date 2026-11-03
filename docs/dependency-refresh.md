@@ -173,3 +173,41 @@ again. Later source changes require fresh release gates and artifact validation;
 benchmark-input changes require new measurements. A version bump also changes
 manifests and packed dependency rewriting, so final release packages must be checked
 again. This record does not authorize a commit, push, version bump or publication.
+
+## F11.102 dependency inputs (2026-11-03)
+
+[F11.102's `minimatch` overrides](dependency-audit.md) change `pnpm-workspace.yaml` and
+`pnpm-lock.yaml`. At `aa2b0ac`, the root, core and facade manifests differed from the snapshot
+above only by the 1.1.0 version line, and the other six inputs were unchanged. Validation on Node
+24.22.1 / pnpm 11.28.7, starting from `aa2b0ac`:
+
+- Clean frozen install in a new workspace and store passes (260 packages downloaded), including
+  esbuild's allowed hook; the lockfile and workspace file are byte-identical afterwards.
+- Production and full audits both exit 0 with zero advisories at every severity.
+- Biome exits 0 (411 files, four style warnings); root and recursive TypeScript checks pass. The
+  guarded suite passes **3,292 tests / 3 skipped / 3,295 collected**, including the corpus bridge,
+  fixed-seed fuzz smoke and the ExcelJS comparator tests.
+- Both builds and all 14 examples pass.
+- Core and facade packed from this tree are byte-identical to the published 1.1.0 tarballs
+  (registry SHA-1 `6871198bf621308f5494224fc8b91884ce5d400c` and
+  `bde839d6557a15651f924ce1e5e09108b59f2099`), so no runtime, declaration or manifest byte changes.
+
+The extended fuzz campaign, CLI probes and consumer installs were not repeated: no runtime source,
+test tooling or packed byte changes. The lockfile is a benchmark input, and the rule above stands;
+the owner waived the re-measurement for this change on 2026-11-03. [The report](benchmarks.md)
+keeps its 1.1.0 measurements on lockfile `d55cf0f9…`, and the next release's benchmark measures on
+this one.
+
+Dependency inputs, SHA-256 (paths relative to the repository):
+
+```text
+aadab28dde171c18ddd8ac02429432d6a1e1f0d282fe3e3075b4cb8801f5d0a7  package.json
+9c0c908f9ab62a090c93df6c78c08ba9a86be2c4a170c7f8449879ab9eab4251  pnpm-workspace.yaml
+8f5d7d625499ac20cc2cf6d726d8224bc520baee027cd349618a0034273f5318  pnpm-lock.yaml
+384dc06d518ccbf1a99a8f810ba801200dcb513587bacc6ea0bd29a0e7edde83  packages/bench/package.json
+33100857f2327c6820f87aaabf506533231a00dca56e0bf944757f3f3e6e7f37  packages/core/package.json
+9a5f21884fee87dc72b739c13686f0952a1fa35a995a970e052e9c17c0a2d450  packages/fixtures/package.json
+3214fb8bb8207c805557b4cdba16d36d5e1afa237710dcf1195e76e04ea42b52  packages/fuzz/package.json
+fe6df3278fce287654d43a18486a3f6fa16c67041f76445baaf212cb9b389387  packages/openjsxl/package.json
+f903f2a4ec04b3cd66d448ceacafc00a01ddf340ae03d7738b8fd224dc1aa8f3  examples/package.json
+```
