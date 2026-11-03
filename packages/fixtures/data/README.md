@@ -426,6 +426,40 @@ git-ignored [`../local/`](../local) directory and are never committed.
   checksum-verified logical formulas/values, and the read→write→read result. The PRE workbook is
   evidence only and is deliberately not committed.
 
+- **`excel-online-cr-saveback.xlsx`** — saved and downloaded from **Microsoft Excel Online 16.0300**
+  (build `rupBuild="30626"`) on 2026-11-03 (macOS, Chrome) from the openjsxl-authored 1.1.0 CR check
+  workbook, committed as **`openjsxl-cr-check-sent.xlsx`** (written by `942d457`'s writer, unchanged
+  in `c1948c8`; SHA-256 `8c8b048a4e10840677ed0620f50065929878d7c88e18cff979139c8a4fcac2eb`). The
+  sent workbook carries no cached formula values, so every check value in the return is Excel's own.
+  It carries a carriage return, written as `_x000D_`, in cell text, a formula's string literal, a
+  defined name, two conditional-format formulas, a legacy Note's text and author, and a hyperlink
+  location. Excel opened it with no prompt or repair, and computed `LEN` 3 and `CODE(MID(…,2,1))` 13
+  for the cell, the formula literal and the defined name, so it read a real CR, against 9 and 95 for
+  the literal `_x005F_x000D_` control. B6's conditional format showed `CR` on green, and the B7 note
+  showed two lines; Excel for the web does not display a Note's author. The owner then edited only
+  `Control!B12` from `BEFORE` to `AFTER` and downloaded a copy. Excel wrote every CR field back as
+  `_x000D_`, except the hyperlink `location`, which it lowercased to `_x000d_`. It added a
+  `calcChain` part and left the creator and last editor empty, with no local path. SHA-256:
+  `c4b2e23407bc79820cff404df67972f94c0837e2c1b7296bd523013a79a956b6`.
+  `reader/__tests__/cr-excel-online.test.ts` pins the producer wire forms, Excel's cached check
+  values, the sent workbook's bytes, and the logical read→write→read result.
+
+- **`excel-online-1904-saveback.xlsx`** — saved and downloaded from **Microsoft Excel Online
+  16.0300** (build `rupBuild="30626"`) on 2026-11-03 (macOS, Chrome) from the openjsxl-authored
+  1.1.0 workbook written with `date1904: true`, committed as **`openjsxl-1904-check-sent.xlsx`**
+  (`942d457`'s writer, unchanged in `c1948c8`; SHA-256
+  `8cd76ca7b0003fd5d4211aa0ced3df521a94f1559fba4cd0b5a25ab3c3f469f9`). The sent workbook carries no
+  cached formula values, so every check value in the return is Excel's own. Excel opened it with no
+  prompt or repair, kept `date1904="1"`, and showed the intended dates (1904-01-01, 1904-02-29,
+  1999-12-31, 2000-02-29, 2024-01-02). It computed YEAR, MONTH and DAY to match, the 1904 serials 0,
+  59, 35063, 35123 and 43831, and TRUE for every `Bn=DATE(y,m,d)` check, which holds only under the
+  1904 system. The owner then edited only `Control!B12` from `BEFORE` to `AFTER` and downloaded a
+  copy. Excel re-wrote the date format as `yyyy\-mm\-dd`, added a `calcChain` part, and left the
+  creator and last editor empty, with no local path. SHA-256:
+  `f0854224e692fc3a93dc60932037a9ea4859e5cac9729d2f09581290468fdaf1`.
+  `reader/__tests__/date1904-excel-online.test.ts` pins the producer bytes, Excel's cached date
+  checks, the sent workbook's bytes, and the logical read→write→read result.
+
 - **`sheetjs-short-cells-inline.xlsb` / `sheetjs-short-cells-sst.xlsb`** — authored locally on
   2026-10-22 by **SheetJS Community Edition 0.20.3**, the reviewed official distribution installed
   in the private benchmark package, for F11.28. These are unmodified producer outputs, not
