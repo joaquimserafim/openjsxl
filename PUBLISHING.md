@@ -195,8 +195,8 @@ not add it.
   README becomes the **canonical documentation** — a full API reference for both entry points, verified
   against the built `.d.ts`. `.xlsx` output for existing input stays byte-identical (the freeze is
   additive / hygiene only). Follow semver from here.
-- **`1.1.0` (in progress; not published)** — a minor release of correctness and hardening work on
-  the 1.0 line. Input outside the cases below reads and writes as in 1.0.0.
+- **`1.1.0`** — a minor release of correctness and hardening work on the 1.0 line. Input outside the
+  cases below reads and writes as in 1.0.0.
 
   **New public members.**
   - `ReadOptions.verifyChecksums` (off by default) checks each fully read ZIP entry's CRC-32.
@@ -408,9 +408,12 @@ not add it.
   - *Documentation.* The README states the date contract (UTC wall-clock dates, serials below 61 one
     day off from Excel, the ranges that match Excel, times and durations), the read and write limits,
     and which readers show which escaped text. SECURITY.md describes the guards for untrusted files.
-  - *Costs.* Reading `.xlsx` cells costs about 13–27% more than in 1.0.0, from the container
-    scoping, and `formula()` and the geometry accessors scan more of the sheet. Writing styled cells
-    costs about 30–36% more, from the own-property checks; numeric writes are within 1%.
+  - *Costs* at 1M cells, measured against 1.0.0's source on one machine with the same harness,
+    toolchain and fixtures (2026-11-03). Reading an `.xlsx` sheet takes about 15–22% longer, from the
+    container scoping, and `formula()` and the geometry accessors scan more of the sheet. Writing
+    styled cells takes about 32–35% longer, from the own-property checks. Numeric and text writes stay
+    within about 5%, and `.ods` reads take about 10% longer. `docs/benchmarks.md` has the full 1.1.0
+    matrix, and `docs/benchmarks-1.1.0-vs-1.0.0.md` the comparison.
   - *Hardening.* The seeded property and mutation fuzz harness now also runs the readers with
     checksums on and compares streamed with buffered rows; new tests pin the code added since
     1.0.0; CI keeps its code checks running after an audit failure and fails below a minimum test

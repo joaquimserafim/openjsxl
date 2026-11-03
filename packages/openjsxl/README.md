@@ -1,7 +1,7 @@
 # openjsxl
 
 [![npm version](https://img.shields.io/npm/v/openjsxl?color=cb3837&logo=npm)](https://www.npmjs.com/package/openjsxl)
-[![install size](https://packagephobia.com/badge?p=openjsxl)](https://packagephobia.com/result?p=openjsxl)
+[![install size](https://badgen.net/packagephobia/install/openjsxl)](https://packagephobia.com/result?p=openjsxl)
 [![types included](https://img.shields.io/npm/types/openjsxl)](https://www.npmjs.com/package/openjsxl)
 [![license: MIT](https://img.shields.io/npm/l/openjsxl?color=blue)](./LICENSE)
 
@@ -9,10 +9,10 @@ Fast, **zero-dependency**, TypeScript-first Excel (`.xlsx`) reader **and writer*
 runtimes — Node, Deno, Bun, the browser, and edge. This is the package to install; it re-exports
 the [`@openjsxl/core`](https://www.npmjs.com/package/@openjsxl/core) engine.
 
-On the 2026-10-22 benchmark, this workspace build reads a 1M-cell numeric XLSX sheet
-in **805 ms** (ExcelJS: 1.69 s; SheetJS: 2.62 s).
+On the 2026-11-03 benchmark, this workspace build reads a 1M-cell numeric XLSX sheet
+in **858 ms** (ExcelJS: 1.65 s; SheetJS: 2.64 s).
 Published 1.0.0 installs in **0.52 MB with zero third-party dependencies**. XLSB reads now pass
-the expected checksum at all three benchmark sizes; the 1M-cell XLSB read takes **990 ms**.
+the expected checksum at all three benchmark sizes; the 1M-cell XLSB read takes **748 ms**.
 See the [full measurements and limitations](https://github.com/joaquimserafim/openjsxl/blob/main/docs/benchmarks.md).
 
 ```sh

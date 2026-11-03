@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/openjsxl?color=cb3837&logo=npm)](https://www.npmjs.com/package/openjsxl)
 [![CI](https://github.com/joaquimserafim/openjsxl/actions/workflows/ci.yml/badge.svg)](https://github.com/joaquimserafim/openjsxl/actions/workflows/ci.yml)
-[![install size](https://packagephobia.com/badge?p=openjsxl)](https://packagephobia.com/result?p=openjsxl)
+[![install size](https://badgen.net/packagephobia/install/openjsxl)](https://packagephobia.com/result?p=openjsxl)
 [![types included](https://img.shields.io/npm/types/openjsxl)](https://www.npmjs.com/package/openjsxl)
 [![license: MIT](https://img.shields.io/npm/l/openjsxl?color=blue)](./LICENSE)
 
@@ -820,20 +820,20 @@ capability of [`openpyxl`](https://pypi.org/project/openpyxl/).
 
 ## Performance
 
-On an Apple M2 Pro (Node 24.21.0), this workspace build processes a **1-million-cell numeric
+On an Apple M2 Pro (Node 24.22.1), this workspace build processes a **1-million-cell numeric
 sheet** as follows (median wall-time · peak RSS, each library in an isolated process):
 
 | 1M cells | openjsxl | ExcelJS `4.4.0` | SheetJS `0.20.3` |
 | --- | --- | --- | --- |
-| **read** | **805 ms · 208.1 MB** | 1.69 s · 819.0 MB | 2.62 s · 528.1 MB |
-| **write** | **729 ms · 369.3 MB** | 3.36 s · 1.51 GB | 2.38 s · 524.0 MB |
+| **read** | **858 ms · 209.0 MB** | 1.65 s · 800.9 MB | 2.64 s · 527.8 MB |
+| **write** | **741 ms · 395.4 MB** | 3.26 s · 1.24 GB | 2.66 s · 526.8 MB |
 
-The streamed writer measured **754 ms · 100.2 MB** for the same million
+The streamed writer measured **760 ms · 100.3 MB** for the same million
 cells from a lazy row source. Embedded images, when present, remain resident until the stream ends.
 
-The 2026-10-22 report also measures `.xlsb`, `.ods`, and `.csv`. XLSB reads now pass the
+The 2026-11-03 report also measures `.xlsb`, `.ods`, and `.csv`. XLSB reads now pass the
 expected checksum at all three sizes, including the SheetJS 0.20.3 compact cell records.
-The million-cell XLSB read measured **990 ms · 491.1 MB**.
+The million-cell XLSB read measured **748 ms · 461.4 MB**.
 
 A clean production install (lifecycle scripts disabled) gives these footprints:
 
@@ -849,7 +849,7 @@ Other install-size transitives resolve during the dated clean install.
 The full matrix (10k / 100k / 1M cells; numbers / strings / styled; read + write), format lanes,
 source hashes, failed checks and methodology are in [`docs/benchmarks.md`](./docs/benchmarks.md).
 Run `pnpm bench` to reproduce it. Python reference results are omitted until remeasured against
-these fixtures. _(Measured 2026-10-22.)_
+these fixtures. _(Timings measured 2026-11-03; install sizes 2026-10-22.)_
 
 ## Approach
 

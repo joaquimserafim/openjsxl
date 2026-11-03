@@ -201,3 +201,17 @@ sizes were measured again; all 57 read checksums match exactly (90 valid measure
 3 expected unsupported styled writes). The current report and README figures use that later
 snapshot. [The refresh record](dependency-refresh.md) documents versions, retained majors,
 fuzz/package validation and the exact dependency freeze.
+
+**1.1.0 release follow-up (2026-11-03):** on the release tree (lockfile SHA-256
+`d55cf0f92fcff742726deb66f80e0587234264b1d8dbdf4867b84139a5c59457`, unchanged since F11.19),
+`pnpm audit --prod` reports **zero advisories** over 18 production dependencies. The full workspace
+audit reports **1 moderate** finding that the 2026-10-22 audits did not:
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), a denial of service
+through glob-pattern amplification in `minimatch` before 11.0.1. Its only paths run through the
+private benchmark package's ExcelJS 4.4.0 comparator: `minimatch` 3.1.5 under
+`exceljs > archiver > … > glob` and `exceljs > unzipper > fstream > rimraf > glob`, and 5.1.9 under
+`exceljs > archiver > readdir-glob`. Neither public package depends on it, and no glob pattern from
+benchmark data reaches it. It stays open until after publish: changing the lockfile now would reopen
+the F11.19 freeze, as the open Dependabot updates would. The 1.1.0 benchmark matrix recorded
+**93 cells: 90 valid measurements and 3 unsupported SheetJS styled writes**, and all 57 read
+checksums match.
